@@ -451,6 +451,10 @@ class _SalesmanHomeScreenState extends State<SalesmanHomeScreen> {
     }
   }
 
+  Future<void> _refreshRouteState() async {
+    await _loadTodayRoute();
+  }
+
   Future<void> _requestRetake(bool isFirst) async {
     final authProvider = context.read<AuthProvider>();
     final user = authProvider.currentUser;
@@ -769,6 +773,11 @@ class _SalesmanHomeScreenState extends State<SalesmanHomeScreen> {
         title: const Text('Sales Route'),
         elevation: 0,
         actions: [
+          IconButton(
+            onPressed: _isUploading ? null : _refreshRouteState,
+            tooltip: 'Refresh',
+            icon: const Icon(Icons.refresh),
+          ),
           Padding(
             padding: const EdgeInsets.all(16.0),
             child: Center(

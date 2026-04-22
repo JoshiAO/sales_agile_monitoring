@@ -181,7 +181,13 @@ class _SupervisorDashboardState extends State<SupervisorDashboard> {
           ],
         ),
         elevation: 0,
-
+        actions: [
+          IconButton(
+            onPressed: _loadRoutes,
+            tooltip: 'Refresh',
+            icon: const Icon(Icons.refresh),
+          ),
+        ],
       ),
       body: Column(
         children: [

@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:intl/intl.dart';
 import 'package:compact_sales_monitoring/models/user_model.dart';
-import 'package:compact_sales_monitoring/providers/auth_provider.dart';
 import 'package:compact_sales_monitoring/providers/route_provider.dart';
 import 'package:compact_sales_monitoring/services/firestore_service.dart';
 import 'package:compact_sales_monitoring/screens/superuser/user_management_screen.dart';
@@ -178,6 +177,11 @@ class _SuperUserDashboardState extends State<SuperUserDashboard> {
         ),
         elevation: 0,
         actions: [
+          IconButton(
+            onPressed: _loadRoutes,
+            tooltip: 'Refresh',
+            icon: const Icon(Icons.refresh),
+          ),
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 8.0),
             child: Center(

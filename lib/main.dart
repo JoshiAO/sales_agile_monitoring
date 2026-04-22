@@ -1,5 +1,3 @@
-import 'dart:math';
-
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:compact_sales_monitoring/services/firebase_service.dart';
@@ -112,7 +110,7 @@ class MainAppHome extends StatefulWidget {
 
 class _MainAppHomeState extends State<MainAppHome>
     with SingleTickerProviderStateMixin {
-  bool _showSplash = true;
+  final bool _showSplash = true;
   late AnimationController _transitionController;
 
   @override
