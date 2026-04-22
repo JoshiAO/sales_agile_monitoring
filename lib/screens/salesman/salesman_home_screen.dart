@@ -26,8 +26,9 @@ class SalesmanHomeScreen extends StatefulWidget {
 }
 
 class _SalesmanHomeScreenState extends State<SalesmanHomeScreen> {
-  static const Duration _checkpointMinInterval = Duration(minutes: 15);
-  static const double _checkpointMinDistanceMeters = 300.0;
+  static const Duration _checkpointMinInterval = Duration(minutes: 30);
+  static const double _checkpointMinDistanceMeters = 500.0;
+  static const int _maxUploadBytes = 300 * 1024;
 
   final LocationService _locationService = LocationService();
   final StorageService _storageService = StorageService();
@@ -207,12 +208,44 @@ class _SalesmanHomeScreenState extends State<SalesmanHomeScreen> {
     }
 
     final uploadFile = File(uploadPath);
-    await uploadFile.writeAsBytes(img.encodeJpg(uploadImage, quality: 72));
+    await _writeCompressedUpload(
+      uploadImage: uploadImage,
+      outputFile: uploadFile,
+      maxBytes: _maxUploadBytes,
+    );
 
     return _StampedImageResult(
       localFile: localFile,
       uploadFile: uploadFile,
     );
+  }
+
+  Future<void> _writeCompressedUpload({
+    required img.Image uploadImage,
+    required File outputFile,
+    required int maxBytes,
+  }) async {
+    var workingImage = uploadImage;
+    var quality = 78;
+    List<int> encoded = img.encodeJpg(workingImage, quality: quality);
+
+    while (encoded.length > maxBytes && quality > 40) {
+      quality -= 8;
+      encoded = img.encodeJpg(workingImage, quality: quality);
+    }
+
+    while (encoded.length > maxBytes && workingImage.width > 720) {
+      final nextWidth = max(720, (workingImage.width * 0.85).round());
+      workingImage = img.copyResize(workingImage, width: nextWidth);
+      encoded = img.encodeJpg(workingImage, quality: quality);
+
+      while (encoded.length > maxBytes && quality > 32) {
+        quality -= 4;
+        encoded = img.encodeJpg(workingImage, quality: quality);
+      }
+    }
+
+    await outputFile.writeAsBytes(encoded, flush: true);
   }
 
   Future<String?> _saveStampedImageToGallery({
@@ -244,6 +277,13 @@ class _SalesmanHomeScreenState extends State<SalesmanHomeScreen> {
     } catch (e) {
       return 'Gallery save failed: $e';
     }
+  }
+
+  Future<String?> _resolveLocalImagePath(DateTime timestamp) async {
+    final appDir = await getApplicationDocumentsDirectory();
+    final localPath = '${appDir.path}/call_images/call_${timestamp.millisecondsSinceEpoch}.jpg';
+    final file = File(localPath);
+    return file.existsSync() ? localPath : null;
   }
 
   void _previewCallImage({
@@ -424,10 +464,18 @@ class _SalesmanHomeScreenState extends State<SalesmanHomeScreen> {
           await _firestoreService.getRoutesBySalesman(user.uid, _todayDate);
       if (routes.isNotEmpty) {
         final route = routes[0];
+        final firstLocalPath = route.hasFirstCall
+            ? await _resolveLocalImagePath(route.first.timestamp)
+            : null;
+        final lastLocalPath = route.hasLastCall
+            ? await _resolveLocalImagePath(route.last.timestamp)
+            : null;
         setState(() {
           _todayRouteId = route.routeId;
           _firstPoint = route.hasFirstCall ? route.first : null;
           _lastPoint = route.hasLastCall ? route.last : null;
+          _firstLocalImagePath = firstLocalPath;
+          _lastLocalImagePath = lastLocalPath;
           _firstRetakeRequested = route.firstRetakeRequested;
           _firstRetakeApproved = route.firstRetakeApproved;
           _lastRetakeRequested = route.lastRetakeRequested;
@@ -449,10 +497,6 @@ class _SalesmanHomeScreenState extends State<SalesmanHomeScreen> {
         _syncCheckpointTracking();
       }
     }
-  }
-
-  Future<void> _refreshRouteState() async {
-    await _loadTodayRoute();
   }
 
   Future<void> _requestRetake(bool isFirst) async {
@@ -773,11 +817,6 @@ class _SalesmanHomeScreenState extends State<SalesmanHomeScreen> {
         title: const Text('Sales Route'),
         elevation: 0,
         actions: [
-          IconButton(
-            onPressed: _isUploading ? null : _refreshRouteState,
-            tooltip: 'Refresh',
-            icon: const Icon(Icons.refresh),
-          ),
           Padding(
             padding: const EdgeInsets.all(16.0),
             child: Center(

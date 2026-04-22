@@ -77,6 +77,15 @@ class FirestoreService {
         .toList();
   }
 
+  Future<List<AppUser>> getAllUsers() async {
+    final querySnapshot =
+        await _firebaseService.firestore.collection('users').get();
+
+    return querySnapshot.docs
+        .map((doc) => AppUser.fromMap(doc.data(), uid: doc.id))
+        .toList();
+  }
+
   // Route Management
   Future<String> createRoute({
     required String salesmanId,
@@ -127,6 +136,21 @@ class FirestoreService {
     final querySnapshot = await _firebaseService.firestore
         .collection('routes')
         .where('date', isEqualTo: date)
+        .get();
+
+    return querySnapshot.docs
+        .map((doc) => SalesRoute.fromMap(doc.data(), routeId: doc.id))
+        .toList();
+  }
+
+  Future<List<SalesRoute>> getAllRoutesByDateRange({
+    required String startDate,
+    required String endDate,
+  }) async {
+    final querySnapshot = await _firebaseService.firestore
+        .collection('routes')
+        .where('date', isGreaterThanOrEqualTo: startDate)
+        .where('date', isLessThanOrEqualTo: endDate)
         .get();
 
     return querySnapshot.docs
@@ -194,6 +218,27 @@ class FirestoreService {
       isFirst ? 'firstRetakeApprovedAt' : 'lastRetakeApprovedAt':
           FieldValue.serverTimestamp(),
     });
+  }
+
+  Future<void> deleteRoutesByIds(List<String> routeIds) async {
+    if (routeIds.isEmpty) return;
+
+    final firestore = _firebaseService.firestore;
+    final chunks = <List<String>>[];
+    for (var index = 0; index < routeIds.length; index += 400) {
+      chunks.add(routeIds.sublist(
+        index,
+        index + 400 > routeIds.length ? routeIds.length : index + 400,
+      ));
+    }
+
+    for (final chunk in chunks) {
+      final batch = firestore.batch();
+      for (final routeId in chunk) {
+        batch.delete(firestore.collection('routes').doc(routeId));
+      }
+      await batch.commit();
+    }
   }
 
   Future<void> deleteUserData({

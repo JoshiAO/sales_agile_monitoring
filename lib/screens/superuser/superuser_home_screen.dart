@@ -134,11 +134,6 @@ class _SuperuserHomeScreenState extends State<SuperuserHomeScreen> {
       appBar: AppBar(
         title: const Text('Superuser Home'),
         actions: [
-          IconButton(
-            onPressed: _refresh,
-            tooltip: 'Refresh',
-            icon: const Icon(Icons.refresh),
-          ),
           Padding(
             padding: const EdgeInsets.all(16.0),
             child: Center(

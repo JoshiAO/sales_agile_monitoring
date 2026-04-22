@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:intl/intl.dart';
 import 'package:compact_sales_monitoring/models/user_model.dart';
 import 'package:compact_sales_monitoring/providers/route_provider.dart';
+import 'package:compact_sales_monitoring/services/archive_service.dart';
 import 'package:compact_sales_monitoring/services/firestore_service.dart';
 import 'package:compact_sales_monitoring/screens/superuser/user_management_screen.dart';
 import 'package:compact_sales_monitoring/widgets/date_selector_widget.dart';
@@ -11,7 +13,6 @@ import 'package:compact_sales_monitoring/widgets/loading_skeletons.dart';
 import 'package:compact_sales_monitoring/constants/app_constants.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
-import 'package:cached_network_image/cached_network_image.dart';
 import 'package:compact_sales_monitoring/models/route_model.dart';
 
 class SuperUserDashboard extends StatefulWidget {
@@ -24,8 +25,10 @@ class SuperUserDashboard extends StatefulWidget {
 class _SuperUserDashboardState extends State<SuperUserDashboard> {
   late DateTime _selectedDate;
   final FirestoreService _firestoreService = FirestoreService();
+  final ArchiveService _archiveService = ArchiveService();
   late MapController _mapController;
   final Map<String, AppUser> _salesmenCache = {};
+  bool _isArchiving = false;
 
   @override
   void initState() {
@@ -55,6 +58,102 @@ class _SuperUserDashboardState extends State<SuperUserDashboard> {
   void _onDateChanged(DateTime newDate) {
     setState(() => _selectedDate = newDate);
     _loadRoutes();
+  }
+
+  Future<void> _showArchiveCompleteDialog(ArchiveResult result) async {
+    final dateFolderLabel = result.dateFolders.length <= 3
+        ? result.dateFolders.join(', ')
+        : '${result.dateFolders.first}, ${result.dateFolders[1]}, +${result.dateFolders.length - 2} more';
+
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Archive Complete'),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('Date range: ${result.startDate} to ${result.endDate}'),
+              const SizedBox(height: 8),
+              Text('Routes archived: ${result.routeCount}'),
+              Text('Images exported: ${result.imageCount}'),
+              const SizedBox(height: 12),
+              const Text(
+                'Saved ZIP path',
+                style: TextStyle(fontWeight: FontWeight.w700),
+              ),
+              const SizedBox(height: 4),
+              SelectableText(result.zipPath),
+              const SizedBox(height: 12),
+              const Text(
+                'ZIP structure',
+                style: TextStyle(fontWeight: FontWeight.w700),
+              ),
+              const SizedBox(height: 4),
+              Text('- ${result.workbookFileName}'),
+              Text('- Date folders: $dateFolderLabel'),
+              const Text('- Inside each date: salesman folders with first/last call images'),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () async {
+              await Clipboard.setData(ClipboardData(text: result.zipPath));
+              if (!mounted) return;
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('Archive path copied')),
+              );
+            },
+            child: const Text('Copy Path'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: const Text('Close'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _openArchivePicker() async {
+    if (_isArchiving) return;
+
+    final now = DateTime.now();
+    final pickedRange = await showDateRangePicker(
+      context: context,
+      firstDate: DateTime(now.year - 5),
+      lastDate: now,
+      initialDateRange: DateTimeRange(
+        start: _selectedDate,
+        end: _selectedDate,
+      ),
+      helpText: 'Archive routes',
+      saveText: 'Archive',
+    );
+
+    if (pickedRange == null || !mounted) return;
+
+    setState(() => _isArchiving = true);
+    try {
+      final result = await _archiveService.archiveRoutes(
+        startDate: pickedRange.start,
+        endDate: pickedRange.end,
+      );
+      await _loadRoutes();
+      if (!mounted) return;
+      await _showArchiveCompleteDialog(result);
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Archive failed: $error')),
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _isArchiving = false);
+      }
+    }
   }
 
   Widget _buildSalesmanMarker(SalesRoute route, RoutePoint callPoint,
@@ -113,34 +212,21 @@ class _SuperUserDashboardState extends State<SuperUserDashboard> {
               ),
               const SizedBox(height: 6),
               Container(
+                padding: const EdgeInsets.all(6),
                 decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  border: Border.all(
-                    color: isFirstCall ? Colors.green.shade500 : Colors.red.shade500,
-                    width: 3,
-                  ),
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(999),
                   boxShadow: [
                     BoxShadow(
-                      blurRadius: 4,
-                      color: Colors.black.withValues(alpha: 0.3),
+                      blurRadius: 6,
+                      color: Colors.black.withValues(alpha: 0.25),
                     ),
                   ],
                 ),
-                child: CircleAvatar(
-                  radius: 24,
-                  backgroundColor:
-                    isFirstCall ? Colors.green.shade50 : Colors.red.shade50,
-                  backgroundImage: callPoint.imageUrl.isNotEmpty
-                    ? CachedNetworkImageProvider(callPoint.imageUrl)
-                      : null,
-                  child: callPoint.imageUrl.isEmpty
-                    ? Icon(
-                      isFirstCall ? Icons.flag : Icons.person_pin_circle,
-                      color: isFirstCall
-                        ? Colors.green.shade700
-                        : Colors.red.shade700,
-                    )
-                      : null,
+                child: Icon(
+                  Icons.flag,
+                  size: 34,
+                  color: isFirstCall ? Colors.green.shade700 : Colors.red.shade700,
                 ),
               ),
             ],
@@ -178,9 +264,9 @@ class _SuperUserDashboardState extends State<SuperUserDashboard> {
         elevation: 0,
         actions: [
           IconButton(
-            onPressed: _loadRoutes,
-            tooltip: 'Refresh',
-            icon: const Icon(Icons.refresh),
+            onPressed: _isArchiving ? null : _openArchivePicker,
+            tooltip: 'Archive',
+            icon: const Icon(Icons.archive_outlined),
           ),
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 8.0),
@@ -375,6 +461,30 @@ class _SuperUserDashboardState extends State<SuperUserDashboard> {
                         ),
                       ),
                     ),
+                    if (_isArchiving)
+                      Positioned.fill(
+                        child: ColoredBox(
+                          color: Colors.black.withValues(alpha: 0.24),
+                          child: const Center(
+                            child: Card(
+                              child: Padding(
+                                padding: EdgeInsets.symmetric(
+                                  horizontal: 20,
+                                  vertical: 16,
+                                ),
+                                child: Column(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    CircularProgressIndicator(),
+                                    SizedBox(height: 12),
+                                    Text('Archiving selected routes...'),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
                   ],
                 );
               },

@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
-import 'package:cached_network_image/cached_network_image.dart';
 import 'package:provider/provider.dart';
 import 'package:intl/intl.dart';
 import 'package:compact_sales_monitoring/constants/app_constants.dart';
@@ -118,34 +117,21 @@ class _SupervisorDashboardState extends State<SupervisorDashboard> {
               ),
               const SizedBox(height: 6),
               Container(
+                padding: const EdgeInsets.all(6),
                 decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  border: Border.all(
-                    color: isFirstCall ? Colors.green.shade500 : Colors.red.shade500,
-                    width: 3,
-                  ),
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(999),
                   boxShadow: [
                     BoxShadow(
-                      blurRadius: 4,
-                      color: Colors.black.withValues(alpha: 0.3),
+                      blurRadius: 6,
+                      color: Colors.black.withValues(alpha: 0.25),
                     ),
                   ],
                 ),
-                child: CircleAvatar(
-                  radius: 24,
-                  backgroundColor:
-                    isFirstCall ? Colors.green.shade50 : Colors.red.shade50,
-                  backgroundImage: callPoint.imageUrl.isNotEmpty
-                    ? CachedNetworkImageProvider(callPoint.imageUrl)
-                      : null,
-                  child: callPoint.imageUrl.isEmpty
-                    ? Icon(
-                      isFirstCall ? Icons.flag : Icons.person_pin_circle,
-                      color: isFirstCall
-                        ? Colors.green.shade700
-                        : Colors.red.shade700,
-                    )
-                      : null,
+                child: Icon(
+                  Icons.flag,
+                  size: 34,
+                  color: isFirstCall ? Colors.green.shade700 : Colors.red.shade700,
                 ),
               ),
             ],
@@ -181,13 +167,6 @@ class _SupervisorDashboardState extends State<SupervisorDashboard> {
           ],
         ),
         elevation: 0,
-        actions: [
-          IconButton(
-            onPressed: _loadRoutes,
-            tooltip: 'Refresh',
-            icon: const Icon(Icons.refresh),
-          ),
-        ],
       ),
       body: Column(
         children: [
