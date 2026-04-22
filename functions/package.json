@@ -1,0 +1,16 @@
+{
+  "name": "compact-sales-monitoring-functions",
+  "private": true,
+  "main": "index.js",
+  "engines": {
+    "node": "20"
+  },
+  "scripts": {
+    "deploy": "firebase deploy --only functions",
+    "serve": "firebase emulators:start --only functions"
+  },
+  "dependencies": {
+    "firebase-admin": "^13.8.0",
+    "firebase-functions": "^6.5.0"
+  }
+}
