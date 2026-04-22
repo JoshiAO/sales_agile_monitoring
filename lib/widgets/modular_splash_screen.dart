@@ -69,7 +69,7 @@ class _ModularSplashScreenState extends State<ModularSplashScreen>
       vsync: this,
     )..repeat();
     _exitController = AnimationController(
-      duration: const Duration(milliseconds: 850),
+      duration: const Duration(milliseconds: 1),
       vsync: this,
     );
 
@@ -150,11 +150,8 @@ class _ModularSplashScreenState extends State<ModularSplashScreen>
               SafeArea(
                 child: Center(
                   child: Transform.translate(
-                    offset: Offset(0, -24 * exitValue),
-                    child: Opacity(
-                      opacity: 1 - exitValue,
-                      child: child,
-                    ),
+                    offset: Offset(0, 0),
+                    child: child,
                   ),
                 ),
               ),

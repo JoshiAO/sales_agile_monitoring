@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:compact_sales_monitoring/screens/superuser/superuser_dashboard.dart';
+import 'package:compact_sales_monitoring/screens/superuser/superuser_home_screen.dart';
 
 class SuperuserTabsScreen extends StatefulWidget {
   const SuperuserTabsScreen({super.key});
@@ -9,10 +10,10 @@ class SuperuserTabsScreen extends StatefulWidget {
 }
 
 class _SuperuserTabsScreenState extends State<SuperuserTabsScreen> {
-  int _currentIndex = 1;
+  int _currentIndex = 0;
 
   late final List<Widget> _pages = [
-    const _BlankRoleTab(title: 'Home'),
+    const SuperuserHomeScreen(),
     const SuperUserDashboard(),
     const _BlankRoleTab(title: 'Agile'),
   ];

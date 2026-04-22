@@ -28,8 +28,8 @@ class _SalesmanTabsScreenState extends State<SalesmanTabsScreen> {
         onTap: (index) => setState(() => _currentIndex = index),
         items: const [
           BottomNavigationBarItem(
-            icon: Icon(Icons.phone_outlined),
-            activeIcon: Icon(Icons.phone),
+            icon: Icon(Icons.co_present_outlined),
+            activeIcon: Icon(Icons.co_present),
             label: 'Calls',
           ),
           BottomNavigationBarItem(

@@ -19,11 +19,44 @@ class RouteDetailModal extends StatelessWidget {
     this.onRouteChanged,
   });
 
-  void _openGoogleMaps(double lat, double lon) async {
-    final url = 'https://www.google.com/maps/search/?api=1&query=$lat,$lon';
-    if (await canLaunchUrl(Uri.parse(url))) {
-      await launchUrl(Uri.parse(url));
+  Future<void> _openGoogleMaps(
+    BuildContext context,
+    double lat,
+    double lon,
+  ) async {
+    final googleMapsUri = Uri.parse(
+      'https://www.google.com/maps/search/?api=1&query=$lat,$lon',
+    );
+    final geoUri = Uri.parse('geo:$lat,$lon?q=$lat,$lon(Call Location)');
+
+    try {
+      final openedGoogleMaps = await launchUrl(
+        googleMapsUri,
+        mode: LaunchMode.externalApplication,
+      );
+      if (openedGoogleMaps) return;
+
+      final openedGeo = await launchUrl(
+        geoUri,
+        mode: LaunchMode.externalApplication,
+      );
+      if (openedGeo) return;
+
+      final openedInBrowser = await launchUrl(
+        googleMapsUri,
+        mode: LaunchMode.platformDefault,
+      );
+      if (openedInBrowser) return;
+    } catch (_) {
+      // Fall through to show message below.
     }
+
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Unable to open map for this location.'),
+      ),
+    );
   }
 
   void _openFullImagePreview(BuildContext context, String imageUrl, String title) {
@@ -236,7 +269,7 @@ class RouteDetailModal extends StatelessWidget {
                   ),
                   ElevatedButton.icon(
                     onPressed: () {
-                      _openGoogleMaps(route.first.lat, route.first.lon);
+                      _openGoogleMaps(context, route.first.lat, route.first.lon);
                     },
                     icon: const Icon(Icons.location_on),
                     label: const Text('Maps'),
@@ -329,7 +362,7 @@ class RouteDetailModal extends StatelessWidget {
                     ),
                     ElevatedButton.icon(
                       onPressed: () {
-                        _openGoogleMaps(route.last.lat, route.last.lon);
+                        _openGoogleMaps(context, route.last.lat, route.last.lon);
                       },
                       icon: const Icon(Icons.location_on),
                       label: const Text('Maps'),

@@ -1,3 +1,5 @@
+import 'dart:math';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:compact_sales_monitoring/services/firebase_service.dart';
@@ -108,12 +110,18 @@ class MainAppHome extends StatefulWidget {
   State<MainAppHome> createState() => _MainAppHomeState();
 }
 
-class _MainAppHomeState extends State<MainAppHome> {
+class _MainAppHomeState extends State<MainAppHome>
+    with SingleTickerProviderStateMixin {
   bool _showSplash = true;
+  late AnimationController _transitionController;
 
   @override
   void initState() {
     super.initState();
+    _transitionController = AnimationController(
+      duration: const Duration(milliseconds: 1400),
+      vsync: this,
+    );
     // Check if user is already logged in
     WidgetsBinding.instance.addPostFrameCallback((_) {
       context.read<AuthProvider>().checkCurrentUser();
@@ -121,16 +129,49 @@ class _MainAppHomeState extends State<MainAppHome> {
   }
 
   void _completeSplash() {
-    setState(() {
-      _showSplash = false;
-    });
+    // Play transition animation (splash exits up, app enters from bottom)
+    _transitionController.forward(from: 0);
+  }
+
+  @override
+  void dispose() {
+    _transitionController.dispose();
+    super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    if (_showSplash) {
-      return SplashScreen(onComplete: _completeSplash);
-    }
-    return const AppRouter();
+    return AnimatedBuilder(
+      animation: _transitionController,
+      builder: (context, _) {
+        // t: 0 → 1 over 1400ms
+        final t = _transitionController.value;
+        // Smooth ease-out curve
+        final easeT = Curves.easeOutQuart.transform(t);
+        
+        // Height to slide (approximately screen height)
+        final slideDistance = MediaQuery.sizeOf(context).height;
+
+        return Stack(
+          fit: StackFit.expand,
+          children: [
+            // ── App Router (destination) slides UP from bottom ──
+            Transform.translate(
+              offset: Offset(0, slideDistance * (1 - easeT)),
+              child: const AppRouter(),
+            ),
+
+            // ── Splash slides UP and exits ──
+            if (_showSplash)
+              Transform.translate(
+                offset: Offset(0, -slideDistance * easeT),
+                child: SplashScreen(
+                  onComplete: _completeSplash,
+                ),
+              ),
+          ],
+        );
+      },
+    );
   }
 }

@@ -6,6 +6,7 @@ import 'package:compact_sales_monitoring/models/user_model.dart';
 import 'package:compact_sales_monitoring/providers/auth_provider.dart';
 import 'package:compact_sales_monitoring/services/firestore_service.dart';
 import 'package:compact_sales_monitoring/widgets/route_detail_modal.dart';
+import 'package:compact_sales_monitoring/widgets/loading_skeletons.dart';
 
 class SupervisorHomeScreen extends StatefulWidget {
   const SupervisorHomeScreen({super.key});
@@ -132,7 +133,7 @@ class _SupervisorHomeScreenState extends State<SupervisorHomeScreen> {
         future: _homeDataFuture,
         builder: (context, snapshot) {
           if (snapshot.connectionState == ConnectionState.waiting) {
-            return const Center(child: CircularProgressIndicator());
+            return const CardsLoadingSkeleton(cardCount: 6);
           }
 
           if (snapshot.hasError) {

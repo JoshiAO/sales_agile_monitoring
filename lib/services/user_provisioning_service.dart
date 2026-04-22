@@ -111,6 +111,14 @@ class UserProvisioningService {
 
     if (shouldUpdateEmail || shouldUpdatePassword) {
       try {
+        final currentUser = FirebaseAuth.instance.currentUser;
+        if (currentUser == null) {
+          throw Exception('Your session has expired. Please sign in again.');
+        }
+
+        // Force a fresh token so callable requests include valid auth context.
+        await currentUser.getIdToken(true);
+
         final callable = _functions.httpsCallable('adminUpdateUserCredentials');
         await callable.call(<String, dynamic>{
           'uid': uid,
@@ -118,6 +126,9 @@ class UserProvisioningService {
           if (shouldUpdatePassword) 'password': trimmedPassword,
         });
       } on FirebaseFunctionsException catch (e) {
+        if (e.code == 'unauthenticated') {
+          throw Exception('Your session has expired. Please sign out and sign in again.');
+        }
         throw Exception(
           e.message ??
               'Unable to update authentication credentials. Ensure the adminUpdateUserCredentials Cloud Function is deployed.',

@@ -1,9 +1,11 @@
-const functions = require('firebase-functions');
+const functions = require('firebase-functions/v1');
 const admin = require('firebase-admin');
 
 admin.initializeApp();
 
-exports.adminUpdateUserCredentials = functions.https.onCall(async (data, context) => {
+exports.adminUpdateUserCredentials = functions
+  .region('us-central1')
+  .https.onCall(async (data, context) => {
   if (!context.auth?.uid) {
     throw new functions.https.HttpsError('unauthenticated', 'You must be signed in.');
   }

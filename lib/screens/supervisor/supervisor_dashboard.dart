@@ -10,6 +10,7 @@ import 'package:compact_sales_monitoring/providers/auth_provider.dart';
 import 'package:compact_sales_monitoring/providers/route_provider.dart';
 import 'package:compact_sales_monitoring/services/firestore_service.dart';
 import 'package:compact_sales_monitoring/widgets/date_selector_widget.dart';
+import 'package:compact_sales_monitoring/widgets/loading_skeletons.dart';
 import 'package:compact_sales_monitoring/widgets/route_detail_modal.dart';
 import 'package:compact_sales_monitoring/models/route_model.dart';
 
@@ -180,22 +181,7 @@ class _SupervisorDashboardState extends State<SupervisorDashboard> {
           ],
         ),
         elevation: 0,
-        actions: [
-          Padding(
-            padding: const EdgeInsets.all(16.0),
-            child: Center(
-              child: GestureDetector(
-                onTap: () {
-                  context.read<AuthProvider>().logout();
-                },
-                child: const Text(
-                  'Logout',
-                  style: TextStyle(fontSize: 14),
-                ),
-              ),
-            ),
-          ),
-        ],
+
       ),
       body: Column(
         children: [
@@ -213,7 +199,7 @@ class _SupervisorDashboardState extends State<SupervisorDashboard> {
             child: Consumer<RouteProvider>(
               builder: (context, routeProvider, _) {
                 if (routeProvider.isLoading) {
-                  return const Center(child: CircularProgressIndicator());
+                      return const MapLoadingSkeleton();
                 }
 
                 if (routeProvider.routes.isEmpty) {
