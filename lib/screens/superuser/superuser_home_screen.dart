@@ -132,7 +132,7 @@ class _SuperuserHomeScreenState extends State<SuperuserHomeScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Superuser Home'),
+        title: const Text('Home'),
         actions: [
           Padding(
             padding: const EdgeInsets.all(16.0),
@@ -493,26 +493,50 @@ class _CardModeToggle extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return SegmentedButton<_SuperuserCardMode>(
-      showSelectedIcon: false,
-      selected: {
-        _SuperuserCardMode.wide == mode
-            ? _SuperuserCardMode.wide
-            : _SuperuserCardMode.compact,
+    final isExpanded = MediaQuery.sizeOf(context).width >= 700;
+    return ToggleButtons(
+      constraints: const BoxConstraints(minWidth: 40, minHeight: 36),
+      isSelected: [
+        mode == _SuperuserCardMode.wide,
+        mode == _SuperuserCardMode.compact,
+      ],
+      onPressed: (index) {
+        onModeChanged(
+          index == 0 ? _SuperuserCardMode.wide : _SuperuserCardMode.compact,
+        );
       },
-      onSelectionChanged: (selection) {
-        onModeChanged(selection.first);
-      },
-      segments: const [
-        ButtonSegment<_SuperuserCardMode>(
-          value: _SuperuserCardMode.wide,
-          icon: Icon(Icons.view_agenda_outlined),
-          label: Text('Wide'),
+      children: [
+        Tooltip(
+          message: 'Wide view',
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 8),
+            child: isExpanded
+                ? const Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.view_agenda_outlined),
+                      SizedBox(width: 6),
+                      Text('Wide'),
+                    ],
+                  )
+                : const Icon(Icons.view_agenda_outlined),
+          ),
         ),
-        ButtonSegment<_SuperuserCardMode>(
-          value: _SuperuserCardMode.compact,
-          icon: Icon(Icons.view_list_outlined),
-          label: Text('Compact'),
+        Tooltip(
+          message: 'Compact view',
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 8),
+            child: isExpanded
+                ? const Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.view_list_outlined),
+                      SizedBox(width: 6),
+                      Text('Compact'),
+                    ],
+                  )
+                : const Icon(Icons.view_list_outlined),
+          ),
         ),
       ],
     );

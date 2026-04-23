@@ -151,21 +151,7 @@ class _SupervisorDashboardState extends State<SupervisorDashboard> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text('Supervisor Dashboard'),
-            Text(
-              'First/Last Call',
-              style: TextStyle(
-                fontSize: 12,
-                fontWeight: FontWeight.w400,
-                color: Color(0xFFF5F5F5),
-              ),
-            ),
-          ],
-        ),
+        title: const Text('Map'),
         elevation: 0,
       ),
       body: Column(

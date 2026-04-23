@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:compact_sales_monitoring/screens/superuser/superuser_dashboard.dart';
 import 'package:compact_sales_monitoring/screens/superuser/superuser_home_screen.dart';
+import 'package:compact_sales_monitoring/screens/superuser/superuser_agile_page.dart';
 
 class SuperuserTabsScreen extends StatefulWidget {
   const SuperuserTabsScreen({super.key});
@@ -15,7 +16,7 @@ class _SuperuserTabsScreenState extends State<SuperuserTabsScreen> {
   late final List<Widget> _pages = [
     const SuperuserHomeScreen(),
     const SuperUserDashboard(),
-    const _BlankRoleTab(title: 'Agile'),
+    const SuperuserAgilePage(),
   ];
 
   @override
@@ -50,16 +51,3 @@ class _SuperuserTabsScreenState extends State<SuperuserTabsScreen> {
   }
 }
 
-class _BlankRoleTab extends StatelessWidget {
-  final String title;
-
-  const _BlankRoleTab({required this.title});
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: Text(title)),
-      body: const SizedBox.expand(),
-    );
-  }
-}

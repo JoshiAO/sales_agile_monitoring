@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:compact_sales_monitoring/screens/salesman/salesman_home_screen.dart';
+import 'package:compact_sales_monitoring/widgets/agile_call_form_card.dart';
 
 class SalesmanTabsScreen extends StatefulWidget {
   const SalesmanTabsScreen({super.key});
@@ -13,7 +14,7 @@ class _SalesmanTabsScreenState extends State<SalesmanTabsScreen> {
 
   late final List<Widget> _pages = [
     const SalesmanHomeScreen(),
-    const _BlankRoleTab(title: 'Agile'),
+    const _AgileTab(),
   ];
 
   @override
@@ -43,16 +44,27 @@ class _SalesmanTabsScreenState extends State<SalesmanTabsScreen> {
   }
 }
 
-class _BlankRoleTab extends StatelessWidget {
-  final String title;
-
-  const _BlankRoleTab({required this.title});
+class _AgileTab extends StatelessWidget {
+  const _AgileTab();
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: Text(title)),
-      body: const SizedBox.expand(),
+      appBar: AppBar(title: const Text('Agile')),
+      body: LayoutBuilder(
+        builder: (context, constraints) {
+          final maxContentWidth = constraints.maxWidth >= 900 ? 760.0 : 680.0;
+
+          return Center(
+            child: ConstrainedBox(
+              constraints: BoxConstraints(maxWidth: maxContentWidth),
+              child: SizedBox(
+                height: constraints.maxHeight,
+                child: const AgileCallFormCard(),
+            ),
+          ));
+        },
+      ),
     );
   }
 }

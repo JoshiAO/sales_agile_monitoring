@@ -1,4 +1,5 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:compact_sales_monitoring/models/agile_model.dart';
 import 'package:compact_sales_monitoring/models/user_model.dart';
 import 'package:compact_sales_monitoring/models/route_model.dart';
 import 'package:uuid/uuid.dart';
@@ -15,6 +16,10 @@ class FirestoreService {
 
   final FirebaseService _firebaseService = FirebaseService();
   static const uuid = Uuid();
+
+  static String _agileDocId({required String date, required String salesmanId}) {
+    return '${date}_$salesmanId';
+  }
 
   // User Management
   Future<void> createUser({
@@ -272,6 +277,138 @@ class FirestoreService {
     }
 
     await firestore.collection('users').doc(uid).delete();
+  }
+
+  // Agile Targets
+  Future<void> upsertAgileTarget({
+    required String supervisorId,
+    required String salesmanId,
+    required String date,
+    required int productiveCallsTarget,
+    required double sttTarget,
+  }) async {
+    final docId = _agileDocId(date: date, salesmanId: salesmanId);
+
+    await _firebaseService.firestore.collection('agile_targets').doc(docId).set({
+      'supervisorId': supervisorId,
+      'salesmanId': salesmanId,
+      'date': date,
+      'productiveCallsTarget': productiveCallsTarget,
+      'sttTarget': sttTarget,
+      'updatedAt': FieldValue.serverTimestamp(),
+    }, SetOptions(merge: true));
+  }
+
+  Future<Map<String, AgileTarget>> getAgileTargetsForSupervisorByDate({
+    required String supervisorId,
+    required String date,
+  }) async {
+    final querySnapshot = await _firebaseService.firestore
+        .collection('agile_targets')
+        .where('supervisorId', isEqualTo: supervisorId)
+        .where('date', isEqualTo: date)
+        .get();
+
+    final map = <String, AgileTarget>{};
+    for (final doc in querySnapshot.docs) {
+      final target = AgileTarget.fromMap(doc.data());
+      map[target.salesmanId] = target;
+    }
+    return map;
+  }
+
+  Future<Map<String, AgileTarget>> getAgileTargetsByDate({
+    required String date,
+  }) async {
+    final querySnapshot = await _firebaseService.firestore
+        .collection('agile_targets')
+        .where('date', isEqualTo: date)
+        .get();
+
+    final map = <String, AgileTarget>{};
+    for (final doc in querySnapshot.docs) {
+      final target = AgileTarget.fromMap(doc.data());
+      map[target.salesmanId] = target;
+    }
+    return map;
+  }
+
+  // Agile Submissions
+  Future<void> submitAgileSubmission({
+    required String supervisorId,
+    required String salesmanId,
+    required String date,
+    required int totalCalls,
+    required int productiveCalls,
+    required double sttActual,
+    required bool lastCallCompleted,
+  }) async {
+    final docId = _agileDocId(date: date, salesmanId: salesmanId);
+    final docRef = _firebaseService.firestore.collection('agile_submissions').doc(docId);
+    final existingDoc = await docRef.get();
+
+    if (existingDoc.exists) {
+      final existing = AgileSubmission.fromMap(existingDoc.data() ?? {});
+      if (existing.submitted) {
+        throw StateError('Agile submission is already finalized for this date.');
+      }
+    }
+
+    await docRef.set({
+      'supervisorId': supervisorId,
+      'salesmanId': salesmanId,
+      'date': date,
+      'totalCalls': totalCalls,
+      'productiveCalls': productiveCalls,
+      'sttActual': sttActual,
+      'lastCallCompleted': lastCallCompleted,
+      'submitted': true,
+      'submittedAt': FieldValue.serverTimestamp(),
+    }, SetOptions(merge: true));
+  }
+
+  Future<AgileSubmission?> getAgileSubmissionForSalesmanByDate({
+    required String salesmanId,
+    required String date,
+  }) async {
+    final docId = _agileDocId(date: date, salesmanId: salesmanId);
+    final doc = await _firebaseService.firestore.collection('agile_submissions').doc(docId).get();
+    if (!doc.exists) return null;
+    return AgileSubmission.fromMap(doc.data() ?? {});
+  }
+
+  Future<Map<String, AgileSubmission>> getAgileSubmissionsForSupervisorByDate({
+    required String supervisorId,
+    required String date,
+  }) async {
+    final querySnapshot = await _firebaseService.firestore
+        .collection('agile_submissions')
+        .where('supervisorId', isEqualTo: supervisorId)
+        .where('date', isEqualTo: date)
+        .get();
+
+    final map = <String, AgileSubmission>{};
+    for (final doc in querySnapshot.docs) {
+      final submission = AgileSubmission.fromMap(doc.data());
+      map[submission.salesmanId] = submission;
+    }
+    return map;
+  }
+
+  Future<Map<String, AgileSubmission>> getAllAgileSubmissionsByDate({
+    required String date,
+  }) async {
+    final querySnapshot = await _firebaseService.firestore
+        .collection('agile_submissions')
+        .where('date', isEqualTo: date)
+        .get();
+
+    final map = <String, AgileSubmission>{};
+    for (final doc in querySnapshot.docs) {
+      final submission = AgileSubmission.fromMap(doc.data());
+      map[submission.salesmanId] = submission;
+    }
+    return map;
   }
 }
 

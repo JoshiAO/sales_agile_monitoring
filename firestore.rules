@@ -18,6 +18,10 @@ service cloud.firestore {
       return signedIn() && myRole() == 'supervisor';
     }
 
+    function isOwnedAgileDoc(docId) {
+      return signedIn() && docId.matches('^.+_' + request.auth.uid + '$');
+    }
+
     match /users/{userId} {
       allow read: if signedIn() && (
         request.auth.uid == userId ||
@@ -40,6 +44,36 @@ service cloud.firestore {
         resource.data.salesmanId == request.auth.uid ||
         resource.data.supervisorId == request.auth.uid
       );
+      allow delete: if isSuperuser();
+    }
+
+    match /agile_targets/{targetId} {
+      allow read: if signedIn() && (
+        isSuperuser() ||
+        isOwnedAgileDoc(targetId) ||
+        (resource != null && resource.data.supervisorId == request.auth.uid)
+      );
+
+      allow create, update: if signedIn() && (
+        isSuperuser() ||
+        (isSupervisor() && request.resource.data.supervisorId == request.auth.uid)
+      );
+
+      allow delete: if isSuperuser();
+    }
+
+    match /agile_submissions/{submissionId} {
+      allow read: if signedIn() && (
+        isSuperuser() ||
+        isOwnedAgileDoc(submissionId) ||
+        (resource != null && resource.data.supervisorId == request.auth.uid)
+      );
+
+      allow create, update: if signedIn() && (
+        isSuperuser() ||
+        request.resource.data.salesmanId == request.auth.uid
+      );
+
       allow delete: if isSuperuser();
     }
   }
