@@ -1,323 +1,201 @@
-# Sales Agile Monitoring
+# Compact Sales Monitoring
 
-A comprehensive multi-role Flutter application for field sales monitoring with real-time GPS tracking, photo capture, and route visualization using Firebase and OpenStreetMap.
+Compact Sales Monitoring is a multi-role Flutter + Firebase app for field sales operations. It combines daily route capture, team map monitoring, Agile target setting, Agile performance submissions, and superuser administration in one codebase.
 
-App branding:
-- App name: Sales Agile Monitoring
-- Launcher icon source: assets/images/JoshiAO.jpg
+## Overview
 
-## 🚀 Features
+The app supports three roles:
 
-### Multi-Platform & Multi-Role Architecture
-- **Salesman (Android)**: Field sales representative mobile app
-- **Supervisor (Desktop/Web)**: Team management dashboard  
-- **Super User (Desktop/Web)**: Global administration & user management
+- Salesman: capture first and last calls, upload stamped photos, and submit daily Agile actuals.
+- Supervisor: monitor assigned salesmen, review routes on the map, set daily Agile targets, and compare targets vs actuals.
+- Superuser: view all teams, manage users, review global route activity, inspect Agile summaries, and archive route data.
 
-### Key Capabilities
+## Main Features
 
-#### Salesman Features
-- ✅ Firebase Authentication login
-- ✅ Camera-based photo capture (first & last point)
-- ✅ GPS coordinates with each photo
-- ✅ Automatic upload to Firebase Storage
-- ✅ Route metadata saved to Firestore
-- ✅ Simple, intuitive UI with status tracking
+### Salesman experience
 
-#### Supervisor Features
-- ✅ Interactive OpenStreetMap dashboard
-- ✅ Date-based route filtering
-- ✅ Road-aware polyline routing (OpenRouteService)
-- ✅ Team route visualization
-- ✅ Click pins to view detailed modal:
-  - Raw captured images
-  - Salesman information
-  - Timestamp data
-  - GPS coordinates with Google Maps links
-  - Distance metrics
+- Email/password authentication.
+- Calls tab for first-call and last-call capture.
+- GPS-tagged photo capture with overlay details and QR map link.
+- Firebase Storage upload plus Firestore route persistence.
+- Checkpoint capture during the workday.
+- Retake request and approval flow for call images.
+- Agile tab for daily submission of:
+  - total calls
+  - productive calls
+  - STT actual sale
+- Validation that prevents invalid Agile submissions and locks finalized entries.
 
-#### Super User Features
-- ✅ Global route dashboard (all supervisors & teams)
-- ✅ User activation/deactivation controls
-- ✅ User management (create, edit, reassign)
-- ✅ Role assignment (salesman ↔ supervisor)
-- ✅ Supervisor hierarchy management
-- ✅ Complete audit trail capabilities
+### Supervisor experience
 
-## 🏗️ Architecture
+- Home tab showing assigned salesmen and latest call status for the selected day.
+- Map tab with date-based filtering of team routes.
+- Interactive map markers and route detail previews.
+- Road-aware polylines with cached fallback behavior for offline or failed route resolution.
+- Agile tab for daily target management per salesman:
+  - productive calls target
+  - STT target
+- Historical Agile review by date with compact and wide card layouts.
 
-### Technology Stack
-- **Frontend**: Flutter (UI framework)
-- **Backend**: Firebase (Auth, Firestore, Storage)
-- **Mapping**: flutter_map + OpenStreetMap
-- **Routing**: OpenRouteService API
-- **State Management**: Provider
-- **Location**: Geolocator
-- **Camera**: Camera package
-- **Storage**: Firebase Cloud Storage
+### Superuser experience
 
-### Project Structure
-```
+- Home tab showing supervisor team summaries.
+- Map tab showing all routes for the selected day.
+- Archive flow for exporting route data over a date range.
+- Agile tab showing supervisor-level rollups of targets and actuals.
+- Preview pages for drilling into team and salesman performance.
+- User management for:
+  - creating users
+  - editing user assignments
+  - activating or deactivating accounts
+  - deleting accounts
+  - updating authentication credentials through Cloud Functions support
+
+## Tech Stack
+
+- Flutter
+- Firebase Authentication
+- Cloud Firestore
+- Firebase Storage
+- Firebase Cloud Functions
+- Provider
+- flutter_map with OpenStreetMap/CARTO tiles
+- Geolocator
+- Image Picker
+- intl
+
+## App Structure
+
+```text
 lib/
-├── constants/          # App-wide constants and configurations
-├── models/            # Data models (User, Route, RoutePoint)
-├── services/          # Firebase, Auth, Location, Routing services
-├── providers/         # State management (Auth, Routes)
-├── screens/           # UI screens (Login, Salesman, Supervisor, SuperUser)
-├── widgets/           # Reusable UI components
-├── app_router.dart    # Role-based routing logic
-└── main.dart          # App entry point
+  app_router.dart
+  main.dart
+  constants/
+  models/
+  providers/
+  screens/
+    salesman/
+    supervisor/
+    superuser/
+  services/
+  widgets/
+functions/
+firestore.rules
+storage.rules
 ```
 
-## 📱 Screen Layouts
+## Key Screens
 
-### Login Screen
-Simple email/password authentication with error handling and demo credentials display.
+### Salesman
 
-### Salesman Home Screen
-```
-┌─────────────────────────┐
-│    Daily Route Tracker  │
-│    2026-04-21           │
-├─────────────────────────┤
-│                         │
-│  [First Photo Status]   │
-│  [Last Photo Status]    │
-│                         │
-│  [Take First Photo]     │
-│  [Take Last Photo]      │
-│                         │
-└─────────────────────────┘
-```
+- Calls: first/last call workflow and route capture.
+- Agile: daily form submission after call completion.
 
-### Supervisor/SuperUser Dashboard
-```
-┌──────────────────────────────┐
-│ Dashboard     [Manage Users] │
-├──────────────────────────────┤
-│ [Date Selector Widget]       │
-├──────────────────────────────┤
-│                              │
-│    [OpenStreetMap with]      │
-│    [Routes & Pins]           │
-│    [Click pin for details]   │
-│                              │
-└──────────────────────────────┘
-```
+### Supervisor
 
-## 🔐 Security & Permissions
+- Home: assigned salesmen summary cards.
+- Map: route visualization and call inspection.
+- Agile: target input and actual comparison by salesman and date.
 
-### Firebase Security Rules
-- User-level read access (authenticated users only)
-- Role-based write permissions
-- SuperUser elevated permissions for user management
+### Superuser
 
-### Android Permissions
-- Camera access (photo capture)
-- Location (fine & coarse)
-- External storage (image cache)
-- Internet (Firebase connectivity)
+- Home: supervisor team overview.
+- Map: global route operations view and archive action.
+- Agile: supervisor-level performance overview.
+- User Management: account lifecycle and role assignment.
 
-### iOS Permissions
-- Camera usage description
-- Location usage description
+## Firestore Data
 
-## 📊 Data Model
+### Core collections
 
-### Users Collection
-```json
-{
-  "uid": "user-id-string",
-  "email": "user@example.com",
-  "role": "salesman|supervisor|superuser",
-  "active": true,
-  "supervisorId": "supervisor-uid|null",
-  "profilePic": "storage-url|null",
-  "createdAt": "timestamp"
-}
-```
+- `users`
+- `routes`
+- `agile_targets`
+- `agile_submissions`
 
-### Routes Collection
-```json
-{
-  "routeId": "uuid",
-  "salesmanId": "user-id",
-  "supervisorId": "user-id",
-  "date": "2026-04-21",
-  "first": {
-    "lat": 15.485,
-    "lon": 120.967,
-    "imageUrl": "storage-url",
-    "timestamp": "datetime"
-  },
-  "last": {
-    "lat": 15.495,
-    "lon": 120.977,
-    "imageUrl": "storage-url",
-    "timestamp": "datetime"
-  },
-  "distance": 2.3,
-  "createdAt": "timestamp"
-}
-```
+### Agile documents
 
-## ⚙️ Configuration
+`agile_targets` stores daily supervisor-entered targets per salesman.
 
-### Firebase Setup
-See [FIREBASE_SETUP.md](FIREBASE_SETUP.md) for detailed setup instructions including:
-- Project creation
-- Authentication configuration
-- Firestore rules
-- Storage configuration
-- API key setup
+`agile_submissions` stores daily salesman-entered actual values and submission status.
 
-### OpenRouteService API
-1. Create account: https://openrouteservice.org
-2. Get API key (2,000 free requests/day)
-3. Update `lib/constants/app_constants.dart`:
-```dart
-static const String openRouteServiceApiKey = 'YOUR_API_KEY_HERE';
-```
+## Security Model
 
-## 🚀 Getting Started
+- Authenticated users can read only the data relevant to their role.
+- Supervisors can manage targets for their own team.
+- Salesmen can submit only their own Agile actuals.
+- Superusers have full access for administration and archive workflows.
+
+See `firestore.rules` and `storage.rules` for the current rule set.
+
+## Getting Started
 
 ### Prerequisites
+
+- Flutter SDK installed
+- Firebase project configured
+- FlutterFire CLI installed
+
+### Install
+
 ```bash
-flutter --version  # Ensure Flutter 3.11+
-dart pub global activate flutterfire_cli
+flutter pub get
 ```
 
-### Installation
+### Configure Firebase
+
 ```bash
-# Clone the repository
-git clone <repository-url>
-cd compact_sales_monitoring
-
-# Install dependencies
-flutter pub get
-
-# Configure Firebase
 flutterfire configure
 ```
 
-### Running the App
+Then confirm these files are in place:
 
-#### Android (Salesman)
+- `lib/firebase_options.dart`
+- `android/app/google-services.json`
+- platform Firebase config files generated by FlutterFire
+
+### Run the app
+
 ```bash
-flutter run -t lib/main.dart
+flutter run
 ```
 
-#### Desktop (Supervisor/SuperUser)
+Useful targets:
+
 ```bash
-# Windows
-flutter run -d windows -t lib/main.dart
-
-# macOS
-flutter run -d macos -t lib/main.dart
+flutter run -d windows
+flutter run -d android
+flutter build apk
 ```
 
-#### iOS (Optional)
+## Setup Notes
+
+- Firebase setup instructions: `FIREBASE_SETUP.md`
+- Quick setup checklist: `SETUP_CHECKLIST.md`
+- Architecture notes: `ARCHITECTURE.md`
+- Implementation notes: `IMPLEMENTATION_GUIDE.md`
+
+## Current Highlights
+
+- Role-based routing from a shared login flow.
+- Animated auth transition overlay.
+- Responsive card layouts for supervisor and superuser dashboards.
+- Historical date selectors across Home, Map, and Agile reporting flows.
+- Stamped route images with QR shortcuts to map coordinates.
+- Firestore-backed Agile targets and submissions.
+- Archive export support for route data.
+
+## Development Checks
+
+Useful commands:
+
 ```bash
-flutter run -d ios -t lib/main.dart
+flutter analyze
+flutter test
+flutter build apk
 ```
 
-## 🧪 Testing
+## Branding
 
-### Test Accounts
-```
-Email: salesman@demo.com
-Password: Demo@123
-Role: Salesman
-
-Email: supervisor@demo.com
-Password: Demo@123
-Role: Supervisor
-
-Email: superuser@demo.com
-Password: Demo@123
-Role: SuperUser
-```
-
-### Test Scenarios
-1. **Salesman Flow**: Login → Capture photos → Verify Firestore upload
-2. **Supervisor Flow**: Login → Select date → View routes on map → Click pins
-3. **SuperUser Flow**: Login → View all routes → Manage users → Toggle activation
-
-## 📈 Performance Optimization
-
-### Data Optimization
-- **Single entry per day**: Only first/last GPS/photo logged per salesman per day
-- **Lazy loading**: User details loaded on-demand
-- **Image caching**: CachedNetworkImage for efficient loading
-- **Polyline caching**: RouteProvider caches road-aware polylines
-
-### Free Tier Usage
-- Firebase Storage: 5GB free ✓
-- Firestore: 50k reads/writes/day ✓
-- OpenRouteService: 2,000 requests/day ✓
-
-## 🔄 State Management
-
-### AuthProvider
-- Manages authentication state
-- Tracks current user and role
-- Handles login/logout operations
-
-### RouteProvider
-- Fetches and caches routes
-- Generates polylines on-demand
-- Handles date-based filtering
-
-## 🐛 Troubleshooting
-
-### Common Issues
-- **Firebase initialization fails**: Run `flutterfire configure`
-- **Camera permission denied**: Check Android/iOS settings
-- **No routes displayed**: Verify Firestore has data and date matches
-- **Images not loading**: Check Firebase Storage rules and connectivity
-
-See [FIREBASE_SETUP.md](FIREBASE_SETUP.md) for detailed troubleshooting.
-
-## 📖 Documentation
-
-- [IMPLEMENTATION_GUIDE.md](IMPLEMENTATION_GUIDE.md) - Detailed implementation guide
-- [FIREBASE_SETUP.md](FIREBASE_SETUP.md) - Firebase configuration steps
-
-## 🚀 Future Enhancements
-
-- [ ] Cloud Functions for custom claims
-- [ ] Real-time Firestore listeners
-- [ ] Push notifications
-- [ ] Performance analytics dashboard
-- [ ] Export routes (PDF/CSV)
-- [ ] Offline mode with sync
-- [ ] Video recording capability
-- [ ] Profile picture uploads
-- [ ] Advanced filtering & search
-- [ ] Geofencing for automatic check-in/out
-
-## 🛡️ Production Deployment
-
-Before deploying to production:
-- [ ] Replace demo API keys
-- [ ] Update Firebase security rules
-- [ ] Set up Cloud Functions for custom claims
-- [ ] Enable Firebase monitoring
-- [ ] Configure backup strategies
-- [ ] Test all three user roles thoroughly
-- [ ] Implement analytics tracking
-- [ ] Set up error monitoring (Crashlytics)
-
-## 📝 License
-
-This project is provided as-is for demonstration and development purposes.
-
-## 🤝 Support
-
-For issues, questions, or contributions, please refer to the documentation files or contact the development team.
-
----
-
-**Last Updated**: April 2026  
-**Flutter Version**: 3.11.4+  
-**Dart Version**: 3.11.4+
-
+- App name: Sales Agile Monitoring
+- Launcher icon source: `assets/images/JoshiAO.jpg`

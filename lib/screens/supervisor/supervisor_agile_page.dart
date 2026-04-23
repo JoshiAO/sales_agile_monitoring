@@ -217,10 +217,10 @@ class _SupervisorAgilePageState extends State<SupervisorAgilePage> {
                     : () async {
                         try {
                           final data = await _pageFuture;
-                          if (!mounted) return;
+                          if (!context.mounted) return;
                           await _saveAllTargets(data);
                         } catch (_) {
-                          if (!mounted) return;
+                          if (!context.mounted) return;
                           ScaffoldMessenger.of(context).showSnackBar(
                             const SnackBar(content: Text('Unable to save targets right now.')),
                           );
@@ -827,95 +827,6 @@ class _SummaryMetricCard extends StatelessWidget {
                   ),
                 ],
               ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _MiniMetricBox extends StatelessWidget {
-  final String label;
-  final String value;
-
-  const _MiniMetricBox({required this.label, required this.value});
-
-  @override
-  Widget build(BuildContext context) {
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        border: Border.all(color: Colors.grey.shade300),
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.all(12),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(label, style: Theme.of(context).textTheme.bodySmall),
-            const SizedBox(height: 4),
-            Text(
-              value,
-              style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.w700,
-                  ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _IndexSummaryBox extends StatelessWidget {
-  final String title;
-  final double indexValue;
-
-  const _IndexSummaryBox({
-    required this.title,
-    required this.indexValue,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final percentage = (indexValue * 100).toStringAsFixed(1);
-    final indexLabel = indexValue.toStringAsFixed(2);
-
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        border: Border.all(color: Colors.grey.shade300),
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.all(12),
-        child: Row(
-          children: [
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    '$title Index',
-                    style: Theme.of(context).textTheme.bodySmall,
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    '$indexLabel x',
-                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                          fontWeight: FontWeight.w700,
-                        ),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(width: 8),
-            Text(
-              '$percentage%',
-              style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.w700,
-                    color: Colors.blueGrey.shade700,
-                  ),
             ),
           ],
         ),

@@ -1,264 +1,184 @@
-# Firebase Configuration Guide
+# Firebase Setup
 
-## Prerequisites
-- Firebase Project created (https://console.firebase.google.com)
-- FlutterFire CLI installed (`dart pub global activate flutterfire_cli`)
-- Admin access to Flutter project files
+This project uses Firebase Authentication, Cloud Firestore, Firebase Storage, and optional Cloud Functions.
 
-## Step 1: Create Firebase Project
-1. Go to Firebase Console
-2. Click "Create a new project"
-3. Name it "compact-sales-monitoring"
-4. Enable Google Analytics (optional but recommended)
+## Services Used
 
-## Step 2: Configure FlutterFire
-Run in the project root:
+- Firebase Authentication
+- Cloud Firestore
+- Firebase Storage
+- Cloud Functions for Firebase
+
+## 1. Configure FlutterFire
+
+Run from the project root:
+
 ```bash
 flutterfire configure
 ```
-Select:
-- Android ✓
-- iOS ✓
-- macOS ✓
-- Web (optional)
-- Windows ✓
 
-This will automatically update your Firebase configuration files.
+Recommended platforms:
 
-## Step 3: Enable Firebase Services
+- Android
+- Windows
+- macOS
+- iOS if you plan to support it
+- Web if you plan to test the web target
 
-### Authentication
-1. Go to Firebase Console → Authentication
-2. Click "Get Started"
-3. Enable "Email/Password" provider
-4. (Optional) Add other providers (Google, Facebook, etc.)
+## 2. Enable Authentication
 
-### Firestore Database
-1. Go to Firestore Database
-2. Click "Create database"
-3. Start in **Production mode**
-4. Select a region close to your users (e.g., us-central1)
+In Firebase Console:
 
-### Firebase Storage
-1. Go to Storage
-2. Click "Get started"
-3. Update storage rules when prompted (see step 4)
+1. Open Authentication.
+2. Enable Email/Password sign-in.
+3. Create your initial users or prepare to seed them later.
 
-### Realtime Database (Optional)
-Not needed for this project but useful for real-time features.
+## 3. Create Firestore Database
 
-## Step 4: Set Up Firestore Rules
+1. Open Firestore Database.
+2. Create the database in production mode.
+3. Choose a region close to your users.
 
-Update your Firestore security rules:
+## 4. Deploy Firestore Rules
 
-```
-rules_version = '2';
-service cloud.firestore {
-  match /databases/{database}/documents {
-    // Users collection - only accessible by authenticated users
-    match /users/{userId} {
-      allow read: if request.auth.uid != null;
-      allow create: if request.auth.uid != null && request.resource.data.email == request.auth.token.email;
-      allow update: if request.auth.uid != null && 
-                      (request.auth.uid == userId || 
-                       request.auth.token.role == 'superuser');
-      allow delete: if request.auth.uid != null && request.auth.token.role == 'superuser';
-    }
+The repository already contains current rules for:
 
-    // Routes collection
-    match /routes/{routeId} {
-      allow read: if request.auth.uid != null;
-      allow create: if request.auth.uid != null;
-      allow update: if request.auth.uid != null;
-      allow delete: if request.auth.uid != null && request.auth.token.role == 'superuser';
-    }
-  }
-}
-```
+- role-based user access
+- route visibility
+- Agile target permissions
+- Agile submission permissions
 
-Note: Firestore doesn't support custom claims directly in security rules. For production, implement Cloud Functions to set custom claims.
+Deploy them with:
 
-## Step 5: Set Up Storage Rules
-
-```
-rules_version = '2';
-service firebase.storage {
-  match /b/{bucket}/o {
-    match /profile_pictures/{allPaths=**} {
-      allow read: if request.auth.uid != null;
-      allow write: if request.auth.uid != null;
-    }
-    match /route_images/{allPaths=**} {
-      allow read: if request.auth.uid != null;
-      allow write: if request.auth.uid != null;
-    }
-  }
-}
-```
-
-## Step 6: Android Configuration
-
-Update `android/app/build.gradle`:
-```gradle
-android {
-    compileSdkVersion 34
-    
-    defaultConfig {
-        minSdkVersion 23
-        targetSdkVersion 34
-    }
-}
-
-dependencies {
-    // Firebase is added by FlutterFire, but ensure modern versions
-    implementation platform('com.google.firebase:firebase-bom:32.7.0')
-}
-```
-
-Update `android/gradle.properties`:
-```properties
-org.gradle.jvmargs=-Xmx4096m
-android.useAndroidX=true
-android.enableJetifier=true
-```
-
-## Step 7: iOS Configuration
-
-Update `ios/Podfile`:
-Ensure platform is iOS 12 or higher:
-```ruby
-platform :ios, '12.0'
-```
-
-Run:
 ```bash
-cd ios
-pod deintegrate
-pod install
-cd ..
+firebase deploy --only firestore:rules
 ```
 
-## Step 8: macOS/Windows Configuration
+## 5. Create Firebase Storage
 
-For desktop platforms, FlutterFire configure handles most setup automatically.
+1. Open Storage.
+2. Create the default bucket.
+3. Deploy storage rules:
 
-## Step 9: Update OpenRouteService API Key
-
-1. Create account at https://openrouteservice.org
-2. Get your free API key (2,000 requests/day)
-3. Update `lib/constants/app_constants.dart`:
-```dart
-static const String openRouteServiceApiKey = 'YOUR_ORS_API_KEY_HERE';
+```bash
+firebase deploy --only storage
 ```
 
-## Step 10: Create Demo Users
+## 6. Collections Used By The App
 
-In Firebase Console → Authentication → Users:
-1. Add user: `salesman@demo.com` (password: Demo@123)
-2. Add user: `supervisor@demo.com` (password: Demo@123)
-3. Add user: `superuser@demo.com` (password: Demo@123)
+### users
 
-In Firestore → users collection, add documents:
+Stores app users, roles, active state, and supervisor assignment.
 
-**User 1 (Salesman):**
+Suggested fields:
+
 ```json
 {
-  "email": "salesman@demo.com",
+  "uid": "user-id",
+  "email": "user@example.com",
+  "name": "User Name",
   "role": "salesman",
   "active": true,
-  "supervisorId": "supervisor-uid-here",
-  "profilePic": null
+  "supervisorId": "supervisor-uid-or-null",
+  "profilePic": null,
+  "createdAt": "timestamp"
 }
 ```
 
-**User 2 (Supervisor):**
+### routes
+
+Stores first call, last call, checkpoints, cached polyline, and route review fields.
+
+### agile_targets
+
+Stores supervisor-set targets per day and salesman.
+
+Suggested fields:
+
 ```json
 {
-  "email": "supervisor@demo.com",
-  "role": "supervisor",
-  "active": true,
-  "supervisorId": null,
-  "profilePic": null
+  "supervisorId": "supervisor-uid",
+  "salesmanId": "salesman-uid",
+  "date": "2026-04-23",
+  "productiveCallsTarget": 10,
+  "sttTarget": 5000,
+  "updatedAt": "timestamp"
 }
 ```
 
-**User 3 (SuperUser):**
+### agile_submissions
+
+Stores salesman actual values and submission state.
+
+Suggested fields:
+
 ```json
 {
-  "email": "superuser@demo.com",
-  "role": "superuser",
-  "active": true,
-  "supervisorId": null,
-  "profilePic": null
+  "supervisorId": "supervisor-uid",
+  "salesmanId": "salesman-uid",
+  "date": "2026-04-23",
+  "totalCalls": 18,
+  "productiveCalls": 11,
+  "sttActual": 6200,
+  "lastCallCompleted": true,
+  "submitted": true,
+  "submittedAt": "timestamp"
 }
 ```
 
-## Step 11: Permissions Configuration
+## 7. Seed Users
 
-### Android Permissions (android/app/src/main/AndroidManifest.xml):
-```xml
-<uses-permission android:name="android.permission.CAMERA" />
-<uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
-<uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
-<uses-permission android:name="android.permission.INTERNET" />
-<uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />
-<uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
-```
+You can create users manually in Firebase Authentication and mirror them in Firestore, or use the repository scripts under scripts/ if they match your environment.
 
-### iOS Permissions (ios/Runner/Info.plist):
-```xml
-<key>NSCameraUsageDescription</key>
-<string>We need camera access to capture photos of your route</string>
-<key>NSLocationWhenInUseUsageDescription</key>
-<string>We need your location to tag your photos</string>
-```
+Minimum roles needed:
 
-## Testing the Setup
+- one superuser
+- one supervisor
+- one salesman assigned to that supervisor
 
-### Run on Android:
+## 8. Optional Cloud Functions
+
+The functions project includes superuser credential update support.
+
+Install and deploy:
+
 ```bash
-flutter run -t lib/main.dart --device-id <device-id>
+cd functions
+npm install
+cd ..
+firebase deploy --only functions
 ```
 
-### Run on Desktop (Windows/macOS):
+## 9. Android Notes
+
+Confirm Android has the required permissions for:
+
+- camera
+- fine/coarse location
+- internet
+- photo or storage access as needed by the device version
+
+## 10. Verify End-To-End
+
+1. Salesman logs in and submits a route.
+2. Salesman submits Agile actuals.
+3. Supervisor sees the route, team summaries, and Agile values.
+4. Superuser sees global summaries and can manage accounts.
+
+## Common Commands
+
 ```bash
-flutter run -t lib/main.dart -d windows
-flutter run -t lib/main.dart -d macos
+flutterfire configure
+firebase deploy --only firestore:rules
+firebase deploy --only storage
+firebase deploy --only functions
+flutter analyze
 ```
 
-### Run on iOS (after setup):
-```bash
-flutter run -t lib/main.dart -d ios
-```
+## Related Files
 
-## Troubleshooting
-
-### Firebase not initializing:
-- Ensure `flutterfire configure` completed successfully
-- Check internet connection
-- Verify Firebase project is active
-
-### Camera not working:
-- On Android: Check app permissions in Settings
-- On iOS: Check Info.plist permissions
-
-### Location not working:
-- On Android: Check location permissions in Settings
-- Test with real device (emulator may have issues)
-
-### Images not uploading:
-- Check Firebase Storage rules
-- Verify internet connection
-- Check Storage quota
-
-## Production Deployment Checklist
-
-- [ ] Replace demo API keys with production keys
-- [ ] Update Firebase rules for production
-- [ ] Set up custom claims using Cloud Functions
-- [ ] Enable rate limiting and DDoS protection
-- [ ] Configure Firebase security for production
-- [ ] Set up backup and recovery procedures
-- [ ] Test all three roles thoroughly
-- [ ] Enable Firebase Analytics
-- [ ] Set up error monitoring (Firebase Crashlytics)
+- firestore.rules
+- storage.rules
+- functions/index.js
+- lib/services/firestore_service.dart
+- lib/models/agile_model.dart

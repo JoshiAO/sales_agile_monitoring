@@ -1,441 +1,281 @@
-# Architecture & Data Flow Guide
+# Architecture
 
-## System Architecture Overview
+## System Overview
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                          Flutter App                            │
-├─────────────────────────────────────────────────────────────────┤
-│  UI Layer                                                        │
-│  ├─ LoginScreen (shared)                                        │
-│  ├─ SalesmanHomeScreen (Android)                                │
-│  ├─ SupervisorDashboard (Desktop)                               │
-│  └─ SuperUserDashboard (Desktop)                                │
-├─────────────────────────────────────────────────────────────────┤
-│  State Management (Provider)                                     │
-│  ├─ AuthProvider (login, user, logout)                          │
-│  └─ RouteProvider (routes, polylines)                           │
-├─────────────────────────────────────────────────────────────────┤
-│  Services Layer                                                  │
-│  ├─ FirebaseService (init)                                      │
-│  ├─ AuthService (Firebase Auth)                                 │
-│  ├─ FirestoreService (database CRUD)                            │
-│  ├─ StorageService (image uploads)                              │
-│  ├─ LocationService (GPS)                                       │
-│  └─ RoutingService (OpenRouteService API)                       │
-├─────────────────────────────────────────────────────────────────┤
-│  Data Models                                                     │
-│  ├─ AppUser (uid, email, role, active, supervisorId)            │
-│  ├─ SalesRoute (routeId, salesmanId, supervisorId, date)        │
-│  └─ RoutePoint (lat, lon, imageUrl, timestamp)                  │
-└─────────────────────────────────────────────────────────────────┘
-        ↕         ↕          ↕           ↕
-    ┌────────────────────────────────────────┐
-    │      External Services/APIs            │
-    ├────────────────────────────────────────┤
-    │ Firebase (Auth, Firestore, Storage)    │
-    │ OpenRouteService (Routing API)         │
-    │ OpenStreetMap (Tiles)                  │
-    │ Google Maps (Links)                    │
-    └────────────────────────────────────────┘
+Compact Sales Monitoring is a role-based Flutter application backed by Firebase. The app serves three user types from one codebase:
+
+- Salesman
+- Supervisor
+- Superuser
+
+Each role receives a different tab layout through the shared app router after authentication.
+
+## High-Level Layers
+
+```text
+Flutter App
+  UI Screens and Widgets
+  Provider State
+  Service Layer
+  Firebase Backend
 ```
 
-## Data Flow Diagrams
+## Routing Model
 
-### 1. Salesman Photo Capture Flow
+Authentication is handled first. After login, the app resolves the destination screen by role.
 
-```
-User (Salesman) Takes Photo
-        ↓
-Image Picker (Camera)
-        ↓
-LocationService.getCurrentLocation()
-        ↓
-StorageService.uploadRouteImage()
-        ↓
-Firebase Storage ✓
-        ↓
-Create/Update SalesRoute in Firestore
-        ↓
-Route metadata saved with imageUrl
-        ↓
-UI updates with status ✓
+```text
+LoginScreen
+  -> AuthProvider
+  -> AuthService
+  -> Firestore user lookup
+  -> AppRouter
+       -> SalesmanTabsScreen
+       -> SupervisorTabsScreen
+       -> SuperuserTabsScreen
 ```
 
-### 2. Supervisor Route Viewing Flow
+## Role-Based Screen Structure
 
-```
-Supervisor Logs In
-        ↓
-AuthProvider.login()
-        ↓
-Firebase Auth ✓
-        ↓
-Load user from Firestore ✓
-        ↓
-Check: active == true ✓
-        ↓
-Navigate to SupervisorDashboard
-        ↓
-Select Date (date selector widget)
-        ↓
-RouteProvider.fetchRoutesByDate(supervisorId, date)
-        ↓
-Query Firestore routes collection ✓
-        ↓
-For each route: RoutingService.getRoute(first, last)
-        ↓
-OpenRouteService API ✓
-        ↓
-Generate polylines
-        ↓
-Render map with polylines & pins
-        ↓
-User clicks pin
-        ↓
-Fetch salesman details from Firestore ✓
-        ↓
-Show RouteDetailModal
-        ↓
-User sees images, GPS, timestamp, Google Maps link
-```
+### Salesman
 
-### 3. User Management Flow (SuperUser)
+- Calls tab
+- Agile tab
 
-```
-SuperUser Logs In
-        ↓
-Navigate to UserManagementScreen
-        ↓
-Fetch all users from Firestore ✓
-        ↓
-Display users in list
-        ↓
-Click edit → Show dialog with options:
-    ├─ Change role (salesman ↔ supervisor)
-    ├─ Reassign supervisor
-    └─ Toggle active status
-        ↓
-Update Firestore users collection ✓
-        ↓
-UI updates
-```
+Primary responsibilities:
 
-## Authentication Flow
+- capture first and last call images
+- collect GPS metadata
+- store route progress and checkpoints
+- submit daily Agile actuals
 
-```
-┌─────────────────┐
-│   LoginScreen   │
-└────────┬────────┘
-         │ Email & Password
-         ↓
-┌──────────────────────┐
-│  AuthProvider.login()│
-└────────┬─────────────┘
-         │
-         ↓
-┌──────────────────────────────────┐
-│  AuthService.loginWithEmail()    │
-└────────┬─────────────────────────┘
-         │
-         ↓
-┌────────────────────────────────────┐
-│  Firebase Auth.signInWithEmail()   │
-└────────┬────────────────────────────┘
-         │ Auth successful?
-    ┌────┴────┐
-    │Yes      │No
-    ↓         ↓ Return error
-┌──────────────────────────────────────┐
-│ Fetch user doc from Firestore       │
-│ (/users/{uid})                      │
-└────────┬─────────────────────────────┘
-         │
-         ↓
-┌──────────────────────────────┐
-│ Check: active == true        │
-└────────┬─────────────────────┘
-    ┌────┴────┐
-    │Yes      │No
-    ↓         ↓ Sign out & error
-┌──────────────────┐
-│ Update AuthState │
-└────────┬─────────┘
-         │
-         ↓
-┌─────────────────────────────────┐
-│ AppRouter selects screen by role│
-└─────────────────────────────────┘
-```
+### Supervisor
 
-## Role-Based Access Control (RBAC)
+- Home tab
+- Map tab
+- Agile tab
 
-```
-┌──────────────────────────────────────────────────────────────────┐
-│                      AppRouter Decision Tree                      │
-├──────────────────────────────────────────────────────────────────┤
-│                                                                   │
-│  User Authenticated?                                              │
-│  ├─ NO  → LoginScreen                                            │
-│  └─ YES → Check User Role                                        │
-│           ├─ SALESMAN      → SalesmanHomeScreen                  │
-│           ├─ SUPERVISOR    → SupervisorDashboard                 │
-│           └─ SUPERUSER     → SuperUserDashboard                  │
-│                                                                   │
-└──────────────────────────────────────────────────────────────────┘
+Primary responsibilities:
 
-Firestore Security Rules
-├─ Read:  IF authenticated                                          │
-├─ Create: IF authenticated AND (self-create OR role==superuser)   │
-├─ Update: IF authenticated AND (self-update OR role==superuser)   │
-└─ Delete: IF role==superuser                                       │
+- review assigned salesmen
+- inspect routes by date
+- preview route details
+- set Agile targets per salesman and day
+- compare actual values against targets
+
+### Superuser
+
+- Home tab
+- Map tab
+- Agile tab
+- User Management flow
+
+Primary responsibilities:
+
+- view all supervisors and teams
+- inspect all routes globally
+- archive route history
+- review Agile performance rollups
+- create and maintain user accounts
+
+## State Management
+
+The app uses Provider for shared state.
+
+### AuthProvider
+
+Responsibilities:
+
+- login and logout
+- maintain authenticated user state
+- restore user session
+- expose loading and error state
+
+### RouteProvider
+
+Responsibilities:
+
+- fetch routes by date
+- fetch global routes for superuser
+- generate or reuse route polylines
+- track approximate fallback polylines when routing is unavailable
+
+## Service Layer
+
+### AuthService
+
+- wraps Firebase Authentication
+- fetches the signed-in user profile from Firestore
+
+### FirestoreService
+
+- user CRUD and assignment logic
+- route CRUD and lookup logic
+- Agile target persistence
+- Agile submission persistence
+- archive and administrative support helpers
+
+### StorageService
+
+- uploads route images to Firebase Storage
+
+### LocationService
+
+- retrieves device location
+- supports route capture and checkpoint logic
+
+### RoutingService
+
+- resolves road-aware route segments
+- supports map polyline generation
+
+## Core User Flows
+
+### Salesman Call Capture
+
+```text
+Salesman opens Calls tab
+  -> capture image
+  -> fetch current location
+  -> stamp image details and QR link
+  -> upload to Firebase Storage
+  -> save route data in Firestore
+  -> update UI state
 ```
 
-## Database Schema
+### Salesman Agile Submission
 
-### Users Collection (`/users/{uid}`)
-```
-uid (document ID)
-├─ email: string
-├─ role: enum (salesman|supervisor|superuser)
-├─ active: boolean
-├─ supervisorId: string|null
-├─ profilePic: string|null
-└─ createdAt: timestamp
+```text
+Salesman opens Agile tab
+  -> load existing submission for selected day
+  -> validate totals and submission rules
+  -> confirm submission
+  -> save to agile_submissions
+  -> lock finalized state
 ```
 
-### Routes Collection (`/routes/{routeId}`)
-```
-routeId (document ID)
-├─ salesmanId: string (foreign key to users)
-├─ supervisorId: string (foreign key to users)
-├─ date: string (yyyy-MM-dd)
-├─ first:
-│  ├─ lat: number
-│  ├─ lon: number
-│  ├─ imageUrl: string
-│  └─ timestamp: datetime
-├─ last:
-│  ├─ lat: number
-│  ├─ lon: number
-│  ├─ imageUrl: string
-│  └─ timestamp: datetime
-├─ distance: number
-└─ createdAt: timestamp
+### Supervisor Agile Target Management
+
+```text
+Supervisor opens Agile tab
+  -> load assigned team
+  -> load agile_targets for selected day
+  -> load agile_submissions for selected day
+  -> edit targets per salesman
+  -> save to agile_targets
+  -> review actual vs target metrics
 ```
 
-## Storage Structure
+### Route Monitoring Flow
 
-```
-Firebase Storage Buckets
-└─ gs://bucket-name/
-   ├─ profile_pictures/
-   │  └─ {userId}.jpg
-   └─ route_images/
-      └─ {salesmanId}/
-         └─ {timestamp}.jpg
-```
-
-## State Management Flow
-
-### AuthProvider State
-```
-Class: AuthProvider extends ChangeNotifier
-├─ _currentUser: AppUser?
-├─ _isLoading: bool
-├─ _error: String?
-├─
-├─ Methods:
-│  ├─ login(email, password) → validates & updates state
-│  ├─ logout() → clears state
-│  ├─ checkCurrentUser() → restores session
-│  └─ clearError() → clears error message
-└─
-└─ Listeners: Widgets call notifyListeners() when changed
+```text
+Supervisor or Superuser opens Map tab
+  -> choose date
+  -> fetch routes from Firestore
+  -> load cached polyline or request route segments
+  -> render map markers and polylines
+  -> open route detail preview when selected
 ```
 
-### RouteProvider State
-```
-Class: RouteProvider extends ChangeNotifier
-├─ _routes: List<SalesRoute>
-├─ _routePolylines: Map<routeId, List<LatLng>>
-├─ _isLoading: bool
-├─ _error: String?
-├─
-├─ Methods:
-│  ├─ fetchRoutesByDate(supervisorId, date) → queries Firestore
-│  ├─ fetchAllRoutesByDate(date) → global query
-│  ├─ _generatePolylines() → calls OpenRouteService
-│  └─ clear() → resets state
-└─
-└─ Listeners: Dashboard widgets rebuild when state changes
+### Superuser Administration
+
+```text
+Superuser opens user management
+  -> fetch users by role
+  -> create or edit user
+  -> assign supervisor when needed
+  -> activate, deactivate, or delete account
+  -> optionally update credentials through Cloud Functions
 ```
 
-## API Integration Points
+## Firebase Data Model
 
-### 1. Firebase Authentication API
-```
-Method: FirebaseAuth.signInWithEmailAndPassword()
-Request:
-  - email: string
-  - password: string
-Response:
-  - UserCredential (user + auth token)
-Error Handling:
-  - FirebaseAuthException caught & displayed
-```
+### users
 
-### 2. Firestore API
-```
-Methods Used:
-  - collection('name').doc('id').get() → read
-  - collection('name').doc('id').set() → create
-  - collection('name').doc('id').update() → update
-  - collection('name').where() → query
-Error Handling:
-  - FirebaseException caught & displayed
-```
+Stores identity and role information.
 
-### 3. Firebase Storage API
-```
-Method: ref().putFile(file)
-Request:
-  - File to upload
-  - Path: 'folder/filename'
-Response:
-  - Download URL
-  - Upload task with progress
-Error Handling:
-  - FirebaseException caught
-```
+Typical fields:
 
-### 4. OpenRouteService API
-```
-Endpoint: /v2/directions/driving-car
-Method: GET
-Parameters:
-  - api_key: string
-  - start: "lon,lat"
-  - end: "lon,lat"
-Response:
-  - GeoJSON with coordinates array
-  - Features array containing geometry
-Error Handling:
-  - Returns empty list fallback
-  - Logs error for debugging
-```
+- uid
+- email
+- name
+- role
+- active
+- supervisorId
+- profilePic
+- createdAt
 
-## Key Design Patterns Used
+### routes
 
-### 1. Singleton Pattern
-- FirebaseService
-- AuthService
-- FirestoreService
-- StorageService
-- LocationService
-- RoutingService
+Stores route activity and call data.
 
-### 2. Repository Pattern
-- FirestoreService acts as data access layer
-- Abstracts Firestore operations
+Typical fields:
 
-### 3. Provider Pattern
-- AuthProvider manages auth state
-- RouteProvider manages route data
-- Widgets rebuild on state changes
+- salesmanId
+- supervisorId
+- date
+- first
+- last
+- hasFirstCall
+- hasLastCall
+- checkpoints
+- cachedPolyline
+- distance
+- retake flags
 
-### 4. Factory Pattern
-- AppRouter determines which screen to show based on role
+### agile_targets
 
-### 5. Error Handling Pattern
-- Try-catch in all async operations
-- User-friendly error messages in SnackBars
-- Console logging for debugging
+Stores supervisor-entered targets.
 
-## Performance Optimization Strategies
+Typical fields:
 
-### 1. Image Optimization
-- CachedNetworkImage caches downloaded images
-- maxWidth/maxHeight for camera capture
-- Quality: 85% for JPEG compression
+- supervisorId
+- salesmanId
+- date
+- productiveCallsTarget
+- sttTarget
+- updatedAt
 
-### 2. Query Optimization
-- Firestore queries filtered by supervisorId and date
-- Lazy loading of salesman details
-- Polyline caching in RouteProvider
+### agile_submissions
 
-### 3. Rate Limiting
-- OpenRouteService: 2,000 requests/day (free tier)
-- Firestore: 50k operations/day (free tier)
-- Firebase Storage: 5GB/month (free tier)
+Stores salesman-entered daily actuals.
 
-### 4. Memory Management
-- Proper cleanup in dispose()
-- MapController.dispose()
-- Provider auto-cleanup
+Typical fields:
 
-## Security Considerations
+- supervisorId
+- salesmanId
+- date
+- totalCalls
+- productiveCalls
+- sttActual
+- lastCallCompleted
+- submitted
+- submittedAt
 
-### 1. Authentication
-- Email/password via Firebase Auth
-- Only active users allowed
-- Automatic sign-out on error
+## Security Model
 
-### 2. Authorization
-- Role-based access control (RBAC)
-- Firestore rules check user role
-- SuperUser elevated permissions
+Firestore rules enforce role-based access.
 
-### 3. Data Privacy
-- User location data stored encrypted
-- Images in Firebase Storage
-- User PII in Firestore
+- salesmen can access their own route and Agile submission data
+- supervisors can access their assigned team data and set targets
+- superusers can access all operational data
 
-### 4. API Security
-- OpenRouteService API key in constants
-- HTTPS for all API calls
-- Firebase security rules enforced
+Current rules are defined in `firestore.rules`.
 
-## Scaling Considerations
+## Important Files
 
-### Current Free Tier Limits
-- Firebase Auth: Unlimited
-- Firestore: 50k read/write/day
-- Storage: 5GB/month
-- OpenRouteService: 2,000 requests/day
+- `lib/app_router.dart`
+- `lib/providers/auth_provider.dart`
+- `lib/providers/route_provider.dart`
+- `lib/services/firestore_service.dart`
+- `lib/models/route_model.dart`
+- `lib/models/agile_model.dart`
+- `lib/widgets/agile_call_form_card.dart`
+- `lib/screens/salesman/salesman_tabs_screen.dart`
+- `lib/screens/supervisor/supervisor_tabs_screen.dart`
+- `lib/screens/superuser/superuser_tabs_screen.dart`
 
-### Optimization for Scale
-1. Implement Cloud Functions for batch operations
-2. Use Firestore indexes for complex queries
-3. Implement caching strategy
-4. Consider Realtime Database for live updates
-5. Use CDN for images
-6. Implement rate limiting
+## Current Validation State
 
-## Future Enhancement Points
-
-1. **Real-time Updates**
-   - Listen to Firestore changes
-   - Live route tracking
-   - Real-time notifications
-
-2. **Advanced Features**
-   - Geofencing
-   - Route history & analytics
-   - Performance metrics
-   - Export functionality
-
-3. **Scalability**
-   - Cloud Functions
-   - Firestore sharding
-   - Data archival strategy
-
-4. **User Experience**
-   - Offline support
-   - Background sync
-   - Progressive loading
-   - Animations & transitions
-
----
-
-**Last Updated**: April 2026
+- Documentation aligned with implemented app behavior
+- Flutter analyzer clean
