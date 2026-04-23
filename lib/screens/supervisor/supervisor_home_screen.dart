@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
+import 'package:compact_sales_monitoring/models/agile_model.dart';
 import 'package:compact_sales_monitoring/models/route_model.dart';
 import 'package:compact_sales_monitoring/models/user_model.dart';
 import 'package:compact_sales_monitoring/providers/auth_provider.dart';
@@ -36,10 +37,15 @@ class _SupervisorHomeScreenState extends State<SupervisorHomeScreen> {
     final results = await Future.wait([
       _firestoreService.getSupervisorTeam(currentUser.uid),
       _firestoreService.getRoutesByDate(currentUser.uid, today),
+      _firestoreService.getAgileSubmissionsForSupervisorByDate(
+        supervisorId: currentUser.uid,
+        date: today,
+      ),
     ]);
 
     final team = results[0] as List<AppUser>;
     final routes = results[1] as List<SalesRoute>;
+    final submissionsBySalesman = results[2] as Map<String, AgileSubmission>;
     final routesBySalesman = <String, SalesRoute>{};
 
     for (final route in routes) {
@@ -54,6 +60,7 @@ class _SupervisorHomeScreenState extends State<SupervisorHomeScreen> {
     return _SupervisorHomeData(
       team: team,
       routesBySalesman: routesBySalesman,
+      submissionsBySalesman: submissionsBySalesman,
     );
   }
 
@@ -241,6 +248,7 @@ class _SupervisorHomeScreenState extends State<SupervisorHomeScreen> {
                 return _SalesmanSummaryCard(
                   salesman: salesman,
                   route: route,
+                  submission: data.submissionsBySalesman[salesman.uid],
                   cardMode: _cardMode,
                   formatCallTime: _formatCallTime,
                   onPreviewCalls: route == null
@@ -259,6 +267,7 @@ class _SupervisorHomeScreenState extends State<SupervisorHomeScreen> {
 class _SalesmanSummaryCard extends StatelessWidget {
   final AppUser salesman;
   final SalesRoute? route;
+  final AgileSubmission? submission;
   final _SupervisorCardMode cardMode;
   final String Function({required bool hasCall, required DateTime timestamp})
       formatCallTime;
@@ -267,6 +276,7 @@ class _SalesmanSummaryCard extends StatelessWidget {
   const _SalesmanSummaryCard({
     required this.salesman,
     required this.route,
+    required this.submission,
     required this.cardMode,
     required this.formatCallTime,
     required this.onPreviewCalls,
@@ -295,6 +305,34 @@ class _SalesmanSummaryCard extends StatelessWidget {
       hasCall: route!.hasLastCall,
       timestamp: route!.last.timestamp,
     );
+  }
+
+  String get _actualProductiveCallsText {
+    if (submission == null) {
+      return '--';
+    }
+    return '${submission!.productiveCalls}';
+  }
+
+  String get _actualSttText {
+    if (submission == null) {
+      return '--';
+    }
+    return NumberFormat('#,##0.00').format(submission!.sttActual);
+  }
+
+  String get _actualSttCompactText {
+    if (submission == null) {
+      return '--';
+    }
+    final value = submission!.sttActual;
+    if (value >= 1000000) {
+      return NumberFormat('#,##0.00').format(value / 1000000) + 'M';
+    } else if (value >= 1000) {
+      return NumberFormat('#,##0.00').format(value / 1000) + 'K';
+    } else {
+      return NumberFormat('#,##0.00').format(value);
+    }
   }
 
   Widget _buildWideCard(BuildContext context) {
@@ -343,17 +381,17 @@ class _SalesmanSummaryCard extends StatelessWidget {
                 ),
               ),
               const VerticalDivider(width: 1),
-              const Expanded(
+              Expanded(
                 child: _MetricCell(
-                  label: 'Productive Calls',
-                  value: 'Under Development',
+                  label: 'Actual Productive Calls',
+                  value: _actualProductiveCallsText,
                 ),
               ),
               const VerticalDivider(width: 1),
-              const Expanded(
+              Expanded(
                 child: _MetricCell(
-                  label: 'STT for today',
-                  value: 'Under Development',
+                  label: 'Actual STT',
+                  value: _actualSttText,
                 ),
               ),
             ],
@@ -376,52 +414,54 @@ class _SalesmanSummaryCard extends StatelessWidget {
   }
 
   Widget _buildCompactCard(BuildContext context) {
-    final content = Row(
+    final content = Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Expanded(
-          flex: 3,
-          child: Text(
-            _displayName,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                  fontWeight: FontWeight.w700,
-                ),
-          ),
+        Text(
+          _displayName,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                fontWeight: FontWeight.w700,
+              ),
         ),
-        const SizedBox(width: 8),
-        Expanded(
-          flex: 2,
-          child: _CompactMetric(
-            icon: Icons.outlined_flag,
-            iconColor: Colors.green.shade700,
-            value: _firstCallText,
-          ),
-        ),
-        const SizedBox(width: 8),
-        Expanded(
-          flex: 2,
-          child: _CompactMetric(
-            icon: Icons.flag,
-            iconColor: Colors.red.shade700,
-            value: _lastCallText,
-          ),
-        ),
-        const SizedBox(width: 8),
-        const Expanded(
-          flex: 2,
-          child: _CompactMetric(
-            icon: Icons.storefront_outlined,
-            value: '000',
-          ),
-        ),
-        const SizedBox(width: 8),
-        const Expanded(
-          flex: 3,
-          child: _CompactMetric(
-            icon: Icons.payments_outlined,
-            value: '0,000.00',
-          ),
+        const SizedBox(height: 10),
+        Row(
+          children: [
+            Expanded(
+              flex: 2,
+              child: _CompactMetric(
+                icon: Icons.outlined_flag,
+                iconColor: Colors.green.shade700,
+                value: _firstCallText,
+              ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              flex: 2,
+              child: _CompactMetric(
+                icon: Icons.flag,
+                iconColor: Colors.red.shade700,
+                value: _lastCallText,
+              ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              flex: 3,
+              child: _CompactMetric(
+                icon: Icons.trending_up_outlined,
+                value: 'PC $_actualProductiveCallsText',
+              ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              flex: 3,
+              child: _CompactMetric(
+                icon: Icons.payments_outlined,
+                value: 'STT $_actualSttCompactText',
+              ),
+            ),
+          ],
         ),
       ],
     );
@@ -594,10 +634,12 @@ class _MetricCell extends StatelessWidget {
 class _SupervisorHomeData {
   final List<AppUser> team;
   final Map<String, SalesRoute> routesBySalesman;
+  final Map<String, AgileSubmission> submissionsBySalesman;
 
   const _SupervisorHomeData({
     required this.team,
     required this.routesBySalesman,
+    required this.submissionsBySalesman,
   });
 }
 

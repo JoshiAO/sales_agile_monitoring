@@ -102,19 +102,6 @@ class _AgileCallFormCardState extends State<AgileCallFormCard> {
     setState(() => setter(currentValue - 1));
   }
 
-  void _normalizeSttValue() {
-    final rawValue = _sttController.text.trim();
-    if (rawValue.isEmpty) return;
-
-    final parsed = double.tryParse(rawValue);
-    if (parsed == null) return;
-
-    _sttController.value = TextEditingValue(
-      text: parsed.toStringAsFixed(2),
-      selection: TextSelection.collapsed(offset: parsed.toStringAsFixed(2).length),
-    );
-  }
-
   bool get _isSubmitEnabled {
     return _isLastCallCompleted && !_isSubmitted && !_isSubmitting;
   }
@@ -192,6 +179,22 @@ class _AgileCallFormCardState extends State<AgileCallFormCard> {
       );
       return;
     }
+
+      // Require Total Calls and Productive Calls to be > 0
+      if (_totalCalls <= 0) {
+        await _showMessageDialog(
+          title: 'Total Calls Required',
+          message: 'Total Calls must be greater than zero.',
+        );
+        return;
+      }
+      if (_productiveCalls <= 0) {
+        await _showMessageDialog(
+          title: 'Productive Calls Required',
+          message: 'Productive Calls must be greater than zero.',
+        );
+        return;
+      }
 
     final currentUser = context.read<AuthProvider>().currentUser;
     if (currentUser == null) {
@@ -361,11 +364,7 @@ class _AgileCallFormCardState extends State<AgileCallFormCard> {
                                   readOnly: readOnly,
                                   keyboardType: const TextInputType.numberWithOptions(decimal: true),
                                   textAlign: TextAlign.center,
-                                  inputFormatters: const [
-                                    _TwoDecimalInputFormatter(),
-                                  ],
                                   onEditingComplete: () {
-                                    _normalizeSttValue();
                                     FocusScope.of(context).unfocus();
                                   },
                                   decoration: const InputDecoration(
@@ -378,8 +377,8 @@ class _AgileCallFormCardState extends State<AgileCallFormCard> {
                                     if (text.isEmpty) {
                                       return 'STT for today is required';
                                     }
-                                    if (!RegExp(r'^\d+(\.\d{2})$').hasMatch(text)) {
-                                      return 'Use format 0.00';
+                                    if (double.tryParse(text) == null) {
+                                      return 'Please enter a valid number';
                                     }
                                     if (_productiveCalls > _totalCalls) {
                                       return 'Productive Calls cannot exceed Total Calls';
@@ -527,17 +526,3 @@ class _CounterField extends StatelessWidget {
   }
 }
 
-class _TwoDecimalInputFormatter extends TextInputFormatter {
-  const _TwoDecimalInputFormatter();
-
-  @override
-  TextEditingValue formatEditUpdate(
-    TextEditingValue oldValue,
-    TextEditingValue newValue,
-  ) {
-    if (newValue.text.isEmpty) return newValue;
-
-    final isValid = RegExp(r'^\d*(\.\d{0,2})?$').hasMatch(newValue.text);
-    return isValid ? newValue : oldValue;
-  }
-}

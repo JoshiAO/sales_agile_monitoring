@@ -119,7 +119,10 @@ class _LoginScreenState extends State<LoginScreen> {
                       ),
                       onPressed: authProvider.isLoading
                           ? null
-                          : () => _handleLogin(context),
+                          : () {
+                            FocusScope.of(context).unfocus();
+                            _handleLogin(context);
+                          },
                       child: Text(
                         authProvider.isLoading ? 'Signing in...' : 'Login',
                         style: const TextStyle(

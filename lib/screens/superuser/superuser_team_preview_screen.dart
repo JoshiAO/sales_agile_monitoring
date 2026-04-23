@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import 'package:compact_sales_monitoring/models/agile_model.dart';
 import 'package:compact_sales_monitoring/models/route_model.dart';
 import 'package:compact_sales_monitoring/models/user_model.dart';
 import 'package:compact_sales_monitoring/services/firestore_service.dart';
@@ -41,12 +42,17 @@ class _SuperuserTeamPreviewScreenState extends State<SuperuserTeamPreviewScreen>
     final results = await Future.wait([
       _firestoreService.getSupervisorTeam(widget.supervisor.uid),
       _firestoreService.getRoutesByDate(widget.supervisor.uid, dateStr),
+      _firestoreService.getAgileSubmissionsForSupervisorByDate(
+        supervisorId: widget.supervisor.uid,
+        date: dateStr,
+      ),
     ]);
 
     final team = (results[0] as List<AppUser>)
         .toList()
       ..sort((left, right) => _displayName(left).compareTo(_displayName(right)));
     final routes = results[1] as List<SalesRoute>;
+    final submissionsBySalesman = results[2] as Map<String, AgileSubmission>;
 
     final routesBySalesman = <String, SalesRoute>{};
     for (final route in routes) {
@@ -59,6 +65,7 @@ class _SuperuserTeamPreviewScreenState extends State<SuperuserTeamPreviewScreen>
     return _TeamPreviewData(
       team: team,
       routesBySalesman: routesBySalesman,
+      submissionsBySalesman: submissionsBySalesman,
     );
   }
 
@@ -162,6 +169,16 @@ class _SuperuserTeamPreviewScreenState extends State<SuperuserTeamPreviewScreen>
           final data = snapshot.data!;
           final activeCount = data.team.where((salesman) => salesman.active).length;
           final inactiveCount = data.team.length - activeCount;
+          final totalActualProductiveCalls = data.team.fold<int>(
+            0,
+            (sum, salesman) =>
+                sum + (data.submissionsBySalesman[salesman.uid]?.productiveCalls ?? 0),
+          );
+          final totalActualStt = data.team.fold<double>(
+            0.0,
+            (sum, salesman) =>
+                sum + (data.submissionsBySalesman[salesman.uid]?.sttActual ?? 0.0),
+          );
           final filteredTeam = data.team.where((salesman) {
             switch (_filter) {
               case _TeamPreviewFilter.active:
@@ -234,6 +251,31 @@ class _SuperuserTeamPreviewScreenState extends State<SuperuserTeamPreviewScreen>
                           ],
                         ),
                         const SizedBox(height: 10),
+                        Card(
+                          margin: EdgeInsets.zero,
+                          child: Padding(
+                            padding: const EdgeInsets.all(12),
+                            child: Wrap(
+                              spacing: 16,
+                              runSpacing: 8,
+                              children: [
+                                Text(
+                                  'Team Actual Productive Calls: $totalActualProductiveCalls',
+                                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                                        fontWeight: FontWeight.w700,
+                                      ),
+                                ),
+                                Text(
+                                  'Team Actual STT: ${NumberFormat('#,##0.00').format(totalActualStt)}',
+                                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                                        fontWeight: FontWeight.w700,
+                                      ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 10),
                         SegmentedButton<_TeamPreviewFilter>(
                           showSelectedIcon: false,
                           selected: {_filter},
@@ -277,6 +319,7 @@ class _SuperuserTeamPreviewScreenState extends State<SuperuserTeamPreviewScreen>
                 return _SalesmanSummaryCard(
                   salesman: salesman,
                   route: route,
+                  submission: data.submissionsBySalesman[salesman.uid],
                   formatCallTime: _formatCallTime,
                   onPreviewCalls: route == null
                       ? null
@@ -294,6 +337,7 @@ class _SuperuserTeamPreviewScreenState extends State<SuperuserTeamPreviewScreen>
 class _SalesmanSummaryCard extends StatelessWidget {
   final AppUser salesman;
   final SalesRoute? route;
+  final AgileSubmission? submission;
   final String Function({required bool hasCall, required DateTime timestamp})
       formatCallTime;
   final Future<void> Function()? onPreviewCalls;
@@ -301,6 +345,7 @@ class _SalesmanSummaryCard extends StatelessWidget {
   const _SalesmanSummaryCard({
     required this.salesman,
     required this.route,
+    required this.submission,
     required this.formatCallTime,
     required this.onPreviewCalls,
   });
@@ -328,6 +373,20 @@ class _SalesmanSummaryCard extends StatelessWidget {
       hasCall: route!.hasLastCall,
       timestamp: route!.last.timestamp,
     );
+  }
+
+  String get _actualProductiveCallsText {
+    if (submission == null) {
+      return '--';
+    }
+    return '${submission!.productiveCalls}';
+  }
+
+  String get _actualSttText {
+    if (submission == null) {
+      return '--';
+    }
+    return NumberFormat('#,##0.00').format(submission!.sttActual);
   }
 
   @override
@@ -394,17 +453,17 @@ class _SalesmanSummaryCard extends StatelessWidget {
                     ),
                   ),
                   const VerticalDivider(width: 1),
-                  const Expanded(
+                  Expanded(
                     child: _MetricCell(
-                      label: 'Productive Calls',
-                      value: 'Under Development',
+                      label: 'Actual Productive Calls',
+                      value: _actualProductiveCallsText,
                     ),
                   ),
                   const VerticalDivider(width: 1),
-                  const Expanded(
+                  Expanded(
                     child: _MetricCell(
-                      label: 'STT for today',
-                      value: 'Under Development',
+                      label: 'Actual STT',
+                      value: _actualSttText,
                     ),
                   ),
                 ],
@@ -499,9 +558,11 @@ class _StatusBadge extends StatelessWidget {
 class _TeamPreviewData {
   final List<AppUser> team;
   final Map<String, SalesRoute> routesBySalesman;
+  final Map<String, AgileSubmission> submissionsBySalesman;
 
   const _TeamPreviewData({
     required this.team,
     required this.routesBySalesman,
+    required this.submissionsBySalesman,
   });
 }

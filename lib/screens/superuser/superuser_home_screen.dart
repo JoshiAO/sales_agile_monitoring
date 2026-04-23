@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
+import 'package:compact_sales_monitoring/models/agile_model.dart';
 import 'package:compact_sales_monitoring/models/route_model.dart';
 import 'package:compact_sales_monitoring/models/user_model.dart';
 import 'package:compact_sales_monitoring/providers/auth_provider.dart';
@@ -41,11 +42,13 @@ class _SuperuserHomeScreenState extends State<SuperuserHomeScreen> {
       _firestoreService.getUsersByRole(UserRole.supervisor),
       _firestoreService.getUsersByRole(UserRole.salesman),
       _firestoreService.getAllRoutesByDate(dateStr),
+      _firestoreService.getAllAgileSubmissionsByDate(date: dateStr),
     ]);
 
     final supervisors = (results[0] as List<AppUser>).toList();
     final salesmen = (results[1] as List<AppUser>).toList();
     final routes = results[2] as List<SalesRoute>;
+    final submissionsBySalesman = results[3] as Map<String, AgileSubmission>;
 
     final salesmenBySupervisor = <String, List<AppUser>>{};
     for (final salesman in salesmen) {
@@ -79,6 +82,7 @@ class _SuperuserHomeScreenState extends State<SuperuserHomeScreen> {
     return _SuperuserHomeData(
       selectedDate: _selectedDate,
       routesBySalesman: routesBySalesman,
+      submissionsBySalesman: submissionsBySalesman,
       supervisorSummaries: summaries,
     );
   }
@@ -253,6 +257,7 @@ class _SuperuserHomeScreenState extends State<SuperuserHomeScreen> {
                   summary: summary,
                   cardMode: _cardMode,
                   routesBySalesman: data.routesBySalesman,
+                  submissionsBySalesman: data.submissionsBySalesman,
                   onPreviewTeam: () {
                     _openTeamPreview(
                       supervisor: summary.supervisor,
@@ -273,12 +278,14 @@ class _SupervisorSummaryCard extends StatelessWidget {
   final _SupervisorSummary summary;
   final _SuperuserCardMode cardMode;
   final Map<String, SalesRoute> routesBySalesman;
+  final Map<String, AgileSubmission> submissionsBySalesman;
   final VoidCallback onPreviewTeam;
 
   const _SupervisorSummaryCard({
     required this.summary,
     required this.cardMode,
     required this.routesBySalesman,
+    required this.submissionsBySalesman,
     required this.onPreviewTeam,
   });
 
@@ -301,6 +308,30 @@ class _SupervisorSummaryCard extends StatelessWidget {
   int get _lastCallSuccessCount => summary.assignedSalesmen
       .where((salesman) => routesBySalesman[salesman.uid]?.hasLastCall == true)
       .length;
+
+    int get _actualProductiveCallsTotal => summary.assignedSalesmen.fold(
+      0,
+      (total, salesman) =>
+        total + (submissionsBySalesman[salesman.uid]?.productiveCalls ?? 0),
+      );
+
+    double get _actualSttTotal => summary.assignedSalesmen.fold(
+      0.0,
+      (total, salesman) =>
+        total + (submissionsBySalesman[salesman.uid]?.sttActual ?? 0.0),
+      );
+
+    String get _actualSttTotalText => NumberFormat('#,##0.00').format(_actualSttTotal);
+
+  String get _actualSttCompactText {
+    if (_actualSttTotal >= 1000000) {
+      return NumberFormat('#,##0.00').format(_actualSttTotal / 1000000) + 'M';
+    } else if (_actualSttTotal >= 1000) {
+      return NumberFormat('#,##0.00').format(_actualSttTotal / 1000) + 'K';
+    } else {
+      return NumberFormat('#,##0.00').format(_actualSttTotal);
+    }
+  }
 
   Widget _buildWideCard(BuildContext context) {
     return Column(
@@ -353,38 +384,98 @@ class _SupervisorSummaryCard extends StatelessWidget {
           ],
         ),
         const SizedBox(height: 16),
-        IntrinsicHeight(
-          child: Row(
-            children: [
-              Expanded(
-                child: _MetricCell(
+        LayoutBuilder(
+          builder: (context, constraints) {
+            final isWideLayout = constraints.maxWidth >= 860;
+
+            Widget buildGroup({
+              required String title,
+              required List<Widget> metrics,
+            }) {
+              return Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.grey.shade50,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: Colors.grey.shade200),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                            fontWeight: FontWeight.w700,
+                          ),
+                    ),
+                    const SizedBox(height: 8),
+                    IntrinsicHeight(
+                      child: Row(
+                        children: [
+                          for (int i = 0; i < metrics.length; i++) ...[
+                            Expanded(child: metrics[i]),
+                            if (i < metrics.length - 1) const VerticalDivider(width: 1),
+                          ],
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            }
+
+            final assignedAndActualGroup = buildGroup(
+              title: 'Assigned And Actual Metrics',
+              metrics: [
+                _MetricCell(
                   label: 'Assigned Salesmen',
                   value: '$_teamSize',
                 ),
-              ),
-              const VerticalDivider(width: 1),
-              Expanded(
-                child: _MetricCell(
+                _MetricCell(
+                  label: 'Actual Productive Calls',
+                  value: '$_actualProductiveCallsTotal',
+                ),
+                _MetricCell(
+                  label: 'Actual STT',
+                  value: _actualSttTotalText,
+                ),
+              ],
+            );
+
+            final successfulCallsGroup = buildGroup(
+              title: 'Successful Calls',
+              metrics: [
+                _MetricCell(
                   label: 'Successful First Calls',
                   value: '$_firstCallSuccessCount',
                 ),
-              ),
-              const VerticalDivider(width: 1),
-              Expanded(
-                child: _MetricCell(
+                _MetricCell(
                   label: 'Successful Last Calls',
                   value: '$_lastCallSuccessCount',
                 ),
-              ),
-              const VerticalDivider(width: 1),
-              const Expanded(
-                child: _MetricCell(
-                  label: 'STT for today',
-                  value: 'Under Development',
-                ),
-              ),
-            ],
-          ),
+              ],
+            );
+
+            if (isWideLayout) {
+              return Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(flex: 3, child: assignedAndActualGroup),
+                  const SizedBox(width: 10),
+                  Expanded(flex: 2, child: successfulCallsGroup),
+                ],
+              );
+            }
+
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                assignedAndActualGroup,
+                const SizedBox(height: 8),
+                successfulCallsGroup,
+              ],
+            );
+          },
         ),
         const SizedBox(height: 12),
         Align(
@@ -399,11 +490,13 @@ class _SupervisorSummaryCard extends StatelessWidget {
   }
 
   Widget _buildCompactCard(BuildContext context) {
-    final content = Row(
-      children: [
-        Expanded(
-          flex: 3,
-          child: Text(
+    return InkWell(
+      borderRadius: BorderRadius.circular(12),
+      onTap: onPreviewTeam,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
             _displayName,
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
@@ -411,59 +504,53 @@ class _SupervisorSummaryCard extends StatelessWidget {
                   fontWeight: FontWeight.w700,
                 ),
           ),
-        ),
-        const SizedBox(width: 8),
-        Expanded(
-          flex: 2,
-          child: _CompactMetric(
-            icon: Icons.groups_outlined,
-            value: '$_teamSize',
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              Expanded(
+                flex: 2,
+                child: _CompactMetric(
+                  icon: Icons.groups_outlined,
+                  value: '$_teamSize',
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                flex: 2,
+                child: _CompactMetric(
+                  icon: Icons.outlined_flag,
+                  iconColor: Colors.green.shade700,
+                  value: '$_firstCallSuccessCount',
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                flex: 2,
+                child: _CompactMetric(
+                  icon: Icons.flag,
+                  iconColor: Colors.red.shade700,
+                  value: '$_lastCallSuccessCount',
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                flex: 3,
+                child: _CompactMetric(
+                  icon: Icons.trending_up_outlined,
+                  value: 'PC $_actualProductiveCallsTotal',
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                flex: 3,
+                child: _CompactMetric(
+                  icon: Icons.payments_outlined,
+                  value: 'STT $_actualSttCompactText',
+                ),
+              ),
+            ],
           ),
-        ),
-        const SizedBox(width: 8),
-        Expanded(
-          flex: 2,
-          child: _CompactMetric(
-            icon: Icons.outlined_flag,
-            iconColor: Colors.green.shade700,
-            value: '$_firstCallSuccessCount',
-          ),
-        ),
-        const SizedBox(width: 8),
-        Expanded(
-          flex: 2,
-          child: _CompactMetric(
-            icon: Icons.flag,
-            iconColor: Colors.red.shade700,
-            value: '$_lastCallSuccessCount',
-          ),
-        ),
-        const SizedBox(width: 8),
-        Expanded(
-          flex: 2,
-          child: _CompactMetric(
-            icon: Icons.person_off_outlined,
-            iconColor: Colors.orange.shade700,
-            value: '$_inactiveTeamSize',
-          ),
-        ),
-        const SizedBox(width: 8),
-        const Expanded(
-          flex: 3,
-          child: _CompactMetric(
-            icon: Icons.payments_outlined,
-            value: '0,000.00',
-          ),
-        ),
-      ],
-    );
-
-    return InkWell(
-      borderRadius: BorderRadius.circular(12),
-      onTap: onPreviewTeam,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 4),
-        child: content,
+        ],
       ),
     );
   }
@@ -650,11 +737,13 @@ class _TeamStatusChip extends StatelessWidget {
 class _SuperuserHomeData {
   final DateTime selectedDate;
   final Map<String, SalesRoute> routesBySalesman;
+  final Map<String, AgileSubmission> submissionsBySalesman;
   final List<_SupervisorSummary> supervisorSummaries;
 
   const _SuperuserHomeData({
     required this.selectedDate,
     required this.routesBySalesman,
+    required this.submissionsBySalesman,
     required this.supervisorSummaries,
   });
 }
