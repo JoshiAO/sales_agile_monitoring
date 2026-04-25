@@ -52,3 +52,6 @@ app.*.map.json
 # Node dependencies
 /node_modules/
 /functions/node_modules/
+
+# Firebase related
+lib/firebase_options.dart
