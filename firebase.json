@@ -1,0 +1,34 @@
+﻿{
+    "flutter":  {
+                    "platforms":  {
+                                      "android":  {
+                                                      "default":  {
+                                                                      "projectId":  "sales-team-stream-monitoring",
+                                                                      "appId":  "1:820214382404:android:07f1c0e9ed7703e7b16111",
+                                                                      "fileOutput":  "android/app/google-services.json"
+                                                                  }
+                                                  },
+                                      "dart":  {
+                                                   "lib/firebase_options.dart":  {
+                                                                                     "projectId":  "sales-team-stream-monitoring",
+                                                                                     "configurations":  {
+                                                                                                            "android":  "1:820214382404:android:07f1c0e9ed7703e7b16111",
+                                                                                                            "ios":  "1:820214382404:ios:831ac575ad445f52b16111",
+                                                                                                            "macos":  "1:820214382404:ios:831ac575ad445f52b16111",
+                                                                                                            "web":  "1:820214382404:web:9d52a46d68fe23e3b16111",
+                                                                                                            "windows":  "1:820214382404:web:2ee1284c7a52c165b16111"
+                                                                                                        }
+                                                                                 }
+                                               }
+                                  }
+                },
+    "functions": {
+        "source": "functions"
+    },
+    "firestore":  {
+                      "rules":  "firestore.rules"
+                  },
+    "storage":  {
+                    "rules":  "storage.rules"
+                }
+}
