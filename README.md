@@ -1,6 +1,6 @@
-# Compact Sales Monitoring
+# Sales Agile Monitoring
 
-Compact Sales Monitoring is a multi-role Flutter + Firebase app for field sales operations. It combines daily route capture, team map monitoring, Agile target setting, Agile performance submissions, and superuser administration in one codebase.
+Sales Agile Monitoring is a multi-role Flutter + Firebase app for field sales operations. It combines daily route capture, team map monitoring, Agile target setting, Agile performance submissions, and superuser administration in one codebase.
 
 ## Overview
 
