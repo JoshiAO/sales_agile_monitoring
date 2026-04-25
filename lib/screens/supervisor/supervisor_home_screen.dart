@@ -327,9 +327,9 @@ class _SalesmanSummaryCard extends StatelessWidget {
     }
     final value = submission!.sttActual;
     if (value >= 1000000) {
-      return NumberFormat('#,##0.00').format(value / 1000000) + 'M';
+      return '${NumberFormat('#,##0.00').format(value / 1000000)}M';
     } else if (value >= 1000) {
-      return NumberFormat('#,##0.00').format(value / 1000) + 'K';
+      return '${NumberFormat('#,##0.00').format(value / 1000)}K';
     } else {
       return NumberFormat('#,##0.00').format(value);
     }

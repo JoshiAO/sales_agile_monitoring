@@ -1,5 +1,6 @@
 # Firebase keys (do not commit)
 lib/firebase_keys.dart
+
 # Miscellaneous
 *.class
 *.log
