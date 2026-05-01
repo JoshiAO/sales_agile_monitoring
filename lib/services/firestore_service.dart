@@ -17,7 +17,10 @@ class FirestoreService {
   final FirebaseService _firebaseService = FirebaseService();
   static const uuid = Uuid();
 
-  static String _agileDocId({required String date, required String salesmanId}) {
+  static String _agileDocId({
+    required String date,
+    required String salesmanId,
+  }) {
     return '${date}_$salesmanId';
   }
 
@@ -44,7 +47,10 @@ class FirestoreService {
   }
 
   Future<AppUser?> getUser(String uid) async {
-    final doc = await _firebaseService.firestore.collection('users').doc(uid).get();
+    final doc = await _firebaseService.firestore
+        .collection('users')
+        .doc(uid)
+        .get();
     if (!doc.exists) return null;
     return AppUser.fromMap(doc.data() ?? {}, uid: uid);
   }
@@ -54,10 +60,9 @@ class FirestoreService {
   }
 
   Future<void> toggleUserActive(String uid, bool active) async {
-    await _firebaseService.firestore
-        .collection('users')
-        .doc(uid)
-        .update({'active': active});
+    await _firebaseService.firestore.collection('users').doc(uid).update({
+      'active': active,
+    });
   }
 
   Future<List<AppUser>> getUsersByRole(UserRole role) async {
@@ -83,8 +88,9 @@ class FirestoreService {
   }
 
   Future<List<AppUser>> getAllUsers() async {
-    final querySnapshot =
-        await _firebaseService.firestore.collection('users').get();
+    final querySnapshot = await _firebaseService.firestore
+        .collection('users')
+        .get();
 
     return querySnapshot.docs
         .map((doc) => AppUser.fromMap(doc.data(), uid: doc.id))
@@ -113,7 +119,9 @@ class FirestoreService {
       'last': last.toMap(),
       'hasFirstCall': hasFirstCall,
       'hasLastCall': hasLastCall,
-      'checkpoints': checkpoints.map((checkpoint) => checkpoint.toMap()).toList(),
+      'checkpoints': checkpoints
+          .map((checkpoint) => checkpoint.toMap())
+          .toList(),
       'distance': distance,
       'firstRetakeRequested': false,
       'firstRetakeApproved': false,
@@ -125,7 +133,10 @@ class FirestoreService {
     return routeId;
   }
 
-  Future<List<SalesRoute>> getRoutesByDate(String supervisorId, String date) async {
+  Future<List<SalesRoute>> getRoutesByDate(
+    String supervisorId,
+    String date,
+  ) async {
     final querySnapshot = await _firebaseService.firestore
         .collection('routes')
         .where('supervisorId', isEqualTo: supervisorId)
@@ -163,7 +174,27 @@ class FirestoreService {
         .toList();
   }
 
-  Future<List<SalesRoute>> getRoutesBySalesman(String salesmanId, String date) async {
+  Future<List<SalesRoute>> getRoutesForSupervisorByDateRange({
+    required String supervisorId,
+    required String startDate,
+    required String endDate,
+  }) async {
+    final querySnapshot = await _firebaseService.firestore
+        .collection('routes')
+        .where('supervisorId', isEqualTo: supervisorId)
+        .where('date', isGreaterThanOrEqualTo: startDate)
+        .where('date', isLessThanOrEqualTo: endDate)
+        .get();
+
+    return querySnapshot.docs
+        .map((doc) => SalesRoute.fromMap(doc.data(), routeId: doc.id))
+        .toList();
+  }
+
+  Future<List<SalesRoute>> getRoutesBySalesman(
+    String salesmanId,
+    String date,
+  ) async {
     final querySnapshot = await _firebaseService.firestore
         .collection('routes')
         .where('salesmanId', isEqualTo: salesmanId)
@@ -176,7 +207,10 @@ class FirestoreService {
   }
 
   Future<void> updateRoute(String routeId, Map<String, dynamic> data) async {
-    await _firebaseService.firestore.collection('routes').doc(routeId).update(data);
+    await _firebaseService.firestore
+        .collection('routes')
+        .doc(routeId)
+        .update(data);
   }
 
   Future<void> appendRouteCheckpoint(
@@ -192,8 +226,17 @@ class FirestoreService {
     String routeId,
     List<CachedPolylinePoint> points,
   ) async {
+    final cacheTime = DateTime.now();
     await _firebaseService.firestore.collection('routes').doc(routeId).update({
-      'cachedPolyline': points.map((p) => p.toMap()).toList(),
+      'cachedPolyline': points
+          .map(
+            (p) => CachedPolylinePoint(
+              lat: p.lat,
+              lon: p.lon,
+              timestamp: p.timestamp ?? cacheTime,
+            ).toMap(),
+          )
+          .toList(),
     });
   }
 
@@ -231,10 +274,12 @@ class FirestoreService {
     final firestore = _firebaseService.firestore;
     final chunks = <List<String>>[];
     for (var index = 0; index < routeIds.length; index += 400) {
-      chunks.add(routeIds.sublist(
-        index,
-        index + 400 > routeIds.length ? routeIds.length : index + 400,
-      ));
+      chunks.add(
+        routeIds.sublist(
+          index,
+          index + 400 > routeIds.length ? routeIds.length : index + 400,
+        ),
+      );
     }
 
     for (final chunk in chunks) {
@@ -270,9 +315,7 @@ class FirestoreService {
           .where('supervisorId', isEqualTo: uid)
           .get();
       for (final doc in teamSnapshot.docs) {
-        await doc.reference.update({
-          'supervisorId': null,
-        });
+        await doc.reference.update({'supervisorId': null});
       }
     }
 
@@ -289,14 +332,17 @@ class FirestoreService {
   }) async {
     final docId = _agileDocId(date: date, salesmanId: salesmanId);
 
-    await _firebaseService.firestore.collection('agile_targets').doc(docId).set({
-      'supervisorId': supervisorId,
-      'salesmanId': salesmanId,
-      'date': date,
-      'productiveCallsTarget': productiveCallsTarget,
-      'sttTarget': sttTarget,
-      'updatedAt': FieldValue.serverTimestamp(),
-    }, SetOptions(merge: true));
+    await _firebaseService.firestore
+        .collection('agile_targets')
+        .doc(docId)
+        .set({
+          'supervisorId': supervisorId,
+          'salesmanId': salesmanId,
+          'date': date,
+          'productiveCallsTarget': productiveCallsTarget,
+          'sttTarget': sttTarget,
+          'updatedAt': FieldValue.serverTimestamp(),
+        }, SetOptions(merge: true));
   }
 
   Future<Map<String, AgileTarget>> getAgileTargetsForSupervisorByDate({
@@ -317,6 +363,27 @@ class FirestoreService {
     return map;
   }
 
+  Future<Map<String, AgileTarget>> getAgileTargetsForSupervisorByDateRange({
+    required String supervisorId,
+    required String startDate,
+    required String endDate,
+  }) async {
+    final querySnapshot = await _firebaseService.firestore
+        .collection('agile_targets')
+        .where('supervisorId', isEqualTo: supervisorId)
+        .where('date', isGreaterThanOrEqualTo: startDate)
+        .where('date', isLessThanOrEqualTo: endDate)
+        .get();
+
+    final map = <String, AgileTarget>{};
+    for (final doc in querySnapshot.docs) {
+      final target = AgileTarget.fromMap(doc.data());
+      map[_agileDocId(date: target.date, salesmanId: target.salesmanId)] =
+          target;
+    }
+    return map;
+  }
+
   Future<Map<String, AgileTarget>> getAgileTargetsByDate({
     required String date,
   }) async {
@@ -333,6 +400,25 @@ class FirestoreService {
     return map;
   }
 
+  Future<Map<String, AgileTarget>> getAgileTargetsByDateRange({
+    required String startDate,
+    required String endDate,
+  }) async {
+    final querySnapshot = await _firebaseService.firestore
+        .collection('agile_targets')
+        .where('date', isGreaterThanOrEqualTo: startDate)
+        .where('date', isLessThanOrEqualTo: endDate)
+        .get();
+
+    final map = <String, AgileTarget>{};
+    for (final doc in querySnapshot.docs) {
+      final target = AgileTarget.fromMap(doc.data());
+      map[_agileDocId(date: target.date, salesmanId: target.salesmanId)] =
+          target;
+    }
+    return map;
+  }
+
   // Agile Submissions
   Future<void> submitAgileSubmission({
     required String supervisorId,
@@ -344,13 +430,17 @@ class FirestoreService {
     required bool lastCallCompleted,
   }) async {
     final docId = _agileDocId(date: date, salesmanId: salesmanId);
-    final docRef = _firebaseService.firestore.collection('agile_submissions').doc(docId);
+    final docRef = _firebaseService.firestore
+        .collection('agile_submissions')
+        .doc(docId);
     final existingDoc = await docRef.get();
 
     if (existingDoc.exists) {
       final existing = AgileSubmission.fromMap(existingDoc.data() ?? {});
       if (existing.submitted) {
-        throw StateError('Agile submission is already finalized for this date.');
+        throw StateError(
+          'Agile submission is already finalized for this date.',
+        );
       }
     }
 
@@ -372,7 +462,10 @@ class FirestoreService {
     required String date,
   }) async {
     final docId = _agileDocId(date: date, salesmanId: salesmanId);
-    final doc = await _firebaseService.firestore.collection('agile_submissions').doc(docId).get();
+    final doc = await _firebaseService.firestore
+        .collection('agile_submissions')
+        .doc(docId)
+        .get();
     if (!doc.exists) return null;
     return AgileSubmission.fromMap(doc.data() ?? {});
   }
@@ -395,6 +488,31 @@ class FirestoreService {
     return map;
   }
 
+  Future<Map<String, AgileSubmission>>
+  getAgileSubmissionsForSupervisorByDateRange({
+    required String supervisorId,
+    required String startDate,
+    required String endDate,
+  }) async {
+    final querySnapshot = await _firebaseService.firestore
+        .collection('agile_submissions')
+        .where('supervisorId', isEqualTo: supervisorId)
+        .where('date', isGreaterThanOrEqualTo: startDate)
+        .where('date', isLessThanOrEqualTo: endDate)
+        .get();
+
+    final map = <String, AgileSubmission>{};
+    for (final doc in querySnapshot.docs) {
+      final submission = AgileSubmission.fromMap(doc.data());
+      map[_agileDocId(
+            date: submission.date,
+            salesmanId: submission.salesmanId,
+          )] =
+          submission;
+    }
+    return map;
+  }
+
   Future<Map<String, AgileSubmission>> getAllAgileSubmissionsByDate({
     required String date,
   }) async {
@@ -407,6 +525,28 @@ class FirestoreService {
     for (final doc in querySnapshot.docs) {
       final submission = AgileSubmission.fromMap(doc.data());
       map[submission.salesmanId] = submission;
+    }
+    return map;
+  }
+
+  Future<Map<String, AgileSubmission>> getAllAgileSubmissionsByDateRange({
+    required String startDate,
+    required String endDate,
+  }) async {
+    final querySnapshot = await _firebaseService.firestore
+        .collection('agile_submissions')
+        .where('date', isGreaterThanOrEqualTo: startDate)
+        .where('date', isLessThanOrEqualTo: endDate)
+        .get();
+
+    final map = <String, AgileSubmission>{};
+    for (final doc in querySnapshot.docs) {
+      final submission = AgileSubmission.fromMap(doc.data());
+      map[_agileDocId(
+            date: submission.date,
+            salesmanId: submission.salesmanId,
+          )] =
+          submission;
     }
     return map;
   }

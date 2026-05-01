@@ -51,9 +51,9 @@ class DefaultFirebaseOptions {
   );
 
   static const FirebaseOptions android = FirebaseOptions(
-    apiKey: FirebaseWebKeys.apiKey,
-    appId: FirebaseWebKeys.appId,
-    messagingSenderId: FirebaseWebKeys.messagingSenderId,
+    apiKey: 'AIzaSyDxtzJrIIV8Uw8oWPru-JhPi_Re6aVHX9s',
+    appId: '1:820214382404:android:07f1c0e9ed7703e7b16111',
+    messagingSenderId: '820214382404',
     projectId: 'sales-team-stream-monitoring',
     storageBucket: 'sales-team-stream-monitoring.firebasestorage.app',
   );

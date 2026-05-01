@@ -53,28 +53,34 @@ class RouteCheckpoint {
   }
 
   Map<String, dynamic> toMap() {
-    return {
-      'lat': lat,
-      'lon': lon,
-      'timestamp': timestamp,
-    };
+    return {'lat': lat, 'lon': lon, 'timestamp': timestamp};
   }
 }
 
 class CachedPolylinePoint {
   final double lat;
   final double lon;
+  final DateTime? timestamp;
 
-  const CachedPolylinePoint({required this.lat, required this.lon});
+  const CachedPolylinePoint({
+    required this.lat,
+    required this.lon,
+    this.timestamp,
+  });
 
   factory CachedPolylinePoint.fromMap(Map<String, dynamic> data) {
     return CachedPolylinePoint(
       lat: (data['lat'] as num?)?.toDouble() ?? 0.0,
       lon: (data['lon'] as num?)?.toDouble() ?? 0.0,
+      timestamp: (data['timestamp'] as Timestamp?)?.toDate(),
     );
   }
 
-  Map<String, dynamic> toMap() => {'lat': lat, 'lon': lon};
+  Map<String, dynamic> toMap() => {
+    'lat': lat,
+    'lon': lon,
+    if (timestamp != null) 'timestamp': timestamp,
+  };
 }
 
 class SalesRoute {
@@ -112,7 +118,10 @@ class SalesRoute {
     this.lastRetakeApproved = false,
   });
 
-  factory SalesRoute.fromMap(Map<String, dynamic> data, {required String routeId}) {
+  factory SalesRoute.fromMap(
+    Map<String, dynamic> data, {
+    required String routeId,
+  }) {
     return SalesRoute(
       routeId: routeId,
       salesmanId: data['salesmanId'] as String? ?? '',
@@ -122,11 +131,12 @@ class SalesRoute {
       last: RoutePoint.fromMap(data['last'] as Map<String, dynamic>? ?? {}),
       hasFirstCall: data['hasFirstCall'] as bool? ?? true,
       hasLastCall: data['hasLastCall'] as bool? ?? true,
-      checkpoints: ((data['checkpoints'] as List?) ?? const [])
-          .whereType<Map<String, dynamic>>()
-          .map(RouteCheckpoint.fromMap)
-          .toList()
-        ..sort((a, b) => a.timestamp.compareTo(b.timestamp)),
+      checkpoints:
+          ((data['checkpoints'] as List?) ?? const [])
+              .whereType<Map<String, dynamic>>()
+              .map(RouteCheckpoint.fromMap)
+              .toList()
+            ..sort((a, b) => a.timestamp.compareTo(b.timestamp)),
       cachedPolyline: ((data['cachedPolyline'] as List?) ?? const [])
           .whereType<Map<String, dynamic>>()
           .map(CachedPolylinePoint.fromMap)
@@ -148,7 +158,9 @@ class SalesRoute {
       'last': last.toMap(),
       'hasFirstCall': hasFirstCall,
       'hasLastCall': hasLastCall,
-      'checkpoints': checkpoints.map((checkpoint) => checkpoint.toMap()).toList(),
+      'checkpoints': checkpoints
+          .map((checkpoint) => checkpoint.toMap())
+          .toList(),
       'cachedPolyline': cachedPolyline.map((p) => p.toMap()).toList(),
       'distance': distance,
       'firstRetakeRequested': firstRetakeRequested,
@@ -165,10 +177,9 @@ class SalesRoute {
   }
 
   // Great-circle estimate between first and last call points.
-  double get estimatedDistanceKm =>
-      hasFirstCall && hasLastCall
-          ? _haversineKm(first.lat, first.lon, last.lat, last.lon)
-          : 0.0;
+  double get estimatedDistanceKm => hasFirstCall && hasLastCall
+      ? _haversineKm(first.lat, first.lon, last.lat, last.lon)
+      : 0.0;
 
   // Prefer stored distance when available, otherwise use computed estimate.
   double get distanceKm => distance ?? estimatedDistanceKm;
@@ -183,7 +194,8 @@ class SalesRoute {
     final dLat = _toRadians(lat2 - lat1);
     final dLon = _toRadians(lon2 - lon1);
 
-    final a = math.sin(dLat / 2) * math.sin(dLat / 2) +
+    final a =
+        math.sin(dLat / 2) * math.sin(dLat / 2) +
         math.cos(_toRadians(lat1)) *
             math.cos(_toRadians(lat2)) *
             math.sin(dLon / 2) *

@@ -2,7 +2,6 @@ import 'dart:async';
 import 'dart:io';
 import 'dart:math';
 import 'package:flutter/material.dart';
-import 'package:image_picker/image_picker.dart';
 import 'package:geolocator/geolocator.dart' as geo;
 import 'package:geolocator/geolocator.dart' show Position;
 import 'package:intl/intl.dart';
@@ -14,6 +13,7 @@ import 'package:qr/qr.dart';
 import 'package:saver_gallery/saver_gallery.dart';
 import 'package:compact_sales_monitoring/models/route_model.dart';
 import 'package:compact_sales_monitoring/providers/auth_provider.dart';
+import 'package:compact_sales_monitoring/screens/salesman/camera_screen.dart';
 import 'package:compact_sales_monitoring/services/location_service.dart';
 import 'package:compact_sales_monitoring/services/storage_service.dart';
 import 'package:compact_sales_monitoring/services/firestore_service.dart';
@@ -33,7 +33,6 @@ class _SalesmanHomeScreenState extends State<SalesmanHomeScreen> {
   final LocationService _locationService = LocationService();
   final StorageService _storageService = StorageService();
   final FirestoreService _firestoreService = FirestoreService();
-  final ImagePicker _imagePicker = ImagePicker();
 
   RoutePoint? _firstPoint;
   RoutePoint? _lastPoint;
@@ -65,10 +64,7 @@ class _SalesmanHomeScreenState extends State<SalesmanHomeScreen> {
     final bytes = await sourceFile.readAsBytes();
     final decoded = img.decodeImage(bytes);
     if (decoded == null) {
-      return _StampedImageResult(
-        localFile: sourceFile,
-        uploadFile: sourceFile,
-      );
+      return _StampedImageResult(localFile: sourceFile, uploadFile: sourceFile);
     }
 
     final baseImage = img.bakeOrientation(decoded);
@@ -214,10 +210,7 @@ class _SalesmanHomeScreenState extends State<SalesmanHomeScreen> {
       maxBytes: _maxUploadBytes,
     );
 
-    return _StampedImageResult(
-      localFile: localFile,
-      uploadFile: uploadFile,
-    );
+    return _StampedImageResult(localFile: localFile, uploadFile: uploadFile);
   }
 
   Future<void> _writeCompressedUpload({
@@ -281,20 +274,17 @@ class _SalesmanHomeScreenState extends State<SalesmanHomeScreen> {
 
   Future<String?> _resolveLocalImagePath(DateTime timestamp) async {
     final appDir = await getApplicationDocumentsDirectory();
-    final localPath = '${appDir.path}/call_images/call_${timestamp.millisecondsSinceEpoch}.jpg';
+    final localPath =
+        '${appDir.path}/call_images/call_${timestamp.millisecondsSinceEpoch}.jpg';
     final file = File(localPath);
     return file.existsSync() ? localPath : null;
   }
 
-  void _previewCallImage({
-    required bool isFirst,
-    required RoutePoint point,
-  }) {
+  void _previewCallImage({required bool isFirst, required RoutePoint point}) {
     final localPath = isFirst ? _firstLocalImagePath : _lastLocalImagePath;
-    final imageProvider =
-        (localPath != null && File(localPath).existsSync())
-            ? FileImage(File(localPath)) as ImageProvider
-            : NetworkImage(point.imageUrl);
+    final imageProvider = (localPath != null && File(localPath).existsSync())
+        ? FileImage(File(localPath)) as ImageProvider
+        : NetworkImage(point.imageUrl);
 
     showDialog(
       context: context,
@@ -328,10 +318,7 @@ class _SalesmanHomeScreenState extends State<SalesmanHomeScreen> {
               ),
               Flexible(
                 child: InteractiveViewer(
-                  child: Image(
-                    image: imageProvider,
-                    fit: BoxFit.contain,
-                  ),
+                  child: Image(image: imageProvider, fit: BoxFit.contain),
                 ),
               ),
               const SizedBox(height: 8),
@@ -401,10 +388,7 @@ class _SalesmanHomeScreenState extends State<SalesmanHomeScreen> {
       ),
     );
 
-    _locationSubscription = stream.listen(
-      _onLocationUpdate,
-      onError: (_) {},
-    );
+    _locationSubscription = stream.listen(_onLocationUpdate, onError: (_) {});
   }
 
   void _onLocationUpdate(geo.Position position) {
@@ -433,16 +417,17 @@ class _SalesmanHomeScreenState extends State<SalesmanHomeScreen> {
 
     final timeThresholdMet = timeSinceLast >= _checkpointMinInterval;
     final distanceThresholdMet =
-        prevLat != null && prevLon != null &&
-            distanceSinceLast >= _checkpointMinDistanceMeters;
+        prevLat != null &&
+        prevLon != null &&
+        distanceSinceLast >= _checkpointMinDistanceMeters;
 
     if (!timeThresholdMet && !distanceThresholdMet) {
       return;
     }
 
     _lastCheckpointTime = now;
-  _lastCheckpointLat = position.latitude;
-  _lastCheckpointLon = position.longitude;
+    _lastCheckpointLat = position.latitude;
+    _lastCheckpointLon = position.longitude;
 
     final checkpoint = RouteCheckpoint(
       lat: position.latitude,
@@ -450,9 +435,9 @@ class _SalesmanHomeScreenState extends State<SalesmanHomeScreen> {
       timestamp: now,
     );
 
-    _firestoreService.appendRouteCheckpoint(routeId, checkpoint).catchError(
-      (_) {},
-    );
+    _firestoreService
+        .appendRouteCheckpoint(routeId, checkpoint)
+        .catchError((_) {});
   }
 
   Future<void> _loadTodayRoute() async {
@@ -460,8 +445,10 @@ class _SalesmanHomeScreenState extends State<SalesmanHomeScreen> {
     final user = authProvider.currentUser;
 
     if (user != null) {
-      final routes =
-          await _firestoreService.getRoutesBySalesman(user.uid, _todayDate);
+      final routes = await _firestoreService.getRoutesBySalesman(
+        user.uid,
+        _todayDate,
+      );
       if (routes.isNotEmpty) {
         final route = routes[0];
         final firstLocalPath = route.hasFirstCall
@@ -507,7 +494,9 @@ class _SalesmanHomeScreenState extends State<SalesmanHomeScreen> {
     if (_todayRouteId == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Retake can only be requested after calls are submitted.'),
+          content: Text(
+            'Retake can only be requested after calls are submitted.',
+          ),
         ),
       );
       return;
@@ -516,7 +505,9 @@ class _SalesmanHomeScreenState extends State<SalesmanHomeScreen> {
     if (isFirst && _lastPoint != null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('First call retake is not allowed once last call is taken.'),
+          content: Text(
+            'First call retake is not allowed once last call is taken.',
+          ),
         ),
       );
       return;
@@ -525,7 +516,9 @@ class _SalesmanHomeScreenState extends State<SalesmanHomeScreen> {
     if (isFirst && _firstRetakeRequested || !isFirst && _lastRetakeRequested) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('${isFirst ? 'First' : 'Last'} call retake request is already pending.'),
+          content: Text(
+            '${isFirst ? 'First' : 'Last'} call retake request is already pending.',
+          ),
         ),
       );
       return;
@@ -534,7 +527,9 @@ class _SalesmanHomeScreenState extends State<SalesmanHomeScreen> {
     if (isFirst && _firstRetakeApproved || !isFirst && _lastRetakeApproved) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('${isFirst ? 'First' : 'Last'} call retake already approved. You can retake now.'),
+          content: Text(
+            '${isFirst ? 'First' : 'Last'} call retake already approved. You can retake now.',
+          ),
         ),
       );
       return;
@@ -559,7 +554,9 @@ class _SalesmanHomeScreenState extends State<SalesmanHomeScreen> {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text('${isFirst ? 'First' : 'Last'} call retake request submitted.'),
+        content: Text(
+          '${isFirst ? 'First' : 'Last'} call retake request submitted.',
+        ),
       ),
     );
   }
@@ -586,46 +583,41 @@ class _SalesmanHomeScreenState extends State<SalesmanHomeScreen> {
 
       if (!isFirst && _firstPoint == null) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Please take the first call first.'),
-          ),
+          const SnackBar(content: Text('Please take the first call first.')),
         );
         return;
       }
 
-      final pickedFile = await _imagePicker.pickImage(
-        source: ImageSource.camera,
-        maxWidth: 1920,
-        maxHeight: 1080,
-        imageQuality: 85,
+      final capturedImagePath = await Navigator.of(context).push<String>(
+        MaterialPageRoute(builder: (_) => CameraScreen(isFirstCall: isFirst)),
       );
 
-      if (pickedFile == null) return;
+      if (capturedImagePath == null || capturedImagePath.isEmpty) return;
 
       final position = await _locationService.getCurrentLocation();
       if (position == null) {
         if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Failed to get location')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('Failed to get location')));
         return;
       }
 
       if (!mounted) return;
-      _uploadImage(
-        File(pickedFile.path),
-        position,
-        isFirst,
-      );
+      _uploadImage(File(capturedImagePath), position, isFirst);
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error: $e')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Error: $e')));
     }
   }
 
-  Future<void> _uploadImage(File imageFile, Position position, bool isFirst) async {
+  Future<void> _uploadImage(
+    File imageFile,
+    Position position,
+    bool isFirst,
+  ) async {
     setState(() => _isUploading = true);
 
     try {
@@ -667,8 +659,10 @@ class _SalesmanHomeScreenState extends State<SalesmanHomeScreen> {
       );
 
       // Get existing route for today or create new one
-      final existingRoutes =
-          await _firestoreService.getRoutesBySalesman(user.uid, _todayDate);
+      final existingRoutes = await _firestoreService.getRoutesBySalesman(
+        user.uid,
+        _todayDate,
+      );
 
       if (existingRoutes.isEmpty) {
         if (isFirst) {
@@ -711,9 +705,7 @@ class _SalesmanHomeScreenState extends State<SalesmanHomeScreen> {
           if (_firstPoint == null) {
             if (!mounted) return;
             ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                content: Text('Please take the first call first'),
-              ),
+              const SnackBar(content: Text('Please take the first call first')),
             );
             return;
           }
@@ -739,15 +731,12 @@ class _SalesmanHomeScreenState extends State<SalesmanHomeScreen> {
         // Update existing route
         final route = existingRoutes[0];
         if (isFirst) {
-          await _firestoreService.updateRoute(
-            route.routeId,
-            {
-              'first': routePoint.toMap(),
-              'hasFirstCall': true,
-              'firstRetakeRequested': false,
-              'firstRetakeApproved': false,
-            },
-          );
+          await _firestoreService.updateRoute(route.routeId, {
+            'first': routePoint.toMap(),
+            'hasFirstCall': true,
+            'firstRetakeRequested': false,
+            'firstRetakeApproved': false,
+          });
           setState(() {
             _todayRouteId = route.routeId;
             _firstPoint = routePoint;
@@ -760,15 +749,12 @@ class _SalesmanHomeScreenState extends State<SalesmanHomeScreen> {
           });
           _syncCheckpointTracking();
         } else {
-          await _firestoreService.updateRoute(
-            route.routeId,
-            {
-              'last': routePoint.toMap(),
-              'hasLastCall': true,
-              'lastRetakeRequested': false,
-              'lastRetakeApproved': false,
-            },
-          );
+          await _firestoreService.updateRoute(route.routeId, {
+            'last': routePoint.toMap(),
+            'hasLastCall': true,
+            'lastRetakeRequested': false,
+            'lastRetakeApproved': false,
+          });
           setState(() {
             _todayRouteId = route.routeId;
             _lastPoint = routePoint;
@@ -795,9 +781,9 @@ class _SalesmanHomeScreenState extends State<SalesmanHomeScreen> {
       }
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Upload error: $e')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Upload error: $e')));
     } finally {
       setState(() => _isUploading = false);
     }
@@ -808,9 +794,13 @@ class _SalesmanHomeScreenState extends State<SalesmanHomeScreen> {
     final firstCallTaken = _firstPoint != null;
     final lastCallTaken = _lastPoint != null;
     final canTakeFirstCall =
-      !_isUploading && !lastCallTaken && (!firstCallTaken || _firstRetakeApproved);
+        !_isUploading &&
+        !lastCallTaken &&
+        (!firstCallTaken || _firstRetakeApproved);
     final canTakeLastCall =
-      !_isUploading && firstCallTaken && (!lastCallTaken || _lastRetakeApproved);
+        !_isUploading &&
+        firstCallTaken &&
+        (!lastCallTaken || _lastRetakeApproved);
 
     return Scaffold(
       appBar: AppBar(
@@ -824,10 +814,7 @@ class _SalesmanHomeScreenState extends State<SalesmanHomeScreen> {
                 onTap: () {
                   context.read<AuthProvider>().logout();
                 },
-                child: const Text(
-                  'Logout',
-                  style: TextStyle(fontSize: 14),
-                ),
+                child: const Text('Logout', style: TextStyle(fontSize: 14)),
               ),
             ),
           ),
@@ -859,10 +846,8 @@ class _SalesmanHomeScreenState extends State<SalesmanHomeScreen> {
                     : 'Not taken',
                 onTap: !firstCallTaken
                     ? null
-                    : () => _previewCallImage(
-                          isFirst: true,
-                          point: _firstPoint!,
-                        ),
+                    : () =>
+                          _previewCallImage(isFirst: true, point: _firstPoint!),
               ),
               if (firstCallTaken)
                 TextButton.icon(
@@ -874,8 +859,8 @@ class _SalesmanHomeScreenState extends State<SalesmanHomeScreen> {
                     _firstRetakeRequested
                         ? 'First call retake requested'
                         : _firstRetakeApproved
-                            ? 'First call retake approved'
-                            : 'Request first call retake',
+                        ? 'First call retake approved'
+                        : 'Request first call retake',
                   ),
                 ),
               const SizedBox(height: 16),
@@ -887,10 +872,8 @@ class _SalesmanHomeScreenState extends State<SalesmanHomeScreen> {
                     : 'Not taken',
                 onTap: !lastCallTaken
                     ? null
-                    : () => _previewCallImage(
-                          isFirst: false,
-                          point: _lastPoint!,
-                        ),
+                    : () =>
+                          _previewCallImage(isFirst: false, point: _lastPoint!),
               ),
               if (_lastPoint != null)
                 TextButton.icon(
@@ -902,8 +885,8 @@ class _SalesmanHomeScreenState extends State<SalesmanHomeScreen> {
                     _lastRetakeRequested
                         ? 'Last call retake requested'
                         : _lastRetakeApproved
-                            ? 'Last call retake approved'
-                            : 'Request last call retake',
+                        ? 'Last call retake approved'
+                        : 'Request last call retake',
                   ),
                 ),
               const SizedBox(height: 48),
@@ -981,10 +964,7 @@ class _SalesmanHomeScreenState extends State<SalesmanHomeScreen> {
                 ),
                 Text(
                   subtitle,
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: Colors.grey.shade600,
-                  ),
+                  style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
                 ),
               ],
             ),
@@ -994,10 +974,7 @@ class _SalesmanHomeScreenState extends State<SalesmanHomeScreen> {
                 children: const [
                   Icon(Icons.image_outlined, size: 20),
                   SizedBox(height: 2),
-                  Text(
-                    'Preview',
-                    style: TextStyle(fontSize: 10),
-                  ),
+                  Text('Preview', style: TextStyle(fontSize: 10)),
                 ],
               ),
             ],
@@ -1012,8 +989,5 @@ class _StampedImageResult {
   final File localFile;
   final File uploadFile;
 
-  _StampedImageResult({
-    required this.localFile,
-    required this.uploadFile,
-  });
+  _StampedImageResult({required this.localFile, required this.uploadFile});
 }

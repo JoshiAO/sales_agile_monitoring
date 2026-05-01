@@ -61,8 +61,11 @@ class _SupervisorDashboardState extends State<SupervisorDashboard> {
     _loadRoutes();
   }
 
-  Widget _buildSalesmanMarker(SalesRoute route, RoutePoint callPoint,
-      {required bool isFirstCall}) {
+  Widget _buildSalesmanMarker(
+    SalesRoute route,
+    RoutePoint callPoint, {
+    required bool isFirstCall,
+  }) {
     return FutureBuilder<AppUser?>(
       future: _getSalesmanDetails(route.salesmanId),
       builder: (context, snapshot) {
@@ -71,8 +74,8 @@ class _SupervisorDashboardState extends State<SupervisorDashboard> {
         final displayName = trimmedName.isNotEmpty
             ? trimmedName
             : (salesman?.email.isNotEmpty == true
-                ? salesman!.email
-                : route.salesmanId);
+                  ? salesman!.email
+                  : route.salesmanId);
 
         return GestureDetector(
           onTap: () async {
@@ -96,8 +99,10 @@ class _SupervisorDashboardState extends State<SupervisorDashboard> {
                 child: Center(
                   child: Container(
                     constraints: const BoxConstraints(maxWidth: 165),
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 4,
+                    ),
                     decoration: BoxDecoration(
                       color: Colors.black.withValues(alpha: 0.75),
                       borderRadius: BorderRadius.circular(8),
@@ -131,13 +136,53 @@ class _SupervisorDashboardState extends State<SupervisorDashboard> {
                 child: Icon(
                   Icons.flag,
                   size: 34,
-                  color: isFirstCall ? Colors.green.shade700 : Colors.red.shade700,
+                  color: isFirstCall
+                      ? Colors.green.shade700
+                      : Colors.red.shade700,
                 ),
               ),
             ],
           ),
         );
       },
+    );
+  }
+
+  Widget _buildCheckpointMarker(
+    BuildContext context,
+    SalesRoute route,
+    RouteCheckpoint checkpoint,
+  ) {
+    final checkpointTime = DateFormat('hh:mm a').format(checkpoint.timestamp);
+    final routeColor = context.read<RouteProvider>().routeColorForSalesman(
+      route.salesmanId,
+    );
+
+    return GestureDetector(
+      onTap: () {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Checkpoint: $checkpointTime'),
+            duration: const Duration(seconds: 2),
+          ),
+        );
+      },
+      child: Container(
+        width: 18,
+        height: 18,
+        decoration: BoxDecoration(
+          color: Colors.white,
+          shape: BoxShape.circle,
+          border: Border.all(color: routeColor, width: 2),
+          boxShadow: [
+            BoxShadow(
+              blurRadius: 4,
+              color: Colors.black.withValues(alpha: 0.25),
+            ),
+          ],
+        ),
+        child: Icon(Icons.place, size: 10, color: routeColor),
+      ),
     );
   }
 
@@ -150,10 +195,7 @@ class _SupervisorDashboardState extends State<SupervisorDashboard> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Map'),
-        elevation: 0,
-      ),
+      appBar: AppBar(title: const Text('Map'), elevation: 0),
       body: Column(
         children: [
           // Date Selector
@@ -170,13 +212,11 @@ class _SupervisorDashboardState extends State<SupervisorDashboard> {
             child: Consumer<RouteProvider>(
               builder: (context, routeProvider, _) {
                 if (routeProvider.isLoading) {
-                      return const MapLoadingSkeleton();
+                  return const MapLoadingSkeleton();
                 }
 
                 if (routeProvider.routes.isEmpty) {
-                  return const Center(
-                    child: Text('No routes for this date'),
-                  );
+                  return const Center(child: Text('No routes for this date'));
                 }
 
                 // Calculate initial map bounds
@@ -224,7 +264,8 @@ class _SupervisorDashboardState extends State<SupervisorDashboard> {
                           tileProvider: AppConstants.useOfflineTiles
                               ? AssetTileProvider()
                               : null,
-                            userAgentPackageName: AppConstants.osmUserAgentPackage,
+                          userAgentPackageName:
+                              AppConstants.osmUserAgentPackage,
                         ),
                         RichAttributionWidget(
                           attributions: [
@@ -239,58 +280,110 @@ class _SupervisorDashboardState extends State<SupervisorDashboard> {
                         // Polylines — road-accurate routes
                         PolylineLayer(
                           polylines: routeProvider.routes
-                              .where((r) => !routeProvider.isApproximate(r.routeId))
+                              .where(
+                                (r) => !routeProvider.isApproximate(r.routeId),
+                              )
                               .map((route) {
-                            final polyline =
-                                routeProvider.routePolylines[route.routeId];
-                            return Polyline(
-                              points: polyline ?? [LatLng(route.first.lat, route.first.lon)],
-                              color: Colors.blue.withValues(alpha: 0.7),
-                              strokeWidth: 4,
-                            );
-                          }).toList(),
+                                final polyline =
+                                    routeProvider.routePolylines[route.routeId];
+                                final routeColor = routeProvider
+                                    .routeColorForSalesman(route.salesmanId);
+                                return Polyline(
+                                  points:
+                                      polyline ??
+                                      [
+                                        LatLng(
+                                          route.first.lat,
+                                          route.first.lon,
+                                        ),
+                                      ],
+                                  color: routeColor.withValues(alpha: 0.78),
+                                  strokeWidth: 4,
+                                );
+                              })
+                              .toList(),
                         ),
 
                         // Polylines — approximate (offline fallback) routes
                         PolylineLayer(
                           polylines: routeProvider.routes
-                              .where((r) => routeProvider.isApproximate(r.routeId))
+                              .where(
+                                (r) => routeProvider.isApproximate(r.routeId),
+                              )
                               .map((route) {
-                            final polyline =
-                                routeProvider.routePolylines[route.routeId];
-                            return Polyline(
-                              points: polyline ?? [LatLng(route.first.lat, route.first.lon)],
-                              color: Colors.grey.withValues(alpha: 0.8),
-                              strokeWidth: 3,
-                              isDotted: true,
-                            );
-                          }).toList(),
+                                final polyline =
+                                    routeProvider.routePolylines[route.routeId];
+                                final routeColor = routeProvider
+                                    .routeColorForSalesman(route.salesmanId);
+                                return Polyline(
+                                  points:
+                                      polyline ??
+                                      [
+                                        LatLng(
+                                          route.first.lat,
+                                          route.first.lon,
+                                        ),
+                                      ],
+                                  color: routeColor.withValues(alpha: 0.62),
+                                  strokeWidth: 3,
+                                  isDotted: true,
+                                );
+                              })
+                              .toList(),
                         ),
 
                         // Markers
                         MarkerLayer(
                           markers: routeProvider.routes
-                              .expand((route) => [
+                              .expand(
+                                (route) => [
+                                  Marker(
+                                    point: LatLng(
+                                      route.first.lat,
+                                      route.first.lon,
+                                    ),
+                                    width: 180,
+                                    height: 110,
+                                    rotate: true,
+                                    child: _buildSalesmanMarker(
+                                      route,
+                                      route.first,
+                                      isFirstCall: true,
+                                    ),
+                                  ),
+                                  if (route.hasLastCall)
                                     Marker(
-                                      point:
-                                          LatLng(route.first.lat, route.first.lon),
+                                      point: LatLng(
+                                        route.last.lat,
+                                        route.last.lon,
+                                      ),
                                       width: 180,
                                       height: 110,
                                       rotate: true,
                                       child: _buildSalesmanMarker(
-                                          route, route.first,
-                                          isFirstCall: true),
-                                    ),
-                                    if (route.hasLastCall)
-                                      Marker(
-                                        point: LatLng(route.last.lat, route.last.lon),
-                                        width: 180,
-                                        height: 110,
-                                        rotate: true,
-                                        child: _buildSalesmanMarker(route, route.last,
-                                            isFirstCall: false),
+                                        route,
+                                        route.last,
+                                        isFirstCall: false,
                                       ),
-                                  ])
+                                    ),
+                                  ...route.sortedCheckpoints.map(
+                                    (checkpoint) => Marker(
+                                      point: LatLng(
+                                        checkpoint.lat,
+                                        checkpoint.lon,
+                                      ),
+                                      width: 24,
+                                      height: 24,
+                                      rotate: true,
+                                      child: _buildCheckpointMarker(
+                                        context,
+                                        route,
+                                        checkpoint,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              )
                               .toList(),
                         ),
                       ],
@@ -300,7 +393,9 @@ class _SupervisorDashboardState extends State<SupervisorDashboard> {
                       right: 12,
                       child: Container(
                         padding: const EdgeInsets.symmetric(
-                            horizontal: 10, vertical: 8),
+                          horizontal: 10,
+                          vertical: 8,
+                        ),
                         decoration: BoxDecoration(
                           color: Colors.white.withValues(alpha: 0.9),
                           borderRadius: BorderRadius.circular(10),
@@ -315,9 +410,17 @@ class _SupervisorDashboardState extends State<SupervisorDashboard> {
                           mainAxisSize: MainAxisSize.min,
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            _LegendItem(color: Colors.green, label: 'First Call'),
+                            _LegendItem(
+                              color: Colors.green,
+                              label: 'First Call',
+                            ),
                             SizedBox(height: 6),
                             _LegendItem(color: Colors.red, label: 'Last Call'),
+                            SizedBox(height: 6),
+                            _LegendItem(
+                              color: Colors.blueGrey,
+                              label: 'Checkpoint (tap for time)',
+                            ),
                             SizedBox(height: 6),
                             _LegendItem(
                               color: Colors.grey,
@@ -359,25 +462,17 @@ class _LegendItem extends StatelessWidget {
             ? SizedBox(
                 width: 24,
                 height: 12,
-                child: CustomPaint(
-                  painter: _DashPainter(color: color),
-                ),
+                child: CustomPaint(painter: _DashPainter(color: color)),
               )
             : Container(
                 width: 12,
                 height: 12,
-                decoration: BoxDecoration(
-                  color: color,
-                  shape: BoxShape.circle,
-                ),
+                decoration: BoxDecoration(color: color, shape: BoxShape.circle),
               ),
         const SizedBox(width: 8),
         Text(
           label,
-          style: const TextStyle(
-            fontSize: 12,
-            fontWeight: FontWeight.w600,
-          ),
+          style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
         ),
       ],
     );

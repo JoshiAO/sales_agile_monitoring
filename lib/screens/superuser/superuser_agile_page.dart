@@ -1,11 +1,18 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter/foundation.dart';
+import 'package:android_intent_plus/android_intent.dart';
 import 'package:intl/intl.dart';
 import 'package:compact_sales_monitoring/models/agile_model.dart';
 import 'package:compact_sales_monitoring/models/user_model.dart';
+import 'package:compact_sales_monitoring/services/agile_export_service.dart';
 import 'package:compact_sales_monitoring/services/firestore_service.dart';
 import 'package:compact_sales_monitoring/widgets/date_selector_widget.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 enum _SuperuserAgileViewMode { wide, compact }
+
+enum _AgileExportChoice { selectedDate, dateRange }
 
 class SuperuserAgilePage extends StatefulWidget {
   const SuperuserAgilePage({super.key});
@@ -16,10 +23,12 @@ class SuperuserAgilePage extends StatefulWidget {
 
 class _SuperuserAgilePageState extends State<SuperuserAgilePage> {
   final FirestoreService _firestoreService = FirestoreService();
+  final AgileExportService _agileExportService = AgileExportService();
 
   late DateTime _selectedDate;
   late Future<_SuperuserAgileData> _pageFuture;
   _SuperuserAgileViewMode _viewMode = _SuperuserAgileViewMode.wide;
+  bool _isExporting = false;
 
   @override
   void initState() {
@@ -39,7 +48,9 @@ class _SuperuserAgilePageState extends State<SuperuserAgilePage> {
     ]);
 
     final supervisors = (results[0] as List<AppUser>).toList()
-      ..sort((left, right) => _displayName(left).compareTo(_displayName(right)));
+      ..sort(
+        (left, right) => _displayName(left).compareTo(_displayName(right)),
+      );
     final salesmen = results[1] as List<AppUser>;
     final targetsBySalesman = results[2] as Map<String, AgileTarget>;
     final submissionsBySalesman = results[3] as Map<String, AgileSubmission>;
@@ -54,7 +65,9 @@ class _SuperuserAgilePageState extends State<SuperuserAgilePage> {
     }
 
     for (final team in salesmenBySupervisor.values) {
-      team.sort((left, right) => _displayName(left).compareTo(_displayName(right)));
+      team.sort(
+        (left, right) => _displayName(left).compareTo(_displayName(right)),
+      );
     }
 
     final summaries = supervisors
@@ -94,12 +107,204 @@ class _SuperuserAgilePageState extends State<SuperuserAgilePage> {
     });
   }
 
+  Future<DateTimeRange?> _pickExportRange() async {
+    final choice = await showDialog<_AgileExportChoice>(
+      context: context,
+      builder: (dialogContext) => SimpleDialog(
+        title: const Text('Export Agile Data'),
+        children: [
+          SimpleDialogOption(
+            onPressed: () => Navigator.of(
+              dialogContext,
+            ).pop(_AgileExportChoice.selectedDate),
+            child: const Text('Present Date'),
+          ),
+          SimpleDialogOption(
+            onPressed: () =>
+                Navigator.of(dialogContext).pop(_AgileExportChoice.dateRange),
+            child: const Text('Specific Date Range'),
+          ),
+        ],
+      ),
+    );
+
+    if (choice == null) return null;
+    if (choice == _AgileExportChoice.selectedDate) {
+      return DateTimeRange(start: _selectedDate, end: _selectedDate);
+    }
+    if (!mounted) return null;
+
+    final now = DateTime.now();
+    return showDateRangePicker(
+      context: context,
+      firstDate: DateTime(now.year - 5),
+      lastDate: now,
+      initialDateRange: DateTimeRange(start: _selectedDate, end: _selectedDate),
+      saveText: 'Export',
+    );
+  }
+
+  Future<void> _exportAgileZip() async {
+    if (_isExporting) return;
+
+    final range = await _pickExportRange();
+    if (range == null || !mounted) return;
+
+    setState(() => _isExporting = true);
+    try {
+      final result = await _agileExportService.exportSuperuserAgileZip(
+        startDate: range.start,
+        endDate: range.end,
+      );
+
+      if (!mounted) return;
+      await _showExportSuccessDialog(
+        title: 'ZIP Export Complete',
+        fileName: result.fileName,
+        outputPath: result.outputPath,
+        rowCount: result.rowCount,
+      );
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Export failed: $error')));
+    } finally {
+      if (mounted) {
+        setState(() => _isExporting = false);
+      }
+    }
+  }
+
+  Future<void> _showExportSuccessDialog({
+    required String title,
+    required String fileName,
+    required String outputPath,
+    required int rowCount,
+  }) async {
+    final normalizedOutputPath = outputPath.replaceAll('\\', '/');
+    final separatorIndex = normalizedOutputPath.lastIndexOf('/');
+    final normalizedFolderPath = separatorIndex > 0
+        ? normalizedOutputPath.substring(0, separatorIndex)
+        : normalizedOutputPath;
+
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: Text(title),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('Rows exported: $rowCount'),
+              const SizedBox(height: 8),
+              Text('File: $fileName'),
+              const SizedBox(height: 8),
+              const Text(
+                'Saved to:',
+                style: TextStyle(fontWeight: FontWeight.w700),
+              ),
+              const SizedBox(height: 4),
+              SelectableText(outputPath),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () async {
+                await Clipboard.setData(ClipboardData(text: outputPath));
+                if (!dialogContext.mounted) return;
+                ScaffoldMessenger.of(
+                  dialogContext,
+                ).showSnackBar(const SnackBar(content: Text('Path copied')));
+              },
+              child: const Text('Copy Path'),
+            ),
+            TextButton(
+              onPressed: () =>
+                  _openExportFolder(dialogContext, normalizedFolderPath),
+              child: const Text('Open Folder'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(dialogContext).pop(),
+              child: const Text('Close'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  Future<void> _openExportFolder(
+    BuildContext dialogContext,
+    String folderPath,
+  ) async {
+    final normalized = folderPath.replaceAll('\\', '/');
+
+    if (defaultTargetPlatform == TargetPlatform.android) {
+      try {
+        const intent = AndroidIntent(
+          action: 'android.intent.action.VIEW_DOWNLOADS',
+        );
+        await intent.launch();
+        return;
+      } catch (_) {
+        // Fallback to URL launcher below.
+      }
+    }
+
+    Uri? uri;
+    if (defaultTargetPlatform == TargetPlatform.windows ||
+        defaultTargetPlatform == TargetPlatform.android ||
+        defaultTargetPlatform == TargetPlatform.macOS ||
+        defaultTargetPlatform == TargetPlatform.linux) {
+      uri = Uri.file(normalized);
+    }
+
+    if (uri == null) {
+      if (!dialogContext.mounted) return;
+      ScaffoldMessenger.of(dialogContext).showSnackBar(
+        const SnackBar(
+          content: Text('Open folder is not supported on this platform.'),
+        ),
+      );
+      return;
+    }
+
+    final opened = await launchUrl(uri, mode: LaunchMode.externalApplication);
+    if (!opened && dialogContext.mounted) {
+      ScaffoldMessenger.of(dialogContext).showSnackBar(
+        const SnackBar(content: Text('Unable to open folder. Try Copy Path.')),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final currency = NumberFormat.currency(symbol: '', decimalDigits: 2);
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Agile')),
+      appBar: AppBar(
+        title: const Text('Agile'),
+        actions: [
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 8),
+            child: Center(
+              child: OutlinedButton.icon(
+                onPressed: _isExporting ? null : _exportAgileZip,
+                icon: _isExporting
+                    ? const SizedBox(
+                        width: 14,
+                        height: 14,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.file_download_outlined, size: 18),
+                label: const Text('Export'),
+              ),
+            ),
+          ),
+        ],
+      ),
       body: FutureBuilder<_SuperuserAgileData>(
         future: _pageFuture,
         builder: (context, snapshot) {
@@ -116,7 +321,10 @@ class _SuperuserAgilePageState extends State<SuperuserAgilePage> {
                   children: [
                     const Text(
                       'Unable to load superuser agile data.',
-                      style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w600,
+                      ),
                     ),
                     const SizedBox(height: 8),
                     Text(
@@ -125,7 +333,10 @@ class _SuperuserAgilePageState extends State<SuperuserAgilePage> {
                       style: TextStyle(color: Colors.grey.shade700),
                     ),
                     const SizedBox(height: 16),
-                    FilledButton(onPressed: _refresh, child: const Text('Retry')),
+                    FilledButton(
+                      onPressed: _refresh,
+                      child: const Text('Retry'),
+                    ),
                   ],
                 ),
               ),
@@ -137,11 +348,18 @@ class _SuperuserAgilePageState extends State<SuperuserAgilePage> {
 
           final overallProductive = data.summaries
               .expand((summary) => summary.team)
-              .map((salesman) => data.submissionsBySalesman[salesman.uid]?.productiveCalls ?? 0)
+              .map(
+                (salesman) =>
+                    data.submissionsBySalesman[salesman.uid]?.productiveCalls ??
+                    0,
+              )
               .fold<int>(0, (sum, value) => sum + value);
           final overallSale = data.summaries
               .expand((summary) => summary.team)
-              .map((salesman) => data.submissionsBySalesman[salesman.uid]?.sttActual ?? 0.0)
+              .map(
+                (salesman) =>
+                    data.submissionsBySalesman[salesman.uid]?.sttActual ?? 0.0,
+              )
               .fold<double>(0.0, (sum, value) => sum + value);
 
           if (data.summaries.isEmpty) {
@@ -154,10 +372,7 @@ class _SuperuserAgilePageState extends State<SuperuserAgilePage> {
                   SizedBox(height: 120),
                   Icon(Icons.supervisor_account_outlined, size: 48),
                   SizedBox(height: 16),
-                  Text(
-                    'No supervisors found.',
-                    textAlign: TextAlign.center,
-                  ),
+                  Text('No supervisors found.', textAlign: TextAlign.center),
                 ],
               ),
             );
@@ -190,7 +405,9 @@ class _SuperuserAgilePageState extends State<SuperuserAgilePage> {
                                 children: [
                                   Text(
                                     'Supervisor Agile Overview',
-                                    style: Theme.of(context).textTheme.titleLarge,
+                                    style: Theme.of(
+                                      context,
+                                    ).textTheme.titleLarge,
                                   ),
                                   const SizedBox(height: 4),
                                   Text(
@@ -257,16 +474,36 @@ class _SuperuserAgilePageState extends State<SuperuserAgilePage> {
 
                 final summary = filtered[index - 1];
                 final teamProductiveTarget = summary.team
-                    .map((salesman) => data.targetsBySalesman[salesman.uid]?.productiveCallsTarget ?? 0)
+                    .map(
+                      (salesman) =>
+                          data
+                              .targetsBySalesman[salesman.uid]
+                              ?.productiveCallsTarget ??
+                          0,
+                    )
                     .fold<int>(0, (sum, value) => sum + value);
                 final teamProductiveActual = summary.team
-                    .map((salesman) => data.submissionsBySalesman[salesman.uid]?.productiveCalls ?? 0)
+                    .map(
+                      (salesman) =>
+                          data
+                              .submissionsBySalesman[salesman.uid]
+                              ?.productiveCalls ??
+                          0,
+                    )
                     .fold<int>(0, (sum, value) => sum + value);
                 final teamSttTarget = summary.team
-                    .map((salesman) => data.targetsBySalesman[salesman.uid]?.sttTarget ?? 0.0)
+                    .map(
+                      (salesman) =>
+                          data.targetsBySalesman[salesman.uid]?.sttTarget ??
+                          0.0,
+                    )
                     .fold<double>(0.0, (sum, value) => sum + value);
                 final teamSttActual = summary.team
-                    .map((salesman) => data.submissionsBySalesman[salesman.uid]?.sttActual ?? 0.0)
+                    .map(
+                      (salesman) =>
+                          data.submissionsBySalesman[salesman.uid]?.sttActual ??
+                          0.0,
+                    )
                     .fold<double>(0.0, (sum, value) => sum + value);
 
                 return _SupervisorAggregateCard(
@@ -358,16 +595,15 @@ class _SupervisorAggregateCard extends StatelessWidget {
                     children: [
                       Text(
                         _displayName(summary.supervisor),
-                        style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                              fontWeight: FontWeight.w700,
-                            ),
+                        style: Theme.of(context).textTheme.titleMedium
+                            ?.copyWith(fontWeight: FontWeight.w700),
                       ),
                       const SizedBox(height: 4),
                       Text(
                         summary.supervisor.email,
                         style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                              color: Colors.grey.shade700,
-                            ),
+                          color: Colors.grey.shade700,
+                        ),
                       ),
                     ],
                   ),
@@ -395,7 +631,8 @@ class _SupervisorAggregateCard extends StatelessWidget {
                       icon: Icons.payments_outlined,
                       iconColor: Colors.teal.shade700,
                       label: 'STT Target / Actual',
-                      value: '${currency.format(sttTarget)} / ${currency.format(sttActual)}',
+                      value:
+                          '${currency.format(sttTarget)} / ${currency.format(sttActual)}',
                       indexValue: sttIndex,
                     ),
                   ),
@@ -475,8 +712,9 @@ class _SalesmanPerformancePreviewPage extends StatelessWidget {
           final sttActual = submission?.sttActual ?? 0.0;
           final productiveTarget = target?.productiveCallsTarget ?? 0;
           final sttTarget = target?.sttTarget ?? 0.0;
-          final productiveIndex =
-              productiveTarget == 0 ? 0.0 : productiveActual / productiveTarget;
+          final productiveIndex = productiveTarget == 0
+              ? 0.0
+              : productiveActual / productiveTarget;
           final sttIndex = sttTarget == 0 ? 0.0 : sttActual / sttTarget;
 
           return Card(
@@ -495,16 +733,14 @@ class _SalesmanPerformancePreviewPage extends StatelessWidget {
                           children: [
                             Text(
                               _displayName(salesman),
-                              style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                                    fontWeight: FontWeight.w700,
-                                  ),
+                              style: Theme.of(context).textTheme.titleMedium
+                                  ?.copyWith(fontWeight: FontWeight.w700),
                             ),
                             const SizedBox(height: 4),
                             Text(
                               salesman.email,
-                              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                                    color: Colors.grey.shade700,
-                                  ),
+                              style: Theme.of(context).textTheme.bodySmall
+                                  ?.copyWith(color: Colors.grey.shade700),
                             ),
                           ],
                         ),
@@ -531,7 +767,8 @@ class _SalesmanPerformancePreviewPage extends StatelessWidget {
                           icon: Icons.payments_outlined,
                           iconColor: Colors.teal.shade700,
                           label: 'STT Target / Actual',
-                          value: '${currency.format(sttTarget)} / ${currency.format(sttActual)}',
+                          value:
+                              '${currency.format(sttTarget)} / ${currency.format(sttActual)}',
                           indexValue: sttIndex,
                         ),
                       ),
@@ -551,10 +788,7 @@ class _AgileViewToggle extends StatelessWidget {
   final _SuperuserAgileViewMode mode;
   final ValueChanged<_SuperuserAgileViewMode> onChanged;
 
-  const _AgileViewToggle({
-    required this.mode,
-    required this.onChanged,
-  });
+  const _AgileViewToggle({required this.mode, required this.onChanged});
 
   @override
   Widget build(BuildContext context) {
@@ -641,16 +875,13 @@ class _SummaryMetricCard extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
-                    label,
-                    style: Theme.of(context).textTheme.bodySmall,
-                  ),
+                  Text(label, style: Theme.of(context).textTheme.bodySmall),
                   const SizedBox(height: 2),
                   Text(
                     value,
                     style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                          fontWeight: FontWeight.w700,
-                        ),
+                      fontWeight: FontWeight.w700,
+                    ),
                   ),
                 ],
               ),
@@ -705,17 +936,17 @@ class _MetricWithIndexBox extends StatelessWidget {
             const SizedBox(height: 4),
             Text(
               value,
-              style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.w700,
-                  ),
+              style: Theme.of(
+                context,
+              ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
             ),
             const SizedBox(height: 2),
             Text(
               'Index ${indexValue.toStringAsFixed(2)}x • $percent%',
               style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: Colors.blueGrey.shade700,
-                    fontWeight: FontWeight.w600,
-                  ),
+                color: Colors.blueGrey.shade700,
+                fontWeight: FontWeight.w600,
+              ),
             ),
           ],
         ),
@@ -756,9 +987,9 @@ class _CompactIndexIcon extends StatelessWidget {
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      fontWeight: FontWeight.w700,
-                      color: Colors.blueGrey.shade700,
-                    ),
+                  fontWeight: FontWeight.w700,
+                  color: Colors.blueGrey.shade700,
+                ),
               ),
             ),
           ],
@@ -810,8 +1041,5 @@ class _SupervisorAgileSummary {
   final AppUser supervisor;
   final List<AppUser> team;
 
-  const _SupervisorAgileSummary({
-    required this.supervisor,
-    required this.team,
-  });
+  const _SupervisorAgileSummary({required this.supervisor, required this.team});
 }
