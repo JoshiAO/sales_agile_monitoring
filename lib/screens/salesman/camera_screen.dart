@@ -25,6 +25,7 @@ class _CameraScreenState extends State<CameraScreen> {
   bool _isInitializing = true;
   bool _isDetecting = false;
   bool _isCapturing = false;
+  bool _isFaceDetected = false;
   bool _isFaceAligned = false;
   String _feedbackText = 'Center your face';
 
@@ -111,6 +112,7 @@ class _CameraScreenState extends State<CameraScreen> {
 
       if (faces.isEmpty) {
         setState(() {
+          _isFaceDetected = false;
           _isFaceAligned = false;
           _feedbackText = 'Center your face';
         });
@@ -131,12 +133,14 @@ class _CameraScreenState extends State<CameraScreen> {
       );
 
       setState(() {
+        _isFaceDetected = true;
         _isFaceAligned = feedback.isAligned;
         _feedbackText = feedback.message;
       });
     } catch (_) {
       if (!mounted) return;
       setState(() {
+        _isFaceDetected = false;
         _isFaceAligned = false;
         _feedbackText = 'Center your face';
       });
@@ -149,28 +153,104 @@ class _CameraScreenState extends State<CameraScreen> {
     final controller = _cameraController;
     if (controller == null) return null;
 
-    final allBytes = WriteBuffer();
-    for (final plane in image.planes) {
-      allBytes.putUint8List(plane.bytes);
-    }
-    final bytes = allBytes.done().buffer.asUint8List();
-
     final rotation = _rotationFromCamera(controller);
     if (rotation == null) {
       return null;
     }
 
-    final format = InputImageFormatValue.fromRawValue(image.format.raw);
-    if (format == null) return null;
+    final converted = _convertCameraImage(image);
+    if (converted == null) return null;
 
     final metadata = InputImageMetadata(
       size: Size(image.width.toDouble(), image.height.toDouble()),
       rotation: rotation,
+      format: converted.format,
+      bytesPerRow: converted.bytesPerRow,
+    );
+
+    return InputImage.fromBytes(bytes: converted.bytes, metadata: metadata);
+  }
+
+  _InputImageBytes? _convertCameraImage(CameraImage image) {
+    if (Platform.isIOS) {
+      if (image.planes.isEmpty) return null;
+      return _InputImageBytes(
+        bytes: image.planes.first.bytes,
+        format: InputImageFormat.bgra8888,
+        bytesPerRow: image.planes.first.bytesPerRow,
+      );
+    }
+
+    // Android: prefer NV21. Some devices still deliver YUV_420_888, so convert.
+    if (image.planes.length == 1) {
+      return _InputImageBytes(
+        bytes: image.planes.first.bytes,
+        format: InputImageFormat.nv21,
+        bytesPerRow: image.width,
+      );
+    }
+
+    if (image.planes.length == 3) {
+      final nv21 = _convertYuv420ToNv21(image);
+      if (nv21 == null) return null;
+      return _InputImageBytes(
+        bytes: nv21,
+        format: InputImageFormat.nv21,
+        bytesPerRow: image.width,
+      );
+    }
+
+    final format = InputImageFormatValue.fromRawValue(image.format.raw);
+    if (format == null || image.planes.isEmpty) return null;
+    return _InputImageBytes(
+      bytes: image.planes.first.bytes,
       format: format,
       bytesPerRow: image.planes.first.bytesPerRow,
     );
+  }
 
-    return InputImage.fromBytes(bytes: bytes, metadata: metadata);
+  Uint8List? _convertYuv420ToNv21(CameraImage image) {
+    if (image.planes.length != 3) return null;
+
+    final width = image.width;
+    final height = image.height;
+    final ySize = width * height;
+    final uvSize = width * height ~/ 2;
+    final nv21 = Uint8List(ySize + uvSize);
+
+    final yPlane = image.planes[0];
+    final uPlane = image.planes[1];
+    final vPlane = image.planes[2];
+
+    var dstIndex = 0;
+    for (var row = 0; row < height; row++) {
+      final rowStart = row * yPlane.bytesPerRow;
+      for (var col = 0; col < width; col++) {
+        nv21[dstIndex++] = yPlane.bytes[rowStart + col];
+      }
+    }
+
+    final uRowStride = uPlane.bytesPerRow;
+    final vRowStride = vPlane.bytesPerRow;
+    final uPixelStride = uPlane.bytesPerPixel ?? 1;
+    final vPixelStride = vPlane.bytesPerPixel ?? 1;
+
+    var uvIndex = ySize;
+    for (var row = 0; row < height ~/ 2; row++) {
+      final uRowStart = row * uRowStride;
+      final vRowStart = row * vRowStride;
+      for (var col = 0; col < width ~/ 2; col++) {
+        final uIndex = uRowStart + col * uPixelStride;
+        final vIndex = vRowStart + col * vPixelStride;
+        if (uIndex >= uPlane.bytes.length || vIndex >= vPlane.bytes.length) {
+          return null;
+        }
+        nv21[uvIndex++] = vPlane.bytes[vIndex];
+        nv21[uvIndex++] = uPlane.bytes[uIndex];
+      }
+    }
+
+    return nv21;
   }
 
   InputImageRotation? _rotationFromCamera(CameraController controller) {
@@ -254,7 +334,12 @@ class _CameraScreenState extends State<CameraScreen> {
               fit: StackFit.expand,
               children: [
                 CameraPreview(controller),
-                CustomPaint(painter: const FaceOverlayPainter()),
+                CustomPaint(
+                  painter: FaceOverlayPainter(
+                    isFaceDetected: _isFaceDetected,
+                    isFaceAligned: _isFaceAligned,
+                  ),
+                ),
                 Positioned(
                   top: 24,
                   left: 16,
@@ -315,4 +400,16 @@ class _CameraScreenState extends State<CameraScreen> {
             ),
     );
   }
+}
+
+class _InputImageBytes {
+  final Uint8List bytes;
+  final InputImageFormat format;
+  final int bytesPerRow;
+
+  const _InputImageBytes({
+    required this.bytes,
+    required this.format,
+    required this.bytesPerRow,
+  });
 }

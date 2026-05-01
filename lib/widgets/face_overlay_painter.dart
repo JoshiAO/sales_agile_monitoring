@@ -1,13 +1,22 @@
 import 'package:flutter/material.dart';
 
 class FaceOverlayPainter extends CustomPainter {
-  const FaceOverlayPainter();
+  final bool isFaceDetected;
+  final bool isFaceAligned;
+
+  const FaceOverlayPainter({
+    required this.isFaceDetected,
+    required this.isFaceAligned,
+  });
 
   @override
   void paint(Canvas canvas, Size size) {
     final overlayPaint = Paint()..color = Colors.black.withValues(alpha: 0.55);
+    final ringColor = !isFaceDetected
+        ? Colors.white
+        : (isFaceAligned ? Colors.greenAccent.shade400 : Colors.amber.shade300);
     final borderPaint = Paint()
-      ..color = Colors.white
+      ..color = ringColor
       ..strokeWidth = 3
       ..style = PaintingStyle.stroke;
 
@@ -44,5 +53,8 @@ class FaceOverlayPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
+  bool shouldRepaint(covariant FaceOverlayPainter oldDelegate) {
+    return oldDelegate.isFaceDetected != isFaceDetected ||
+        oldDelegate.isFaceAligned != isFaceAligned;
+  }
 }
