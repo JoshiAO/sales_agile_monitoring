@@ -16,7 +16,7 @@ class FaceDetectionService {
           performanceMode: FaceDetectorMode.fast,
           enableLandmarks: true,
           enableClassification: true,
-          minFaceSize: 0.12,
+          minFaceSize: 0.08,
         ),
       );
 

@@ -1,8 +1,9 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:camera/camera.dart';
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:google_mlkit_face_detection/google_mlkit_face_detection.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:compact_sales_monitoring/services/face_detection_service.dart';
@@ -71,7 +72,9 @@ class _CameraScreenState extends State<CameraScreen> {
         selectedCamera,
         ResolutionPreset.medium,
         enableAudio: false,
-        imageFormatGroup: ImageFormatGroup.yuv420,
+        imageFormatGroup: Platform.isAndroid
+            ? ImageFormatGroup.nv21
+            : ImageFormatGroup.bgra8888,
       );
 
       await controller.initialize();
@@ -98,10 +101,7 @@ class _CameraScreenState extends State<CameraScreen> {
 
     _isDetecting = true;
     try {
-      final inputImage = _toInputImage(
-        image,
-        _cameraController!.description.sensorOrientation,
-      );
+      final inputImage = _toInputImage(image);
       if (inputImage == null) {
         return;
       }
@@ -145,8 +145,9 @@ class _CameraScreenState extends State<CameraScreen> {
     }
   }
 
-  InputImage? _toInputImage(CameraImage image, int sensorOrientation) {
-    if (_cameraController == null) return null;
+  InputImage? _toInputImage(CameraImage image) {
+    final controller = _cameraController;
+    if (controller == null) return null;
 
     final allBytes = WriteBuffer();
     for (final plane in image.planes) {
@@ -154,7 +155,11 @@ class _CameraScreenState extends State<CameraScreen> {
     }
     final bytes = allBytes.done().buffer.asUint8List();
 
-    final rotation = _rotationFromSensor(sensorOrientation);
+    final rotation = _rotationFromCamera(controller);
+    if (rotation == null) {
+      return null;
+    }
+
     final format = InputImageFormatValue.fromRawValue(image.format.raw);
     if (format == null) return null;
 
@@ -168,18 +173,32 @@ class _CameraScreenState extends State<CameraScreen> {
     return InputImage.fromBytes(bytes: bytes, metadata: metadata);
   }
 
-  InputImageRotation _rotationFromSensor(int sensorOrientation) {
-    switch (sensorOrientation) {
-      case 90:
-        return InputImageRotation.rotation90deg;
-      case 180:
-        return InputImageRotation.rotation180deg;
-      case 270:
-        return InputImageRotation.rotation270deg;
-      case 0:
-      default:
-        return InputImageRotation.rotation0deg;
+  InputImageRotation? _rotationFromCamera(CameraController controller) {
+    final camera = controller.description;
+    final sensorOrientation = camera.sensorOrientation;
+
+    var deviceRotationDegrees = 0;
+    switch (controller.value.deviceOrientation) {
+      case DeviceOrientation.portraitUp:
+        deviceRotationDegrees = 0;
+        break;
+      case DeviceOrientation.landscapeLeft:
+        deviceRotationDegrees = 90;
+        break;
+      case DeviceOrientation.portraitDown:
+        deviceRotationDegrees = 180;
+        break;
+      case DeviceOrientation.landscapeRight:
+        deviceRotationDegrees = 270;
+        break;
     }
+
+    final rotationCompensation =
+        camera.lensDirection == CameraLensDirection.front
+        ? (sensorOrientation + deviceRotationDegrees) % 360
+        : (sensorOrientation - deviceRotationDegrees + 360) % 360;
+
+    return InputImageRotationValue.fromRawValue(rotationCompensation);
   }
 
   Future<void> _capture() async {
