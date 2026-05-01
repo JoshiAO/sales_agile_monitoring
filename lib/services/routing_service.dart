@@ -13,7 +13,17 @@ class RoutingService {
 
   RoutingService._internal();
 
-  final Dio _dio = Dio();
+  final Dio _dio = Dio(
+    BaseOptions(
+      connectTimeout: const Duration(seconds: 15),
+      receiveTimeout: const Duration(seconds: 20),
+      sendTimeout: const Duration(seconds: 15),
+      headers: const {
+        'Accept': 'application/json',
+        'User-Agent': 'compact_sales_monitoring/1.0',
+      },
+    ),
+  );
 
   // Uses OpenRouteService when an API key is configured.
   // Falls back to OSRM for resilience.
@@ -27,86 +37,151 @@ class RoutingService {
       return waypoints;
     }
 
+    final dedupedWaypoints = <LatLng>[];
+    for (final point in waypoints) {
+      if (dedupedWaypoints.isEmpty) {
+        dedupedWaypoints.add(point);
+        continue;
+      }
+
+      final prev = dedupedWaypoints.last;
+      final isSamePoint =
+          (prev.latitude - point.latitude).abs() < 0.000001 &&
+          (prev.longitude - point.longitude).abs() < 0.000001;
+      if (!isSamePoint) {
+        dedupedWaypoints.add(point);
+      }
+    }
+
+    if (dedupedWaypoints.length < 2) {
+      return dedupedWaypoints;
+    }
+
     final orsKey = AppConstants.openRouteServiceApiKey.trim();
 
     if (orsKey.isNotEmpty && orsKey != 'YOUR_ORS_API_KEY_HERE') {
-      try {
-        final orsResponse = await _dio.post<Map<String, dynamic>>(
-          '${AppConstants.openRouteServiceBaseUrl}/v2/directions/driving-car/geojson',
-          options: Options(
-            headers: {
-              'Authorization': orsKey,
-              'Content-Type': 'application/json',
+      for (var attempt = 0; attempt < 2; attempt++) {
+        try {
+          final orsResponse = await _dio.post<Map<String, dynamic>>(
+            '${AppConstants.openRouteServiceBaseUrl}/v2/directions/driving-car/geojson',
+            options: Options(
+              headers: {
+                'Authorization': orsKey,
+                'Content-Type': 'application/json',
+              },
+            ),
+            data: {
+              'coordinates': dedupedWaypoints
+                  .map((point) => [point.longitude, point.latitude])
+                  .toList(),
             },
-          ),
-          data: {
-            'coordinates': waypoints
-                .map((point) => [point.longitude, point.latitude])
-                .toList(),
-          },
-        );
+          );
 
-        if (orsResponse.statusCode == 200 && orsResponse.data != null) {
-          final features = orsResponse.data!['features'] as List?;
-          if (features != null && features.isNotEmpty) {
-            final geometry =
-                features.first['geometry'] as Map<String, dynamic>?;
-            final coordinates = geometry?['coordinates'] as List?;
-            if (coordinates != null && coordinates.isNotEmpty) {
-              return coordinates
-                  .whereType<List>()
-                  .map(
-                    (coord) => LatLng(
-                      (coord[1] as num).toDouble(),
-                      (coord[0] as num).toDouble(),
-                    ),
-                  )
-                  .toList();
+          if (orsResponse.statusCode == 200 && orsResponse.data != null) {
+            final features = orsResponse.data!['features'] as List?;
+            if (features != null && features.isNotEmpty) {
+              final geometry =
+                  features.first['geometry'] as Map<String, dynamic>?;
+              final coordinates = geometry?['coordinates'] as List?;
+              if (coordinates != null && coordinates.isNotEmpty) {
+                return coordinates
+                    .whereType<List>()
+                    .map(
+                      (coord) => LatLng(
+                        (coord[1] as num).toDouble(),
+                        (coord[0] as num).toDouble(),
+                      ),
+                    )
+                    .toList();
+              }
             }
           }
+        } catch (e) {
+          developer.log(
+            'OpenRouteService failed (attempt ${attempt + 1}): $e',
+            name: 'RoutingService',
+          );
         }
-      } catch (e) {
-        developer.log('OpenRouteService failed: $e', name: 'RoutingService');
       }
     }
 
-    // OSRM fallback
-    try {
-      final coordinatesParam = waypoints
-          .map((point) => '${point.longitude},${point.latitude}')
-          .join(';');
-      final url =
-          'https://router.project-osrm.org/route/v1/driving/$coordinatesParam';
+    // OSRM-compatible fallback chain.
+    const osrmBackends = <String>[
+      'https://router.project-osrm.org',
+      'https://routing.openstreetmap.de/routed-car',
+    ];
 
-      final response = await _dio.get<Map<String, dynamic>>(
-        url,
-        queryParameters: {'overview': 'full', 'geometries': 'geojson'},
-      );
+    for (final backend in osrmBackends) {
+      for (var attempt = 0; attempt < 2; attempt++) {
+        try {
+          final route = await _fetchOsrmLikeRoute(
+            backendBaseUrl: backend,
+            waypoints: dedupedWaypoints,
+          );
+          if (route.isNotEmpty) {
+            return route;
+          }
+        } catch (e) {
+          developer.log(
+            'OSRM backend failed ($backend, attempt ${attempt + 1}): $e',
+            name: 'RoutingService',
+          );
+        }
+      }
+    }
 
-      if (response.statusCode == 200 && response.data != null) {
-        final data = response.data!;
-        final routes = data['routes'] as List?;
+    throw Exception('Routing error: all road routing backends failed.');
+  }
 
-        if (routes == null || routes.isEmpty) return [];
+  Future<List<LatLng>> _fetchOsrmLikeRoute({
+    required String backendBaseUrl,
+    required List<LatLng> waypoints,
+  }) async {
+    final coordinatesParam = waypoints
+        .map((point) => '${point.longitude},${point.latitude}')
+        .join(';');
+    final url = '$backendBaseUrl/route/v1/driving/$coordinatesParam';
 
-        final geometry = routes[0]['geometry'] as Map<String, dynamic>;
-        final coordinates = geometry['coordinates'] as List;
+    final response = await _dio.get<Map<String, dynamic>>(
+      url,
+      queryParameters: {
+        'overview': 'full',
+        'geometries': 'geojson',
+        'alternatives': 'false',
+        'steps': 'false',
+      },
+    );
 
-        return coordinates
-            .cast<List>()
-            .map(
-              (coord) => LatLng(
-                (coord[1] as num).toDouble(),
-                (coord[0] as num).toDouble(),
-              ),
-            )
-            .toList();
+    if (response.statusCode == 200 && response.data != null) {
+      final data = response.data!;
+      final code = data['code'] as String?;
+      if (code != null && code != 'Ok') {
+        return [];
       }
 
-      throw Exception('Failed to fetch route: ${response.statusCode}');
-    } catch (e) {
-      throw Exception('Routing error: $e');
+      final routes = data['routes'] as List?;
+      if (routes == null || routes.isEmpty) {
+        return [];
+      }
+
+      final geometry = routes[0]['geometry'] as Map<String, dynamic>?;
+      final coordinates = geometry?['coordinates'] as List?;
+      if (coordinates == null || coordinates.isEmpty) {
+        return [];
+      }
+
+      return coordinates
+          .cast<List>()
+          .map(
+            (coord) => LatLng(
+              (coord[1] as num).toDouble(),
+              (coord[0] as num).toDouble(),
+            ),
+          )
+          .toList();
     }
+
+    throw Exception('Failed to fetch route: ${response.statusCode}');
   }
 
   Future<double> getDistance(LatLng start, LatLng end) async {

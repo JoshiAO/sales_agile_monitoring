@@ -40,6 +40,7 @@ class RouteProvider extends ChangeNotifier {
 
     try {
       _routes = await _firestoreService.getRoutesByDate(supervisorId, date);
+      await _migrateLegacyCachedPolylineFlags();
       await _generatePolylines();
     } catch (e) {
       _error = e.toString();
@@ -56,6 +57,7 @@ class RouteProvider extends ChangeNotifier {
 
     try {
       _routes = await _firestoreService.getAllRoutesByDate(date);
+      await _migrateLegacyCachedPolylineFlags();
       await _generatePolylines();
     } catch (e) {
       _error = e.toString();
@@ -65,7 +67,29 @@ class RouteProvider extends ChangeNotifier {
     }
   }
 
-  Future<void> _generatePolylines() async {
+  Future<RouteRealignResult> realignRoutesToRoads() async {
+    _isLoading = true;
+    _error = null;
+    notifyListeners();
+
+    try {
+      await _generatePolylines(forceRoadRefresh: true);
+      final fallbackRoutes = _approximatePolylines.length;
+      return RouteRealignResult(
+        totalRoutes: _routes.length,
+        roadAlignedRoutes: _routes.length - fallbackRoutes,
+        fallbackRoutes: fallbackRoutes,
+      );
+    } catch (e) {
+      _error = e.toString();
+      rethrow;
+    } finally {
+      _isLoading = false;
+      notifyListeners();
+    }
+  }
+
+  Future<void> _generatePolylines({bool forceRoadRefresh = false}) async {
     _routePolylines.clear();
     _approximatePolylines.clear();
 
@@ -83,11 +107,19 @@ class RouteProvider extends ChangeNotifier {
         continue;
       }
 
+      final cachedPolyline = route.cachedPolyline
+          .map((p) => LatLng(p.lat, p.lon))
+          .toList();
+
       // --- Cache-first: use stored polyline if available ---
-      if (route.cachedPolyline.isNotEmpty && _isCacheFresh(route)) {
-        _routePolylines[route.routeId] = route.cachedPolyline
-            .map((p) => LatLng(p.lat, p.lon))
-            .toList();
+      if (!forceRoadRefresh &&
+          cachedPolyline.isNotEmpty &&
+          _isCacheFresh(route)) {
+        _routePolylines[route.routeId] = cachedPolyline;
+        if (route.cachedPolylineApproximate ||
+            _matchesAnchorPolyline(cachedPolyline, anchors)) {
+          _approximatePolylines.add(route.routeId);
+        }
         continue;
       }
 
@@ -125,15 +157,46 @@ class RouteProvider extends ChangeNotifier {
       }
 
       if (polyline.length < 2) {
-        _routePolylines[route.routeId] = anchors;
-        _approximatePolylines.add(route.routeId);
+        if (cachedPolyline.isNotEmpty) {
+          _routePolylines[route.routeId] = cachedPolyline;
+          if (route.cachedPolylineApproximate ||
+              _matchesAnchorPolyline(cachedPolyline, anchors)) {
+            _approximatePolylines.add(route.routeId);
+          }
+        } else {
+          _routePolylines[route.routeId] = anchors;
+          _approximatePolylines.add(route.routeId);
+          _firestoreService
+              .savePolylineCache(
+                route.routeId,
+                _buildFallbackCachePoints(route),
+                isApproximate: true,
+              )
+              .catchError((_) {});
+        }
         continue;
       }
 
       _routePolylines[route.routeId] = polyline;
 
       if (hasApproximateSegment) {
-        _approximatePolylines.add(route.routeId);
+        if (cachedPolyline.isNotEmpty) {
+          _routePolylines[route.routeId] = cachedPolyline;
+          if (route.cachedPolylineApproximate ||
+              _matchesAnchorPolyline(cachedPolyline, anchors)) {
+            _approximatePolylines.add(route.routeId);
+          }
+        } else {
+          _routePolylines[route.routeId] = polyline;
+          _approximatePolylines.add(route.routeId);
+          _firestoreService
+              .savePolylineCache(
+                route.routeId,
+                _buildTimedCachePointsFromPolyline(polyline),
+                isApproximate: true,
+              )
+              .catchError((_) {});
+        }
       } else {
         // Persist only fully road-aware paths to avoid caching straight fallbacks.
         final cacheTime = DateTime.now();
@@ -147,9 +210,48 @@ class RouteProvider extends ChangeNotifier {
             )
             .toList();
         _firestoreService
-            .savePolylineCache(route.routeId, cachePoints)
+            .savePolylineCache(route.routeId, cachePoints, isApproximate: false)
             .catchError((_) {});
       }
+    }
+  }
+
+  Future<void> _migrateLegacyCachedPolylineFlags() async {
+    final migrationWrites = <Future<void>>[];
+
+    for (final route in _routes) {
+      if (route.cachedPolyline.isEmpty ||
+          route.hasCachedPolylineApproximateFlag) {
+        continue;
+      }
+
+      final anchors = <LatLng>[
+        if (route.hasFirstCall) LatLng(route.first.lat, route.first.lon),
+        ...route.sortedCheckpoints.map(
+          (checkpoint) => LatLng(checkpoint.lat, checkpoint.lon),
+        ),
+        if (route.hasLastCall) LatLng(route.last.lat, route.last.lon),
+      ];
+
+      final cachedPolyline = route.cachedPolyline
+          .map((p) => LatLng(p.lat, p.lon))
+          .toList();
+
+      final isApproximate = _matchesAnchorPolyline(cachedPolyline, anchors);
+
+      migrationWrites.add(
+        _firestoreService
+            .savePolylineCache(
+              route.routeId,
+              route.cachedPolyline,
+              isApproximate: isApproximate,
+            )
+            .catchError((_) {}),
+      );
+    }
+
+    if (migrationWrites.isNotEmpty) {
+      await Future.wait(migrationWrites);
     }
   }
 
@@ -176,6 +278,73 @@ class RouteProvider extends ChangeNotifier {
     return !cacheTime.isBefore(routeLatest);
   }
 
+  List<CachedPolylinePoint> _buildFallbackCachePoints(SalesRoute route) {
+    final points = <CachedPolylinePoint>[];
+
+    if (route.hasFirstCall) {
+      points.add(
+        CachedPolylinePoint(
+          lat: route.first.lat,
+          lon: route.first.lon,
+          timestamp: route.first.timestamp,
+        ),
+      );
+    }
+
+    for (final checkpoint in route.sortedCheckpoints) {
+      points.add(
+        CachedPolylinePoint(
+          lat: checkpoint.lat,
+          lon: checkpoint.lon,
+          timestamp: checkpoint.timestamp,
+        ),
+      );
+    }
+
+    if (route.hasLastCall) {
+      points.add(
+        CachedPolylinePoint(
+          lat: route.last.lat,
+          lon: route.last.lon,
+          timestamp: route.last.timestamp,
+        ),
+      );
+    }
+
+    return points;
+  }
+
+  List<CachedPolylinePoint> _buildTimedCachePointsFromPolyline(
+    List<LatLng> polyline,
+  ) {
+    final cacheTime = DateTime.now();
+    return polyline
+        .map(
+          (point) => CachedPolylinePoint(
+            lat: point.latitude,
+            lon: point.longitude,
+            timestamp: cacheTime,
+          ),
+        )
+        .toList();
+  }
+
+  bool _matchesAnchorPolyline(List<LatLng> polyline, List<LatLng> anchors) {
+    if (polyline.length != anchors.length) return false;
+
+    const epsilon = 0.000001;
+    for (var i = 0; i < anchors.length; i++) {
+      final cached = polyline[i];
+      final anchor = anchors[i];
+      if ((cached.latitude - anchor.latitude).abs() > epsilon ||
+          (cached.longitude - anchor.longitude).abs() > epsilon) {
+        return false;
+      }
+    }
+
+    return true;
+  }
+
   Color _colorFromSalesmanId(String salesmanId) {
     var hash = 0;
     for (final codeUnit in salesmanId.codeUnits) {
@@ -196,4 +365,16 @@ class RouteProvider extends ChangeNotifier {
     _routePolylines = {};
     notifyListeners();
   }
+}
+
+class RouteRealignResult {
+  final int totalRoutes;
+  final int roadAlignedRoutes;
+  final int fallbackRoutes;
+
+  const RouteRealignResult({
+    required this.totalRoutes,
+    required this.roadAlignedRoutes,
+    required this.fallbackRoutes,
+  });
 }

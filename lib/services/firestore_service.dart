@@ -224,8 +224,9 @@ class FirestoreService {
 
   Future<void> savePolylineCache(
     String routeId,
-    List<CachedPolylinePoint> points,
-  ) async {
+    List<CachedPolylinePoint> points, {
+    bool isApproximate = false,
+  }) async {
     final cacheTime = DateTime.now();
     await _firebaseService.firestore.collection('routes').doc(routeId).update({
       'cachedPolyline': points
@@ -237,6 +238,7 @@ class FirestoreService {
             ).toMap(),
           )
           .toList(),
+      'cachedPolylineApproximate': isApproximate,
     });
   }
 

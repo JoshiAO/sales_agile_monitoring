@@ -60,6 +60,27 @@ class _SuperUserDashboardState extends State<SuperUserDashboard> {
     _loadRoutes();
   }
 
+  Future<void> _realignRoutesToRoads() async {
+    final routeProvider = context.read<RouteProvider>();
+    try {
+      final result = await routeProvider.realignRoutesToRoads();
+      if (!mounted) return;
+
+      final message = result.fallbackRoutes == 0
+          ? 'All ${result.totalRoutes} routes are now road-aligned.'
+          : '${result.roadAlignedRoutes}/${result.totalRoutes} road-aligned. ${result.fallbackRoutes} still fallback.';
+
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(message)));
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Route realignment failed: $error')),
+      );
+    }
+  }
+
   Future<void> _showArchiveCompleteDialog(ArchiveResult result) async {
     final dateFolderLabel = result.dateFolders.length <= 3
         ? result.dateFolders.join(', ')
@@ -280,6 +301,30 @@ class _SuperUserDashboardState extends State<SuperUserDashboard> {
     );
   }
 
+  Widget _buildRouteStatusChip(SalesRoute route, RouteProvider routeProvider) {
+    return FutureBuilder<AppUser?>(
+      future: _getSalesmanDetails(route.salesmanId),
+      builder: (context, snapshot) {
+        final salesman = snapshot.data;
+        final trimmedName = salesman?.name?.trim() ?? '';
+        final salesmanLabel = trimmedName.isNotEmpty
+            ? trimmedName
+            : (salesman?.email.isNotEmpty == true
+                  ? salesman!.email
+                  : route.salesmanId);
+
+        final isFallback = routeProvider.isApproximate(route.routeId);
+        final lineColor = routeProvider.routeColorForSalesman(route.salesmanId);
+
+        return _RouteStatusChip(
+          salesmanLabel: salesmanLabel,
+          routeColor: lineColor,
+          isFallback: isFallback,
+        );
+      },
+    );
+  }
+
   @override
   void dispose() {
     _mapController.dispose();
@@ -293,6 +338,13 @@ class _SuperUserDashboardState extends State<SuperUserDashboard> {
         title: const Text('Map'),
         elevation: 0,
         actions: [
+          Consumer<RouteProvider>(
+            builder: (context, routeProvider, _) => IconButton(
+              onPressed: routeProvider.isLoading ? null : _realignRoutesToRoads,
+              tooltip: 'Re-align all routes to roads',
+              icon: const Icon(Icons.alt_route),
+            ),
+          ),
           IconButton(
             onPressed: _isArchiving ? null : _openArchivePicker,
             tooltip: 'Archive',
@@ -511,6 +563,56 @@ class _SuperUserDashboardState extends State<SuperUserDashboard> {
                     ),
                     Positioned(
                       top: 12,
+                      left: 12,
+                      child: Container(
+                        width: 240,
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 8,
+                        ),
+                        decoration: BoxDecoration(
+                          color: Colors.white.withValues(alpha: 0.92),
+                          borderRadius: BorderRadius.circular(10),
+                          boxShadow: [
+                            BoxShadow(
+                              blurRadius: 6,
+                              color: Colors.black.withValues(alpha: 0.2),
+                            ),
+                          ],
+                        ),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text(
+                              'Route Status',
+                              style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                            const SizedBox(height: 6),
+                            ConstrainedBox(
+                              constraints: const BoxConstraints(maxHeight: 180),
+                              child: SingleChildScrollView(
+                                child: Column(
+                                  children: routeProvider.routes
+                                      .map(
+                                        (route) => _buildRouteStatusChip(
+                                          route,
+                                          routeProvider,
+                                        ),
+                                      )
+                                      .toList(),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    Positioned(
+                      top: 12,
                       right: 12,
                       child: Container(
                         padding: const EdgeInsets.symmetric(
@@ -620,6 +722,70 @@ class _LegendItem extends StatelessWidget {
           style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
         ),
       ],
+    );
+  }
+}
+
+class _RouteStatusChip extends StatelessWidget {
+  final String salesmanLabel;
+  final Color routeColor;
+  final bool isFallback;
+
+  const _RouteStatusChip({
+    required this.salesmanLabel,
+    required this.routeColor,
+    required this.isFallback,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final statusColor = isFallback
+        ? Colors.orange.shade700
+        : Colors.green.shade700;
+    final bgColor = isFallback ? Colors.orange.shade50 : Colors.green.shade50;
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 6),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+        decoration: BoxDecoration(
+          color: bgColor,
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 10,
+              height: 10,
+              decoration: BoxDecoration(
+                color: routeColor,
+                shape: BoxShape.circle,
+              ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                salesmanLabel,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+            const SizedBox(width: 8),
+            Text(
+              isFallback ? 'Fallback' : 'Road',
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w700,
+                color: statusColor,
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

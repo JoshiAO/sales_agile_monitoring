@@ -94,6 +94,8 @@ class SalesRoute {
   final bool hasLastCall;
   final List<RouteCheckpoint> checkpoints;
   final List<CachedPolylinePoint> cachedPolyline;
+  final bool cachedPolylineApproximate;
+  final bool hasCachedPolylineApproximateFlag;
   final double? distance;
   final bool firstRetakeRequested;
   final bool firstRetakeApproved;
@@ -111,6 +113,8 @@ class SalesRoute {
     this.hasLastCall = true,
     this.checkpoints = const [],
     this.cachedPolyline = const [],
+    this.cachedPolylineApproximate = false,
+    this.hasCachedPolylineApproximateFlag = false,
     this.distance,
     this.firstRetakeRequested = false,
     this.firstRetakeApproved = false,
@@ -141,6 +145,11 @@ class SalesRoute {
           .whereType<Map<String, dynamic>>()
           .map(CachedPolylinePoint.fromMap)
           .toList(),
+      cachedPolylineApproximate:
+          data['cachedPolylineApproximate'] as bool? ?? false,
+      hasCachedPolylineApproximateFlag: data.containsKey(
+        'cachedPolylineApproximate',
+      ),
       distance: (data['distance'] as num?)?.toDouble(),
       firstRetakeRequested: data['firstRetakeRequested'] as bool? ?? false,
       firstRetakeApproved: data['firstRetakeApproved'] as bool? ?? false,
@@ -162,6 +171,7 @@ class SalesRoute {
           .map((checkpoint) => checkpoint.toMap())
           .toList(),
       'cachedPolyline': cachedPolyline.map((p) => p.toMap()).toList(),
+      'cachedPolylineApproximate': cachedPolylineApproximate,
       'distance': distance,
       'firstRetakeRequested': firstRetakeRequested,
       'firstRetakeApproved': firstRetakeApproved,
