@@ -54,7 +54,7 @@ class _LoginScreenState extends State<LoginScreen> {
               ),
               const SizedBox(height: 8),
               const Text(
-                'Multi-Role Dashboard',
+                'Created by: Joshua A. Ocampo',
                 style: TextStyle(
                   fontSize: 14,
                   color: Colors.grey,

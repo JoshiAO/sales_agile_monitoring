@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:compact_sales_monitoring/services/firebase_service.dart';
 import 'package:compact_sales_monitoring/providers/auth_provider.dart';
+import 'package:compact_sales_monitoring/providers/activation_provider.dart';
 import 'package:compact_sales_monitoring/providers/route_provider.dart';
 import 'package:compact_sales_monitoring/app_router.dart';
 import 'package:compact_sales_monitoring/screens/splash_screen.dart';
@@ -19,6 +20,7 @@ class MainApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MultiProvider(
       providers: [
+        ChangeNotifierProvider(create: (_) => ActivationProvider()),
         ChangeNotifierProvider(create: (_) => AuthProvider()),
         ChangeNotifierProvider(create: (_) => RouteProvider()),
       ],
@@ -122,6 +124,7 @@ class _MainAppHomeState extends State<MainAppHome>
     );
     // Check if user is already logged in
     WidgetsBinding.instance.addPostFrameCallback((_) {
+      context.read<ActivationProvider>().initialize();
       context.read<AuthProvider>().checkCurrentUser();
     });
   }

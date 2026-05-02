@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:compact_sales_monitoring/providers/auth_provider.dart';
+import 'package:compact_sales_monitoring/providers/activation_provider.dart';
 import 'package:compact_sales_monitoring/models/user_model.dart';
+import 'package:compact_sales_monitoring/screens/activation_screen.dart';
 import 'package:compact_sales_monitoring/screens/login_screen.dart';
 import 'package:compact_sales_monitoring/widgets/auth_wave_transition_overlay.dart';
 
@@ -25,7 +27,74 @@ class _AppRouterState extends State<AppRouter> {
   Widget? _frozenBaseDuringLoading;
   Widget? _lastStableBase;
 
-  Widget _resolveBase(AuthProvider authProvider) {
+  Widget _buildLeaseStatusBanner(ActivationProvider activationProvider) {
+    final message = activationProvider.leaseStatusMessage;
+    if (message == null || message.isEmpty || !activationProvider.isActivated) {
+      return const SizedBox.shrink();
+    }
+
+    final urgent = activationProvider.isLeaseStatusUrgent;
+    final background = urgent
+        ? const Color(0xFFFDE7E9)
+        : const Color(0xFFFFF7E0);
+    final border = urgent
+        ? const Color(0xFFF28B95)
+        : const Color(0xFFF0C36A);
+    final textColor = urgent
+        ? const Color(0xFF7A1F28)
+        : const Color(0xFF6A4A00);
+
+    return SafeArea(
+      child: Align(
+        alignment: Alignment.topCenter,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(12, 10, 12, 0),
+          child: Container(
+            constraints: const BoxConstraints(maxWidth: 760),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            decoration: BoxDecoration(
+              color: background,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: border),
+            ),
+            child: Row(
+              children: [
+                Icon(
+                  urgent ? Icons.warning_amber_rounded : Icons.info_outline_rounded,
+                  color: textColor,
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'Device Activation Status: $message',
+                    style: TextStyle(
+                      color: textColor,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _resolveBase(
+    AuthProvider authProvider,
+    ActivationProvider activationProvider,
+  ) {
+    if (activationProvider.isChecking) {
+      return const Scaffold(
+        body: Center(child: CircularProgressIndicator()),
+      );
+    }
+
+    if (!activationProvider.isActivated) {
+      return const ActivationScreen();
+    }
+
     if (authProvider.isAuthenticated) {
       switch (authProvider.currentUser!.role) {
         case UserRole.salesman:
@@ -42,12 +111,12 @@ class _AppRouterState extends State<AppRouter> {
 
   @override
   Widget build(BuildContext context) {
-    return Consumer<AuthProvider>(
-      builder: (context, authProvider, _) {
-        final resolvedBase = _resolveBase(authProvider);
+    return Consumer2<AuthProvider, ActivationProvider>(
+      builder: (context, authProvider, activationProvider, _) {
+        final resolvedBase = _resolveBase(authProvider, activationProvider);
         final Widget base;
 
-        if (authProvider.isLoading) {
+        if (authProvider.isLoading && activationProvider.isActivated) {
           // Freeze the previous stable screen while the entrance cover animates.
           _frozenBaseDuringLoading ??= _lastStableBase ?? resolvedBase;
           base = _frozenBaseDuringLoading!;
@@ -63,7 +132,9 @@ class _AppRouterState extends State<AppRouter> {
           fit: StackFit.expand,
           children: [
             base,
-            AuthWaveRevealLayer(isAuthLoading: authProvider.isLoading),
+            _buildLeaseStatusBanner(activationProvider),
+            if (activationProvider.isActivated)
+              AuthWaveRevealLayer(isAuthLoading: authProvider.isLoading),
           ],
         );
       },
