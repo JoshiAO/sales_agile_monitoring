@@ -1,4 +1,4 @@
-# Sales Agile Monitoring
+﻿# Sales Agile Monitoring
 
 Sales Agile Monitoring is a multi-role Flutter + Firebase app for field sales operations. It combines daily route capture, team map monitoring, Agile target setting, Agile performance submissions, and superuser administration in one codebase.
 
@@ -6,13 +6,13 @@ Sales Agile Monitoring is a multi-role Flutter + Firebase app for field sales op
 
 The app supports three roles:
 
-- Salesman: capture first and last calls, upload stamped photos, and submit daily Agile actuals.
-- Supervisor: monitor assigned salesmen, review routes on the map, set daily Agile targets, and compare targets vs actuals.
-- Superuser: view all teams, manage users, review global route activity, inspect Agile summaries, and archive route data.
+- **Salesman** — capture first and last calls, upload stamped photos, and submit daily Agile actuals.
+- **Supervisor** — monitor assigned salesmen, review routes on the map, set daily Agile targets, and compare targets vs actuals.
+- **Superuser** — view all teams, manage users, review global route activity, inspect Agile summaries, and archive route data.
 
 ## Main Features
 
-### Salesman experience
+### Salesman
 
 - Email/password authentication.
 - Calls tab for first-call and last-call capture.
@@ -26,7 +26,7 @@ The app supports three roles:
   - STT actual sale
 - Validation that prevents invalid Agile submissions and locks finalized entries.
 
-### Supervisor experience
+### Supervisor
 
 - Home tab showing assigned salesmen and latest call status for the selected day.
 - Map tab with date-based filtering of team routes.
@@ -37,36 +37,132 @@ The app supports three roles:
   - STT target
 - Historical Agile review by date with compact and wide card layouts.
 
-### Superuser experience
+### Superuser
 
 - Home tab showing supervisor team summaries.
 - Map tab showing all routes for the selected day.
 - Archive flow for exporting route data over a date range.
 - Agile tab showing supervisor-level rollups of targets and actuals.
 - Preview pages for drilling into team and salesman performance.
-- User management for:
+- User management:
   - creating users
   - editing user assignments
   - activating or deactivating accounts
   - deleting accounts
-  - updating authentication credentials through Cloud Functions support
+  - updating authentication credentials via Cloud Functions
+
+## App Flowchart
+
+```mermaid
+flowchart TD
+    A([App Launch]) --> B[Splash Screen]
+    B --> C{Device\nActivated?}
+    C -- No --> D[Activation Screen]
+    D --> C
+    C -- Yes --> E{User\nAuthenticated?}
+    E -- No --> F[Login Screen]
+    F --> G{Login\nSuccess?}
+    G -- No --> F
+    G -- Yes --> H{Role?}
+    E -- Yes --> H
+
+    H -- Salesman --> SAL
+    H -- Supervisor --> SUP
+    H -- Superuser --> SU
+
+    subgraph SAL [Salesman]
+        direction TB
+        SAL_TABS[Tabs: Calls · Agile]
+        SAL_TABS --> SAL_CALLS[Calls Tab]
+        SAL_TABS --> SAL_AGILE[Agile Tab]
+
+        SAL_CALLS --> SAL_FC[Capture First Call]
+        SAL_FC --> SAL_CAM1[Camera Screen]
+        SAL_CAM1 --> SAL_STAMP1[Stamp Photo\nGPS · QR · Date]
+        SAL_STAMP1 --> SAL_UP1[(Firebase Storage\n+ Firestore Route)]
+
+        SAL_CALLS --> SAL_CP[Capture Checkpoints\nevery 30 min / 500 m]
+        SAL_CP --> SAL_UP1
+
+        SAL_CALLS --> SAL_LC[Capture Last Call]
+        SAL_LC --> SAL_CAM2[Camera Screen]
+        SAL_CAM2 --> SAL_STAMP2[Stamp Photo\nGPS · QR · Date]
+        SAL_STAMP2 --> SAL_UP1
+
+        SAL_CALLS --> SAL_RT[Request Retake]
+        SAL_RT --> SAL_RTA{Approved?}
+        SAL_RTA -- Yes --> SAL_CAM1
+
+        SAL_AGILE --> SAL_FORM[Fill Actuals\nTotal Calls · Productive · STT]
+        SAL_FORM --> SAL_LOCK{Submit &\nLock Entry}
+        SAL_LOCK --> SAL_FS[(agile_submissions)]
+    end
+
+    subgraph SUP [Supervisor]
+        direction TB
+        SUP_TABS[Tabs: Home · Map · Agile]
+        SUP_TABS --> SUP_HOME[Home Tab]
+        SUP_TABS --> SUP_MAP[Map Tab]
+        SUP_TABS --> SUP_AGILE[Agile Tab]
+
+        SUP_HOME --> SUP_DATE[Date Selector]
+        SUP_DATE --> SUP_CARDS[Salesman Summary Cards\nlast call status]
+
+        SUP_MAP --> SUP_MDATE[Date Selector]
+        SUP_MDATE --> SUP_POLY[Road-aware Polylines\n+ Cached Fallback]
+        SUP_POLY --> SUP_MARKER[Tap Marker]
+        SUP_MARKER --> SUP_DETAIL[Route Detail Dialog\ncall images · timestamps]
+
+        SUP_AGILE --> SUP_ADATE[Date Selector]
+        SUP_ADATE --> SUP_TGT[Set Targets\nProductive Calls · STT]
+        SUP_TGT --> SUP_TFS[(agile_targets)]
+        SUP_ADATE --> SUP_ACT[View Actuals vs Targets\nCompact / Wide Cards]
+    end
+
+    subgraph SU [Superuser]
+        direction TB
+        SU_TABS[Tabs: Home · Map · Agile · Users]
+        SU_TABS --> SU_HOME[Home Tab]
+        SU_TABS --> SU_MAP[Map Tab]
+        SU_TABS --> SU_AGILE[Agile Tab]
+        SU_TABS --> SU_USERS[User Management]
+
+        SU_HOME --> SU_DATE[Date Selector]
+        SU_DATE --> SU_CARDS[Supervisor Summary Cards]
+        SU_CARDS --> SU_PREVIEW[Team Preview Screen\nper-salesman detail]
+
+        SU_MAP --> SU_MDATE[Date Selector]
+        SU_MDATE --> SU_ALLROUTES[All Team Routes\nGlobal Map View]
+        SU_ALLROUTES --> SU_ARCHIVE[Archive Export\nDate Range → Excel]
+
+        SU_AGILE --> SU_ADATE[Date Selector]
+        SU_ADATE --> SU_ROLLUP[Supervisor Rollup\nTargets vs Actuals]
+
+        SU_USERS --> SU_CREATE[Create User]
+        SU_USERS --> SU_EDIT[Edit / Reassign User]
+        SU_USERS --> SU_TOGGLE[Activate / Deactivate]
+        SU_USERS --> SU_DELETE[Delete User]
+        SU_USERS --> SU_CREDS[Update Credentials\nvia Cloud Functions]
+    end
+```
 
 ## Tech Stack
 
-- Flutter
-- Firebase Authentication
-- Cloud Firestore
-- Firebase Storage
-- Firebase Cloud Functions
-- Provider
-- flutter_map with OpenStreetMap/CARTO tiles
-- Geolocator
-- Image Picker
-- intl
+| Category | Packages |
+|---|---|
+| Framework | Flutter (Dart SDK ^3.11.4) |
+| Auth & Backend | `firebase_auth`, `cloud_firestore`, `firebase_storage`, `cloud_functions`, `firebase_core` |
+| State Management | `provider` |
+| Maps | `flutter_map`, `latlong2` |
+| Location | `geolocator` |
+| Camera & Vision | `camera`, `google_mlkit_face_detection`, `image_picker`, `image` |
+| Networking | `http`, `dio` |
+| Export & Files | `archive`, `excel`, `saver_gallery`, `path_provider` |
+| UI & Utils | `intl`, `uuid`, `qr`, `cached_network_image`, `url_launcher`, `android_intent_plus` |
 
 ## App Structure
 
-```text
+```
 lib/
   app_router.dart
   main.dart
@@ -88,36 +184,30 @@ storage.rules
 
 ### Salesman
 
-- Calls: first/last call workflow and route capture.
-- Agile: daily form submission after call completion.
+- **Calls** — first/last call workflow, checkpoint capture, and route image upload.
+- **Agile** — daily form submission after call completion.
 
 ### Supervisor
 
-- Home: assigned salesmen summary cards.
-- Map: route visualization and call inspection.
-- Agile: target input and actual comparison by salesman and date.
+- **Home** — assigned salesmen summary cards.
+- **Map** — route visualization and call inspection.
+- **Agile** — target input and actual comparison by salesman and date.
 
 ### Superuser
 
-- Home: supervisor team overview.
-- Map: global route operations view and archive action.
-- Agile: supervisor-level performance overview.
-- User Management: account lifecycle and role assignment.
+- **Home** — supervisor team overview.
+- **Map** — global route operations view and archive action.
+- **Agile** — supervisor-level performance overview.
+- **User Management** — account lifecycle and role assignment.
 
-## Firestore Data
+## Firestore Collections
 
-### Core collections
-
-- `users`
-- `routes`
-- `agile_targets`
-- `agile_submissions`
-
-### Agile documents
-
-`agile_targets` stores daily supervisor-entered targets per salesman.
-
-`agile_submissions` stores daily salesman-entered actual values and submission status.
+| Collection | Description |
+|---|---|
+| `users` | User profiles, roles, and supervisor assignments |
+| `routes` | Daily route documents with call images and checkpoints |
+| `agile_targets` | Daily supervisor-entered targets per salesman |
+| `agile_submissions` | Daily salesman-entered actuals and submission status |
 
 ## Security Model
 
@@ -138,17 +228,17 @@ See `firestore.rules` and `storage.rules` for the current rule set.
 
 ### Install
 
-```bash
+```
 flutter pub get
 ```
 
 ### Configure Firebase
 
-```bash
+```
 flutterfire configure
 ```
 
-Then confirm these files are in place:
+Confirm these files are in place before running:
 
 - `lib/firebase_options.dart`
 - `android/app/google-services.json`
@@ -156,15 +246,15 @@ Then confirm these files are in place:
 
 ### Run the app
 
-```bash
+```
 flutter run
 ```
 
 Useful targets:
 
-```bash
-flutter run -d windows
+```
 flutter run -d android
+flutter run -d windows
 flutter build apk
 ```
 
@@ -175,7 +265,7 @@ flutter build apk
 - Architecture notes: `ARCHITECTURE.md`
 - Implementation notes: `IMPLEMENTATION_GUIDE.md`
 
-## Current Highlights
+## Highlights
 
 - Role-based routing from a shared login flow.
 - Animated auth transition overlay.
@@ -185,11 +275,9 @@ flutter build apk
 - Firestore-backed Agile targets and submissions.
 - Archive export support for route data.
 
-## Development Checks
+## Development
 
-Useful commands:
-
-```bash
+```
 flutter analyze
 flutter test
 flutter build apk
@@ -197,5 +285,5 @@ flutter build apk
 
 ## Branding
 
-- App name: Sales Agile Monitoring
+- App name: Compact Sales Monitoring
 - Launcher icon source: `assets/images/JoshiAO.jpg`
