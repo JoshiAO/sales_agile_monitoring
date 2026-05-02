@@ -120,10 +120,17 @@ class _SuperuserHomeScreenState extends State<SuperuserHomeScreen> {
       return 1;
     }
 
-    final compact = _cardMode == _SuperuserCardMode.compact;
-    final minCardWidth = compact ? 300.0 : 380.0;
-    final columns = ((maxWidth + 12) / (minCardWidth + 12)).floor();
-    return columns.clamp(2, 4);
+    if (kIsWeb) {
+      if (maxWidth >= 1500) return 4;
+      if (maxWidth >= 760) return 3;
+      if (maxWidth >= 560) return 2;
+      return 1;
+    }
+
+    if (maxWidth >= 1200) return 4;
+    if (maxWidth >= 900) return 3;
+    if (maxWidth >= 600) return 2;
+    return 1;
   }
 
   void _onDateChanged(DateTime newDate) {
@@ -211,10 +218,8 @@ class _SuperuserHomeScreenState extends State<SuperuserHomeScreen> {
             builder: (context, constraints) {
               final columns = _cardsPerRow(constraints.maxWidth);
               const spacing = 12.0;
-              final cardWidth = columns == 1
-                  ? constraints.maxWidth
-                  : (constraints.maxWidth - (spacing * (columns - 1))) /
-                        columns;
+              final cardExtent =
+                  _cardMode == _SuperuserCardMode.wide ? 372.0 : 112.0;
 
               return RefreshIndicator(
                 onRefresh: _refresh,
@@ -272,26 +277,31 @@ class _SuperuserHomeScreenState extends State<SuperuserHomeScreen> {
                         ],
                       ),
                     ),
-                    Wrap(
-                      spacing: spacing,
-                      runSpacing: spacing,
-                      children: data.supervisorSummaries.map((summary) {
-                        return SizedBox(
-                          width: cardWidth,
-                          child: _SupervisorSummaryCard(
-                            summary: summary,
-                            cardMode: _cardMode,
-                            routesBySalesman: data.routesBySalesman,
-                            submissionsBySalesman: data.submissionsBySalesman,
-                            onPreviewTeam: () {
-                              _openTeamPreview(
-                                supervisor: summary.supervisor,
-                                selectedDate: data.selectedDate,
-                              );
-                            },
-                          ),
+                    GridView.builder(
+                      shrinkWrap: true,
+                      physics: const NeverScrollableScrollPhysics(),
+                      itemCount: data.supervisorSummaries.length,
+                      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                        crossAxisCount: columns,
+                        crossAxisSpacing: spacing,
+                        mainAxisSpacing: spacing,
+                        mainAxisExtent: cardExtent,
+                      ),
+                      itemBuilder: (context, index) {
+                        final summary = data.supervisorSummaries[index];
+                        return _SupervisorSummaryCard(
+                          summary: summary,
+                          cardMode: _cardMode,
+                          routesBySalesman: data.routesBySalesman,
+                          submissionsBySalesman: data.submissionsBySalesman,
+                          onPreviewTeam: () {
+                            _openTeamPreview(
+                              supervisor: summary.supervisor,
+                              selectedDate: data.selectedDate,
+                            );
+                          },
                         );
-                      }).toList(),
+                      },
                     ),
                   ],
                 ),
