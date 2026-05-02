@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>JoshiAO Icon Generator</title>
+  <style>
+    body { font-family: Arial, sans-serif; background: #f0f4f8; padding: 32px; }
+    h2 { color: #1a237e; }
+    .grid { display: flex; gap: 32px; flex-wrap: wrap; margin-top: 24px; }
+    .card { background: white; border-radius: 12px; padding: 20px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); text-align: center; }
+    canvas { display: block; margin: 0 auto 12px; border-radius: 8px; }
+    button { background: #1565c0; color: white; border: none; border-radius: 6px; padding: 8px 18px; cursor: pointer; font-size: 14px; }
+    button:hover { background: #0d47a1; }
+    .note { color: #555; font-size: 13px; margin-top: 6px; }
+    h3 { margin: 0 0 12px; color: #333; font-size: 14px; }
+    .preview-large { width: 192px; height: 192px; }
+  </style>
+</head>
+<body>
+  <h2>JoshiAO — Web Icon Generator</h2>
+  <p>Click each <strong>Download</strong> button, then save the file to the correct location in your Flutter project.</p>
+
+  <div class="grid">
+    <div class="card">
+      <h3>favicon.png → <code>web/favicon.png</code></h3>
+      <canvas id="c-favicon" width="64" height="64"></canvas>
+      <button onclick="download('c-favicon','favicon.png')">Download</button>
+    </div>
+    <div class="card">
+      <h3>Icon-192.png → <code>web/icons/Icon-192.png</code></h3>
+      <canvas id="c-192" width="192" height="192"></canvas>
+      <button onclick="download('c-192','Icon-192.png')">Download</button>
+    </div>
+    <div class="card">
+      <h3>Icon-512.png → <code>web/icons/Icon-512.png</code></h3>
+      <canvas id="c-512" width="512" height="512" class="preview-large"></canvas>
+      <button onclick="download('c-512','Icon-512.png')">Download</button>
+    </div>
+    <div class="card">
+      <h3>Icon-maskable-192.png → <code>web/icons/Icon-maskable-192.png</code></h3>
+      <canvas id="c-m192" width="192" height="192"></canvas>
+      <button onclick="download('c-m192','Icon-maskable-192.png')">Download</button>
+    </div>
+    <div class="card">
+      <h3>Icon-maskable-512.png → <code>web/icons/Icon-maskable-512.png</code></h3>
+      <canvas id="c-m512" width="512" height="512" class="preview-large"></canvas>
+      <button onclick="download('c-m512','Icon-maskable-512.png')">Download</button>
+    </div>
+  </div>
+
+  <script>
+    // ----- Icon design config -----
+    const BG      = '#1565C0';   // deep blue background
+    const TEXT_CL = '#FFFFFF';   // white text
+    const ACCENT  = '#42A5F5';   // lighter blue accent ring
+
+    function drawIcon(canvasId, size, maskable) {
+      const canvas = document.getElementById(canvasId);
+      const ctx = canvas.getContext('2d');
+      const s = size;
+      const pad = maskable ? s * 0.12 : 0; // maskable safe-zone padding
+
+      // Background fill
+      if (maskable) {
+        ctx.fillStyle = BG;
+        ctx.fillRect(0, 0, s, s);
+      } else {
+        // Rounded rect
+        const r = s * 0.18;
+        ctx.beginPath();
+        ctx.moveTo(r, 0);
+        ctx.lineTo(s - r, 0);
+        ctx.quadraticCurveTo(s, 0, s, r);
+        ctx.lineTo(s, s - r);
+        ctx.quadraticCurveTo(s, s, s - r, s);
+        ctx.lineTo(r, s);
+        ctx.quadraticCurveTo(0, s, 0, s - r);
+        ctx.lineTo(0, r);
+        ctx.quadraticCurveTo(0, 0, r, 0);
+        ctx.closePath();
+        ctx.fillStyle = BG;
+        ctx.fill();
+      }
+
+      // Accent subtle circle behind text
+      const cx = s / 2;
+      const cy = s / 2;
+      const circleR = (s - pad * 2) * 0.44;
+      ctx.beginPath();
+      ctx.arc(cx, cy, circleR, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(255,255,255,0.08)';
+      ctx.fill();
+
+      // Draw "JoshiAO" text for >=192, "J" for small
+      if (s >= 192) {
+        // "JoshiAO" across two lines: "Joshi" top, "AO" bottom
+        const line1 = 'Joshi';
+        const line2 = 'AO';
+
+        const fs1 = s * 0.20;
+        const fs2 = s * 0.28;
+
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+
+        // Line 1
+        ctx.fillStyle = TEXT_CL;
+        ctx.font = `700 ${fs1}px 'Arial', sans-serif`;
+        ctx.fillText(line1, cx, cy - fs1 * 0.55);
+
+        // Thin divider line
+        const lineW = s * 0.45;
+        ctx.fillStyle = ACCENT;
+        ctx.fillRect(cx - lineW / 2, cy + fs1 * 0.1, lineW, Math.max(2, s * 0.012));
+
+        // Line 2
+        ctx.fillStyle = TEXT_CL;
+        ctx.font = `900 ${fs2}px 'Arial', sans-serif`;
+        ctx.fillText(line2, cx, cy + fs1 * 0.72);
+      } else {
+        // Small: just "J"
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillStyle = TEXT_CL;
+        ctx.font = `900 ${s * 0.62}px 'Arial', sans-serif`;
+        ctx.fillText('J', cx, cy + s * 0.04);
+      }
+    }
+
+    function download(canvasId, filename) {
+      const canvas = document.getElementById(canvasId);
+      const link = document.createElement('a');
+      link.download = filename;
+      link.href = canvas.toDataURL('image/png');
+      link.click();
+    }
+
+    // Render all
+    drawIcon('c-favicon',  64,  false);
+    drawIcon('c-192',      192, false);
+    drawIcon('c-512',      512, false);
+    drawIcon('c-m192',     192, true);
+    drawIcon('c-m512',     512, true);
+  </script>
+</body>
+</html>

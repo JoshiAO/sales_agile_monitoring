@@ -26,6 +26,7 @@
         "source": "functions"
     },
     "hosting": {
+        "site": "sales-agile-monitoring",
         "public": "build/web",
         "ignore": [
             "firebase.json",
