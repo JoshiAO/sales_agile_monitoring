@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 import 'package:compact_sales_monitoring/models/agile_model.dart';
@@ -10,10 +11,7 @@ import 'package:compact_sales_monitoring/widgets/date_selector_widget.dart';
 import 'package:compact_sales_monitoring/widgets/loading_skeletons.dart';
 import 'package:compact_sales_monitoring/screens/superuser/superuser_team_preview_screen.dart';
 
-enum _SuperuserCardMode {
-  wide,
-  compact,
-}
+enum _SuperuserCardMode { wide, compact }
 
 class SuperuserHomeScreen extends StatefulWidget {
   const SuperuserHomeScreen({super.key});
@@ -62,19 +60,25 @@ class _SuperuserHomeScreenState extends State<SuperuserHomeScreen> {
     final routesBySalesman = <String, SalesRoute>{};
     for (final route in routes) {
       final existing = routesBySalesman[route.salesmanId];
-      if (existing == null || _routeSortTime(route).isAfter(_routeSortTime(existing))) {
+      if (existing == null ||
+          _routeSortTime(route).isAfter(_routeSortTime(existing))) {
         routesBySalesman[route.salesmanId] = route;
       }
     }
 
-    supervisors.sort((left, right) => _displayName(left).compareTo(_displayName(right)));
+    supervisors.sort(
+      (left, right) => _displayName(left).compareTo(_displayName(right)),
+    );
 
     final summaries = supervisors
         .map(
           (supervisor) => _SupervisorSummary(
             supervisor: supervisor,
             assignedSalesmen: (salesmenBySupervisor[supervisor.uid] ?? [])
-              ..sort((left, right) => _displayName(left).compareTo(_displayName(right))),
+              ..sort(
+                (left, right) =>
+                    _displayName(left).compareTo(_displayName(right)),
+              ),
           ),
         )
         .toList();
@@ -108,6 +112,18 @@ class _SuperuserHomeScreenState extends State<SuperuserHomeScreen> {
       _homeDataFuture = nextFuture;
     });
     await nextFuture;
+  }
+
+  int _cardsPerRow(double maxWidth) {
+    final isMobileLayout = !kIsWeb && maxWidth < 700;
+    if (isMobileLayout) {
+      return 1;
+    }
+
+    final compact = _cardMode == _SuperuserCardMode.compact;
+    final minCardWidth = compact ? 300.0 : 380.0;
+    final columns = ((maxWidth + 12) / (minCardWidth + 12)).floor();
+    return columns.clamp(2, 4);
   }
 
   void _onDateChanged(DateTime newDate) {
@@ -145,10 +161,7 @@ class _SuperuserHomeScreenState extends State<SuperuserHomeScreen> {
                 onTap: () {
                   context.read<AuthProvider>().logout();
                 },
-                child: const Text(
-                  'Logout',
-                  style: TextStyle(fontSize: 14),
-                ),
+                child: const Text('Logout', style: TextStyle(fontSize: 14)),
               ),
             ),
           ),
@@ -194,79 +207,96 @@ class _SuperuserHomeScreenState extends State<SuperuserHomeScreen> {
 
           final data = snapshot.data!;
 
-          return RefreshIndicator(
-            onRefresh: _refresh,
-            child: ListView.builder(
-              physics: const AlwaysScrollableScrollPhysics(),
-              padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
-              itemCount: data.supervisorSummaries.length + 1,
-              itemBuilder: (context, index) {
-                if (index == 0) {
-                  return Padding(
-                    padding: const EdgeInsets.only(bottom: 12),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        DateSelectorWidget(
-                          initialDate: _selectedDate,
-                          onDateChanged: _onDateChanged,
-                        ),
-                        const SizedBox(height: 12),
-                        Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    'Supervisor Team Summary',
-                                    style: Theme.of(context).textTheme.titleLarge,
-                                  ),
-                                  const SizedBox(height: 4),
-                                  Text(
-                                    '${data.supervisorSummaries.length} supervisor${data.supervisorSummaries.length == 1 ? '' : 's'}',
-                                    style: Theme.of(context)
-                                        .textTheme
-                                        .bodyMedium
-                                        ?.copyWith(
-                                          color: Colors.grey.shade700,
-                                        ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                            const SizedBox(width: 12),
-                            _CardModeToggle(
-                              mode: _cardMode,
-                              onModeChanged: (mode) {
-                                setState(() {
-                                  _cardMode = mode;
-                                });
-                              },
-                            ),
-                          ],
-                        ),
-                      ],
-                    ),
-                  );
-                }
+          return LayoutBuilder(
+            builder: (context, constraints) {
+              final columns = _cardsPerRow(constraints.maxWidth);
+              const spacing = 12.0;
+              final cardWidth = columns == 1
+                  ? constraints.maxWidth
+                  : (constraints.maxWidth - (spacing * (columns - 1))) /
+                        columns;
 
-                final summary = data.supervisorSummaries[index - 1];
-                return _SupervisorSummaryCard(
-                  summary: summary,
-                  cardMode: _cardMode,
-                  routesBySalesman: data.routesBySalesman,
-                  submissionsBySalesman: data.submissionsBySalesman,
-                  onPreviewTeam: () {
-                    _openTeamPreview(
-                      supervisor: summary.supervisor,
-                      selectedDate: data.selectedDate,
-                    );
-                  },
-                );
-              },
-            ),
+              return RefreshIndicator(
+                onRefresh: _refresh,
+                child: ListView(
+                  physics: const AlwaysScrollableScrollPhysics(),
+                  padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 12),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          DateSelectorWidget(
+                            initialDate: _selectedDate,
+                            onDateChanged: _onDateChanged,
+                          ),
+                          const SizedBox(height: 12),
+                          Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      'Supervisor Team Summary',
+                                      style: Theme.of(
+                                        context,
+                                      ).textTheme.titleLarge,
+                                    ),
+                                    const SizedBox(height: 4),
+                                    Text(
+                                      '${data.supervisorSummaries.length} supervisor${data.supervisorSummaries.length == 1 ? '' : 's'}',
+                                      style: Theme.of(context)
+                                          .textTheme
+                                          .bodyMedium
+                                          ?.copyWith(
+                                            color: Colors.grey.shade700,
+                                          ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              const SizedBox(width: 12),
+                              _CardModeToggle(
+                                mode: _cardMode,
+                                onModeChanged: (mode) {
+                                  setState(() {
+                                    _cardMode = mode;
+                                  });
+                                },
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                    Wrap(
+                      spacing: spacing,
+                      runSpacing: spacing,
+                      children: data.supervisorSummaries.map((summary) {
+                        return SizedBox(
+                          width: cardWidth,
+                          child: _SupervisorSummaryCard(
+                            summary: summary,
+                            cardMode: _cardMode,
+                            routesBySalesman: data.routesBySalesman,
+                            submissionsBySalesman: data.submissionsBySalesman,
+                            onPreviewTeam: () {
+                              _openTeamPreview(
+                                supervisor: summary.supervisor,
+                                selectedDate: data.selectedDate,
+                              );
+                            },
+                          ),
+                        );
+                      }).toList(),
+                    ),
+                  ],
+                ),
+              );
+            },
           );
         },
       ),
@@ -309,25 +339,26 @@ class _SupervisorSummaryCard extends StatelessWidget {
       .where((salesman) => routesBySalesman[salesman.uid]?.hasLastCall == true)
       .length;
 
-    int get _actualProductiveCallsTotal => summary.assignedSalesmen.fold(
-      0,
-      (total, salesman) =>
+  int get _actualProductiveCallsTotal => summary.assignedSalesmen.fold(
+    0,
+    (total, salesman) =>
         total + (submissionsBySalesman[salesman.uid]?.productiveCalls ?? 0),
-      );
+  );
 
-    double get _actualSttTotal => summary.assignedSalesmen.fold(
-      0.0,
-      (total, salesman) =>
+  double get _actualSttTotal => summary.assignedSalesmen.fold(
+    0.0,
+    (total, salesman) =>
         total + (submissionsBySalesman[salesman.uid]?.sttActual ?? 0.0),
-      );
+  );
 
-    String get _actualSttTotalText => NumberFormat('#,##0.00').format(_actualSttTotal);
+  String get _actualSttTotalText =>
+      NumberFormat('#,##0.00').format(_actualSttTotal);
 
   String get _actualSttCompactText {
     if (_actualSttTotal >= 1000000) {
-      return NumberFormat('#,##0.00').format(_actualSttTotal / 1000000) + 'M';
+      return '${NumberFormat('#,##0.00').format(_actualSttTotal / 1000000)}M';
     } else if (_actualSttTotal >= 1000) {
-      return NumberFormat('#,##0.00').format(_actualSttTotal / 1000) + 'K';
+      return '${NumberFormat('#,##0.00').format(_actualSttTotal / 1000)}K';
     } else {
       return NumberFormat('#,##0.00').format(_actualSttTotal);
     }
@@ -347,8 +378,8 @@ class _SupervisorSummaryCard extends StatelessWidget {
                   Text(
                     _displayName,
                     style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                          fontWeight: FontWeight.w700,
-                        ),
+                      fontWeight: FontWeight.w700,
+                    ),
                   ),
                   const SizedBox(height: 6),
                   Wrap(
@@ -376,9 +407,9 @@ class _SupervisorSummaryCard extends StatelessWidget {
                 summary.supervisor.email,
                 textAlign: TextAlign.right,
                 style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: Colors.grey.shade700,
-                      fontSize: 11,
-                    ),
+                  color: Colors.grey.shade700,
+                  fontSize: 11,
+                ),
               ),
             ),
           ],
@@ -405,8 +436,8 @@ class _SupervisorSummaryCard extends StatelessWidget {
                     Text(
                       title,
                       style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                            fontWeight: FontWeight.w700,
-                          ),
+                        fontWeight: FontWeight.w700,
+                      ),
                     ),
                     const SizedBox(height: 8),
                     IntrinsicHeight(
@@ -414,7 +445,8 @@ class _SupervisorSummaryCard extends StatelessWidget {
                         children: [
                           for (int i = 0; i < metrics.length; i++) ...[
                             Expanded(child: metrics[i]),
-                            if (i < metrics.length - 1) const VerticalDivider(width: 1),
+                            if (i < metrics.length - 1)
+                              const VerticalDivider(width: 1),
                           ],
                         ],
                       ),
@@ -427,18 +459,12 @@ class _SupervisorSummaryCard extends StatelessWidget {
             final assignedAndActualGroup = buildGroup(
               title: 'Assigned And Actual Metrics',
               metrics: [
-                _MetricCell(
-                  label: 'Assigned Salesmen',
-                  value: '$_teamSize',
-                ),
+                _MetricCell(label: 'Assigned Salesmen', value: '$_teamSize'),
                 _MetricCell(
                   label: 'Actual Productive Calls',
                   value: '$_actualProductiveCallsTotal',
                 ),
-                _MetricCell(
-                  label: 'Actual STT',
-                  value: _actualSttTotalText,
-                ),
+                _MetricCell(label: 'Actual STT', value: _actualSttTotalText),
               ],
             );
 
@@ -500,9 +526,9 @@ class _SupervisorSummaryCard extends StatelessWidget {
             _displayName,
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
-            style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                  fontWeight: FontWeight.w700,
-                ),
+            style: Theme.of(
+              context,
+            ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700),
           ),
           const SizedBox(height: 10),
           Row(
@@ -558,7 +584,7 @@ class _SupervisorSummaryCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Card(
-      margin: const EdgeInsets.only(bottom: 12),
+      margin: EdgeInsets.zero,
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: cardMode == _SuperuserCardMode.wide
@@ -573,10 +599,7 @@ class _CardModeToggle extends StatelessWidget {
   final _SuperuserCardMode mode;
   final ValueChanged<_SuperuserCardMode> onModeChanged;
 
-  const _CardModeToggle({
-    required this.mode,
-    required this.onModeChanged,
-  });
+  const _CardModeToggle({required this.mode, required this.onModeChanged});
 
   @override
   Widget build(BuildContext context) {
@@ -634,10 +657,7 @@ class _MetricCell extends StatelessWidget {
   final String label;
   final String value;
 
-  const _MetricCell({
-    required this.label,
-    required this.value,
-  });
+  const _MetricCell({required this.label, required this.value});
 
   @override
   Widget build(BuildContext context) {
@@ -649,17 +669,17 @@ class _MetricCell extends StatelessWidget {
           Text(
             label,
             textAlign: TextAlign.center,
-            style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                  fontWeight: FontWeight.w700,
-                ),
+            style: Theme.of(
+              context,
+            ).textTheme.labelMedium?.copyWith(fontWeight: FontWeight.w700),
           ),
           const SizedBox(height: 10),
           Text(
             value,
             textAlign: TextAlign.center,
-            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                  color: Colors.grey.shade800,
-                ),
+            style: Theme.of(
+              context,
+            ).textTheme.bodyMedium?.copyWith(color: Colors.grey.shade800),
           ),
         ],
       ),
@@ -683,20 +703,16 @@ class _CompactMetric extends StatelessWidget {
     return Row(
       mainAxisAlignment: MainAxisAlignment.center,
       children: [
-        Icon(
-          icon,
-          size: 16,
-          color: iconColor ?? Colors.grey.shade700,
-        ),
+        Icon(icon, size: 16, color: iconColor ?? Colors.grey.shade700),
         const SizedBox(width: 4),
         Expanded(
           child: Text(
             value,
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
-            style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  fontWeight: FontWeight.w600,
-                ),
+            style: Theme.of(
+              context,
+            ).textTheme.bodySmall?.copyWith(fontWeight: FontWeight.w600),
           ),
         ),
       ],
@@ -726,9 +742,9 @@ class _TeamStatusChip extends StatelessWidget {
       child: Text(
         label,
         style: Theme.of(context).textTheme.labelSmall?.copyWith(
-              color: foregroundColor,
-              fontWeight: FontWeight.w700,
-            ),
+          color: foregroundColor,
+          fontWeight: FontWeight.w700,
+        ),
       ),
     );
   }

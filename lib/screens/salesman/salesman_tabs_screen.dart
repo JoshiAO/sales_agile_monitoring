@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:compact_sales_monitoring/screens/salesman/salesman_home_screen.dart';
 import 'package:compact_sales_monitoring/widgets/agile_call_form_card.dart';
@@ -17,13 +18,82 @@ class _SalesmanTabsScreenState extends State<SalesmanTabsScreen> {
     const _AgileTab(),
   ];
 
+  Widget _buildMenuHeader(bool isExpandedRail) {
+    if (!isExpandedRail) {
+      return const Padding(
+        padding: EdgeInsets.only(top: 12, bottom: 16),
+        child: Tooltip(
+          message: 'Sales Agile Monitoring\nCreated by: Joshua A. Ocampo',
+          child: Icon(Icons.dashboard_customize_outlined),
+        ),
+      );
+    }
+
+    return const Padding(
+      padding: EdgeInsets.fromLTRB(12, 16, 12, 20),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Sales Agile Monitoring',
+            style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700),
+          ),
+          SizedBox(height: 4),
+          Text(
+            'Created by: Joshua A. Ocampo',
+            style: TextStyle(fontSize: 11, color: Colors.black54),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
+    if (kIsWeb) {
+      return LayoutBuilder(
+        builder: (context, constraints) {
+          final isExpandedRail = constraints.maxWidth >= 1180;
+          return Scaffold(
+            body: SafeArea(
+              child: Row(
+                children: [
+                  NavigationRail(
+                    selectedIndex: _currentIndex,
+                    onDestinationSelected: (index) =>
+                        setState(() => _currentIndex = index),
+                    leading: _buildMenuHeader(isExpandedRail),
+                    extended: isExpandedRail,
+                    labelType: NavigationRailLabelType.none,
+                    minWidth: 68,
+                    minExtendedWidth: 210,
+                    destinations: const [
+                      NavigationRailDestination(
+                        icon: Icon(Icons.co_present_outlined),
+                        selectedIcon: Icon(Icons.co_present),
+                        label: Text('Calls'),
+                      ),
+                      NavigationRailDestination(
+                        icon: Icon(Icons.auto_graph_outlined),
+                        selectedIcon: Icon(Icons.auto_graph),
+                        label: Text('Agile'),
+                      ),
+                    ],
+                  ),
+                  const VerticalDivider(width: 1),
+                  Expanded(
+                    child: IndexedStack(index: _currentIndex, children: _pages),
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
+      );
+    }
+
     return Scaffold(
-      body: IndexedStack(
-        index: _currentIndex,
-        children: _pages,
-      ),
+      body: IndexedStack(index: _currentIndex, children: _pages),
       bottomNavigationBar: BottomNavigationBar(
         currentIndex: _currentIndex,
         onTap: (index) => setState(() => _currentIndex = index),
@@ -61,8 +131,9 @@ class _AgileTab extends StatelessWidget {
               child: SizedBox(
                 height: constraints.maxHeight,
                 child: const AgileCallFormCard(),
+              ),
             ),
-          ));
+          );
         },
       ),
     );

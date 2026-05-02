@@ -100,6 +100,18 @@ class _SuperuserAgilePageState extends State<SuperuserAgilePage> {
     await nextFuture;
   }
 
+  int _cardsPerRow(double maxWidth) {
+    final isMobileLayout = !kIsWeb && maxWidth < 700;
+    if (isMobileLayout) {
+      return 1;
+    }
+
+    final compact = _viewMode == _SuperuserAgileViewMode.compact;
+    final minCardWidth = compact ? 320.0 : 390.0;
+    final columns = ((maxWidth + 12) / (minCardWidth + 12)).floor();
+    return columns.clamp(2, 4);
+  }
+
   void _onDateChanged(DateTime newDate) {
     setState(() {
       _selectedDate = newDate;
@@ -210,21 +222,23 @@ class _SuperuserAgilePageState extends State<SuperuserAgilePage> {
             ],
           ),
           actions: [
-            TextButton(
-              onPressed: () async {
-                await Clipboard.setData(ClipboardData(text: outputPath));
-                if (!dialogContext.mounted) return;
-                ScaffoldMessenger.of(
-                  dialogContext,
-                ).showSnackBar(const SnackBar(content: Text('Path copied')));
-              },
-              child: const Text('Copy Path'),
-            ),
-            TextButton(
-              onPressed: () =>
-                  _openExportFolder(dialogContext, normalizedFolderPath),
-              child: const Text('Open Folder'),
-            ),
+            if (!kIsWeb)
+              TextButton(
+                onPressed: () async {
+                  await Clipboard.setData(ClipboardData(text: outputPath));
+                  if (!dialogContext.mounted) return;
+                  ScaffoldMessenger.of(
+                    dialogContext,
+                  ).showSnackBar(const SnackBar(content: Text('Path copied')));
+                },
+                child: const Text('Copy Path'),
+              ),
+            if (!kIsWeb)
+              TextButton(
+                onPressed: () =>
+                    _openExportFolder(dialogContext, normalizedFolderPath),
+                child: const Text('Open Folder'),
+              ),
             FilledButton(
               onPressed: () => Navigator.of(dialogContext).pop(),
               child: const Text('Close'),
@@ -378,146 +392,167 @@ class _SuperuserAgilePageState extends State<SuperuserAgilePage> {
             );
           }
 
-          return RefreshIndicator(
-            onRefresh: _refresh,
-            child: ListView.builder(
-              physics: const AlwaysScrollableScrollPhysics(),
-              padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
-              itemCount: filtered.length + 1,
-              itemBuilder: (context, index) {
-                if (index == 0) {
-                  return Padding(
-                    padding: const EdgeInsets.only(bottom: 12),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        DateSelectorWidget(
-                          initialDate: _selectedDate,
-                          onDateChanged: _onDateChanged,
-                        ),
-                        const SizedBox(height: 12),
-                        Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    'Supervisor Agile Overview',
-                                    style: Theme.of(
-                                      context,
-                                    ).textTheme.titleLarge,
-                                  ),
-                                  const SizedBox(height: 4),
-                                  Text(
-                                    '${data.summaries.length} supervisor${data.summaries.length == 1 ? '' : 's'} • Date: ${data.date}',
-                                    style: Theme.of(context)
-                                        .textTheme
-                                        .bodyMedium
-                                        ?.copyWith(color: Colors.grey.shade700),
-                                  ),
-                                ],
-                              ),
-                            ),
-                            const SizedBox(width: 12),
-                            _AgileViewToggle(
-                              mode: _viewMode,
-                              onChanged: (mode) {
-                                setState(() {
-                                  _viewMode = mode;
-                                });
-                              },
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 12),
-                        LayoutBuilder(
-                          builder: (context, constraints) {
-                            final stacked = constraints.maxWidth < 560;
-                            final first = _SummaryMetricCard(
-                              label: 'Overall Total Productive Calls',
-                              value: '$overallProductive',
-                              icon: Icons.storefront,
-                              color: Colors.blue,
-                            );
-                            final second = _SummaryMetricCard(
-                              label: 'Overall Total Actual Sale',
-                              value: currency.format(overallSale),
-                              icon: Icons.payments_outlined,
-                              color: Colors.teal,
-                            );
+          return LayoutBuilder(
+            builder: (context, constraints) {
+              final columns = _cardsPerRow(constraints.maxWidth);
+              const spacing = 12.0;
+              final cardWidth = columns == 1
+                  ? constraints.maxWidth
+                  : (constraints.maxWidth - (spacing * (columns - 1))) /
+                        columns;
 
-                            if (stacked) {
-                              return Column(
+              return RefreshIndicator(
+                onRefresh: _refresh,
+                child: ListView(
+                  physics: const AlwaysScrollableScrollPhysics(),
+                  padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 12),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          DateSelectorWidget(
+                            initialDate: _selectedDate,
+                            onDateChanged: _onDateChanged,
+                          ),
+                          const SizedBox(height: 12),
+                          Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      'Supervisor Agile Overview',
+                                      style: Theme.of(
+                                        context,
+                                      ).textTheme.titleLarge,
+                                    ),
+                                    const SizedBox(height: 4),
+                                    Text(
+                                      '${data.summaries.length} supervisor${data.summaries.length == 1 ? '' : 's'} • Date: ${data.date}',
+                                      style: Theme.of(context)
+                                          .textTheme
+                                          .bodyMedium
+                                          ?.copyWith(
+                                            color: Colors.grey.shade700,
+                                          ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              const SizedBox(width: 12),
+                              _AgileViewToggle(
+                                mode: _viewMode,
+                                onChanged: (mode) {
+                                  setState(() {
+                                    _viewMode = mode;
+                                  });
+                                },
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 12),
+                          LayoutBuilder(
+                            builder: (context, constraints) {
+                              final stacked = constraints.maxWidth < 560;
+                              final first = _SummaryMetricCard(
+                                label: 'Overall Total Productive Calls',
+                                value: '$overallProductive',
+                                icon: Icons.storefront,
+                                color: Colors.blue,
+                              );
+                              final second = _SummaryMetricCard(
+                                label: 'Overall Total Actual Sale',
+                                value: currency.format(overallSale),
+                                icon: Icons.payments_outlined,
+                                color: Colors.teal,
+                              );
+
+                              if (stacked) {
+                                return Column(
+                                  children: [
+                                    first,
+                                    const SizedBox(height: 10),
+                                    second,
+                                  ],
+                                );
+                              }
+
+                              return Row(
                                 children: [
-                                  first,
-                                  const SizedBox(height: 10),
-                                  second,
+                                  Expanded(child: first),
+                                  const SizedBox(width: 10),
+                                  Expanded(child: second),
                                 ],
                               );
-                            }
-
-                            return Row(
-                              children: [
-                                Expanded(child: first),
-                                const SizedBox(width: 10),
-                                Expanded(child: second),
-                              ],
-                            );
-                          },
-                        ),
-                      ],
+                            },
+                          ),
+                        ],
+                      ),
                     ),
-                  );
-                }
+                    Wrap(
+                      spacing: spacing,
+                      runSpacing: spacing,
+                      children: filtered.map((summary) {
+                        final teamProductiveTarget = summary.team
+                            .map(
+                              (salesman) =>
+                                  data
+                                      .targetsBySalesman[salesman.uid]
+                                      ?.productiveCallsTarget ??
+                                  0,
+                            )
+                            .fold<int>(0, (sum, value) => sum + value);
+                        final teamProductiveActual = summary.team
+                            .map(
+                              (salesman) =>
+                                  data
+                                      .submissionsBySalesman[salesman.uid]
+                                      ?.productiveCalls ??
+                                  0,
+                            )
+                            .fold<int>(0, (sum, value) => sum + value);
+                        final teamSttTarget = summary.team
+                            .map(
+                              (salesman) =>
+                                  data
+                                      .targetsBySalesman[salesman.uid]
+                                      ?.sttTarget ??
+                                  0.0,
+                            )
+                            .fold<double>(0.0, (sum, value) => sum + value);
+                        final teamSttActual = summary.team
+                            .map(
+                              (salesman) =>
+                                  data
+                                      .submissionsBySalesman[salesman.uid]
+                                      ?.sttActual ??
+                                  0.0,
+                            )
+                            .fold<double>(0.0, (sum, value) => sum + value);
 
-                final summary = filtered[index - 1];
-                final teamProductiveTarget = summary.team
-                    .map(
-                      (salesman) =>
-                          data
-                              .targetsBySalesman[salesman.uid]
-                              ?.productiveCallsTarget ??
-                          0,
-                    )
-                    .fold<int>(0, (sum, value) => sum + value);
-                final teamProductiveActual = summary.team
-                    .map(
-                      (salesman) =>
-                          data
-                              .submissionsBySalesman[salesman.uid]
-                              ?.productiveCalls ??
-                          0,
-                    )
-                    .fold<int>(0, (sum, value) => sum + value);
-                final teamSttTarget = summary.team
-                    .map(
-                      (salesman) =>
-                          data.targetsBySalesman[salesman.uid]?.sttTarget ??
-                          0.0,
-                    )
-                    .fold<double>(0.0, (sum, value) => sum + value);
-                final teamSttActual = summary.team
-                    .map(
-                      (salesman) =>
-                          data.submissionsBySalesman[salesman.uid]?.sttActual ??
-                          0.0,
-                    )
-                    .fold<double>(0.0, (sum, value) => sum + value);
-
-                return _SupervisorAggregateCard(
-                  summary: summary,
-                  mode: _viewMode,
-                  productiveTarget: teamProductiveTarget,
-                  productiveActual: teamProductiveActual,
-                  sttTarget: teamSttTarget,
-                  sttActual: teamSttActual,
-                  targetsBySalesman: data.targetsBySalesman,
-                  submissionsBySalesman: data.submissionsBySalesman,
-                );
-              },
-            ),
+                        return SizedBox(
+                          width: cardWidth,
+                          child: _SupervisorAggregateCard(
+                            summary: summary,
+                            mode: _viewMode,
+                            productiveTarget: teamProductiveTarget,
+                            productiveActual: teamProductiveActual,
+                            sttTarget: teamSttTarget,
+                            sttActual: teamSttActual,
+                            targetsBySalesman: data.targetsBySalesman,
+                            submissionsBySalesman: data.submissionsBySalesman,
+                          ),
+                        );
+                      }).toList(),
+                    ),
+                  ],
+                ),
+              );
+            },
           );
         },
       ),
@@ -563,6 +598,11 @@ class _SupervisorAggregateCard extends StatelessWidget {
     return trimmedName.isNotEmpty ? trimmedName : user.email;
   }
 
+  bool get _showEmailLine {
+    return _displayName(summary.supervisor).toLowerCase() !=
+        summary.supervisor.email.trim().toLowerCase();
+  }
+
   double _indexValue({required double actual, required double target}) {
     if (target <= 0) return 0;
     return actual / target;
@@ -580,9 +620,14 @@ class _SupervisorAggregateCard extends StatelessWidget {
     final sttPercent = sttIndex * 100;
 
     return Card(
-      margin: const EdgeInsets.only(bottom: 12),
+      margin: EdgeInsets.zero,
+      elevation: 0,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: BorderSide(color: Colors.grey.shade300),
+      ),
       child: Padding(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(12),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -595,16 +640,23 @@ class _SupervisorAggregateCard extends StatelessWidget {
                     children: [
                       Text(
                         _displayName(summary.supervisor),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
                         style: Theme.of(context).textTheme.titleMedium
                             ?.copyWith(fontWeight: FontWeight.w700),
                       ),
-                      const SizedBox(height: 4),
-                      Text(
-                        summary.supervisor.email,
-                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: Colors.grey.shade700,
+                      if (_showEmailLine) ...[
+                        const SizedBox(height: 4),
+                        Text(
+                          summary.supervisor.email,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: Theme.of(context).textTheme.bodySmall
+                              ?.copyWith(color: Colors.grey.shade700),
                         ),
-                      ),
+                      ] else ...[
+                        const SizedBox(height: 16),
+                      ],
                     ],
                   ),
                 ),
@@ -612,7 +664,7 @@ class _SupervisorAggregateCard extends StatelessWidget {
                 _StatusTag(active: summary.supervisor.active),
               ],
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: 10),
             if (mode == _SuperuserAgileViewMode.wide) ...[
               Row(
                 children: [
@@ -664,11 +716,19 @@ class _SupervisorAggregateCard extends StatelessWidget {
               ),
             ],
             if (mode == _SuperuserAgileViewMode.wide) ...[
-              const SizedBox(height: 12),
-              OutlinedButton.icon(
-                onPressed: () => _openSalesmanPreview(context),
-                icon: const Icon(Icons.open_in_new),
-                label: const Text('Preview Salesman Performance'),
+              const SizedBox(height: 10),
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  style: OutlinedButton.styleFrom(
+                    minimumSize: const Size(double.infinity, 36),
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    padding: const EdgeInsets.symmetric(vertical: 8),
+                  ),
+                  onPressed: () => _openSalesmanPreview(context),
+                  icon: const Icon(Icons.open_in_new),
+                  label: const Text('Preview Salesman Performance'),
+                ),
               ),
             ],
           ],
@@ -701,82 +761,94 @@ class _SalesmanPerformancePreviewPage extends StatelessWidget {
       appBar: AppBar(
         title: Text('Salesmen: ${_displayName(summary.supervisor)}'),
       ),
-      body: ListView.builder(
-        padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
-        itemCount: summary.team.length,
-        itemBuilder: (context, index) {
-          final salesman = summary.team[index];
-          final submission = submissionsBySalesman[salesman.uid];
-          final target = targetsBySalesman[salesman.uid];
-          final productiveActual = submission?.productiveCalls ?? 0;
-          final sttActual = submission?.sttActual ?? 0.0;
-          final productiveTarget = target?.productiveCallsTarget ?? 0;
-          final sttTarget = target?.sttTarget ?? 0.0;
-          final productiveIndex = productiveTarget == 0
-              ? 0.0
-              : productiveActual / productiveTarget;
-          final sttIndex = sttTarget == 0 ? 0.0 : sttActual / sttTarget;
+      body: LayoutBuilder(
+        builder: (context, constraints) {
+          final isMobileLayout = !kIsWeb && constraints.maxWidth < 700;
+          final columns = isMobileLayout ? 1 : 4;
 
-          return Card(
-            margin: const EdgeInsets.only(bottom: 12),
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
+          return GridView.builder(
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
+            gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+              crossAxisCount: columns,
+              crossAxisSpacing: 12,
+              mainAxisSpacing: 12,
+              mainAxisExtent: isMobileLayout ? 230 : 250,
+            ),
+            itemCount: summary.team.length,
+            itemBuilder: (context, index) {
+              final salesman = summary.team[index];
+              final submission = submissionsBySalesman[salesman.uid];
+              final target = targetsBySalesman[salesman.uid];
+              final productiveActual = submission?.productiveCalls ?? 0;
+              final sttActual = submission?.sttActual ?? 0.0;
+              final productiveTarget = target?.productiveCallsTarget ?? 0;
+              final sttTarget = target?.sttTarget ?? 0.0;
+              final productiveIndex = productiveTarget == 0
+                  ? 0.0
+                  : productiveActual / productiveTarget;
+              final sttIndex = sttTarget == 0 ? 0.0 : sttActual / sttTarget;
+              return Card(
+                margin: EdgeInsets.zero,
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              _displayName(salesman),
-                              style: Theme.of(context).textTheme.titleMedium
-                                  ?.copyWith(fontWeight: FontWeight.w700),
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  _displayName(salesman),
+                                  style: Theme.of(context).textTheme.titleMedium
+                                      ?.copyWith(fontWeight: FontWeight.w700),
+                                ),
+                                const SizedBox(height: 4),
+                                Text(
+                                  salesman.email,
+                                  style: Theme.of(context).textTheme.bodySmall
+                                      ?.copyWith(color: Colors.grey.shade700),
+                                ),
+                              ],
                             ),
-                            const SizedBox(height: 4),
-                            Text(
-                              salesman.email,
-                              style: Theme.of(context).textTheme.bodySmall
-                                  ?.copyWith(color: Colors.grey.shade700),
-                            ),
-                          ],
-                        ),
+                          ),
+                          const SizedBox(width: 12),
+                          _StatusTag(active: salesman.active),
+                        ],
                       ),
-                      const SizedBox(width: 12),
-                      _StatusTag(active: salesman.active),
+                      const SizedBox(height: 14),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: _MetricWithIndexBox(
+                              icon: Icons.storefront,
+                              iconColor: Colors.blue.shade700,
+                              label: 'Productive Calls Target / Actual',
+                              value: '$productiveTarget / $productiveActual',
+                              indexValue: productiveIndex,
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: _MetricWithIndexBox(
+                              icon: Icons.payments_outlined,
+                              iconColor: Colors.teal.shade700,
+                              label: 'STT Target / Actual',
+                              value:
+                                  '${currency.format(sttTarget)} / ${currency.format(sttActual)}',
+                              indexValue: sttIndex,
+                            ),
+                          ),
+                        ],
+                      ),
                     ],
                   ),
-                  const SizedBox(height: 14),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: _MetricWithIndexBox(
-                          icon: Icons.storefront,
-                          iconColor: Colors.blue.shade700,
-                          label: 'Productive Calls Target / Actual',
-                          value: '$productiveTarget / $productiveActual',
-                          indexValue: productiveIndex,
-                        ),
-                      ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: _MetricWithIndexBox(
-                          icon: Icons.payments_outlined,
-                          iconColor: Colors.teal.shade700,
-                          label: 'STT Target / Actual',
-                          value:
-                              '${currency.format(sttTarget)} / ${currency.format(sttActual)}',
-                          indexValue: sttIndex,
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
+                ),
+              );
+            },
           );
         },
       ),
@@ -917,7 +989,7 @@ class _MetricWithIndexBox extends StatelessWidget {
         borderRadius: BorderRadius.circular(12),
       ),
       child: Padding(
-        padding: const EdgeInsets.all(12),
+        padding: const EdgeInsets.all(10),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -976,7 +1048,7 @@ class _CompactIndexIcon extends StatelessWidget {
         borderRadius: BorderRadius.circular(12),
       ),
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
         child: Row(
           children: [
             Icon(icon, size: 16, color: color),
@@ -1010,14 +1082,17 @@ class _StatusTag extends StatelessWidget {
     final fgColor = active ? Colors.green.shade700 : Colors.orange.shade700;
 
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       decoration: BoxDecoration(
         color: bgColor,
         borderRadius: BorderRadius.circular(999),
       ),
       child: Text(
         active ? 'Active' : 'Inactive',
-        style: TextStyle(color: fgColor, fontWeight: FontWeight.w600),
+        style: Theme.of(context).textTheme.labelSmall?.copyWith(
+          color: fgColor,
+          fontWeight: FontWeight.w700,
+        ),
       ),
     );
   }

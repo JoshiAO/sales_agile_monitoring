@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
@@ -121,16 +122,17 @@ class _SuperUserDashboardState extends State<SuperUserDashboard> {
           ),
         ),
         actions: [
-          TextButton(
-            onPressed: () async {
-              await Clipboard.setData(ClipboardData(text: result.zipPath));
-              if (!mounted) return;
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('Archive path copied')),
-              );
-            },
-            child: const Text('Copy Path'),
-          ),
+          if (!kIsWeb)
+            TextButton(
+              onPressed: () async {
+                await Clipboard.setData(ClipboardData(text: result.zipPath));
+                if (!mounted) return;
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Archive path copied')),
+                );
+              },
+              child: const Text('Copy Path'),
+            ),
           FilledButton(
             onPressed: () => Navigator.of(dialogContext).pop(),
             child: const Text('Close'),

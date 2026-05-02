@@ -27,6 +27,16 @@ class _AppRouterState extends State<AppRouter> {
   Widget? _frozenBaseDuringLoading;
   Widget? _lastStableBase;
 
+  String _baseKeyFor(Widget base) {
+    if (base is ActivationScreen) return 'activation';
+    if (base is LoginScreen) return 'login';
+    if (base is SalesmanTabsScreen) return 'salesman';
+    if (base is SupervisorTabsScreen) return 'supervisor';
+    if (base is SuperuserTabsScreen) return 'superuser';
+    if (base is Scaffold) return 'loading';
+    return base.runtimeType.toString();
+  }
+
   Widget _buildLeaseStatusBanner(ActivationProvider activationProvider) {
     final message = activationProvider.leaseStatusMessage;
     if (message == null || message.isEmpty || !activationProvider.isActivated) {
@@ -37,9 +47,7 @@ class _AppRouterState extends State<AppRouter> {
     final background = urgent
         ? const Color(0xFFFDE7E9)
         : const Color(0xFFFFF7E0);
-    final border = urgent
-        ? const Color(0xFFF28B95)
-        : const Color(0xFFF0C36A);
+    final border = urgent ? const Color(0xFFF28B95) : const Color(0xFFF0C36A);
     final textColor = urgent
         ? const Color(0xFF7A1F28)
         : const Color(0xFF6A4A00);
@@ -60,7 +68,9 @@ class _AppRouterState extends State<AppRouter> {
             child: Row(
               children: [
                 Icon(
-                  urgent ? Icons.warning_amber_rounded : Icons.info_outline_rounded,
+                  urgent
+                      ? Icons.warning_amber_rounded
+                      : Icons.info_outline_rounded,
                   color: textColor,
                 ),
                 const SizedBox(width: 8),
@@ -86,9 +96,7 @@ class _AppRouterState extends State<AppRouter> {
     ActivationProvider activationProvider,
   ) {
     if (activationProvider.isChecking) {
-      return const Scaffold(
-        body: Center(child: CircularProgressIndicator()),
-      );
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
 
     if (!activationProvider.isActivated) {
@@ -126,12 +134,41 @@ class _AppRouterState extends State<AppRouter> {
           base = resolvedBase;
         }
 
+        final baseKey = _baseKeyFor(base);
+
         // The wave layer sits on top and manages its own enter/exit lifecycle.
         // When auth loading ends it plays the curtain-reveal, then disappears.
         return Stack(
           fit: StackFit.expand,
           children: [
-            base,
+            AnimatedSwitcher(
+              duration: const Duration(milliseconds: 340),
+              reverseDuration: const Duration(milliseconds: 280),
+              switchInCurve: Curves.easeOutCubic,
+              switchOutCurve: Curves.easeInCubic,
+              layoutBuilder: (currentChild, previousChildren) {
+                return Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    ...previousChildren,
+                    ...?(currentChild == null ? null : [currentChild]),
+                  ],
+                );
+              },
+              transitionBuilder: (child, animation) {
+                final isIncoming = child.key == ValueKey<String>(baseKey);
+                final tween = Tween<Offset>(
+                  begin: isIncoming ? const Offset(1, 0) : Offset.zero,
+                  end: isIncoming ? Offset.zero : const Offset(-0.14, 0),
+                );
+
+                return SlideTransition(
+                  position: animation.drive(tween),
+                  child: child,
+                );
+              },
+              child: KeyedSubtree(key: ValueKey<String>(baseKey), child: base),
+            ),
             _buildLeaseStatusBanner(activationProvider),
             if (activationProvider.isActivated)
               AuthWaveRevealLayer(isAuthLoading: authProvider.isLoading),

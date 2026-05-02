@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 import 'package:compact_sales_monitoring/models/agile_model.dart';
@@ -50,12 +51,15 @@ class _SupervisorHomeScreenState extends State<SupervisorHomeScreen> {
 
     for (final route in routes) {
       final existing = routesBySalesman[route.salesmanId];
-      if (existing == null || _routeSortTime(route).isAfter(_routeSortTime(existing))) {
+      if (existing == null ||
+          _routeSortTime(route).isAfter(_routeSortTime(existing))) {
         routesBySalesman[route.salesmanId] = route;
       }
     }
 
-    team.sort((left, right) => _displayName(left).compareTo(_displayName(right)));
+    team.sort(
+      (left, right) => _displayName(left).compareTo(_displayName(right)),
+    );
 
     return _SupervisorHomeData(
       team: team,
@@ -79,10 +83,7 @@ class _SupervisorHomeScreenState extends State<SupervisorHomeScreen> {
     return trimmedName.isNotEmpty ? trimmedName : salesman.email;
   }
 
-  String _formatCallTime({
-    required bool hasCall,
-    required DateTime timestamp,
-  }) {
+  String _formatCallTime({required bool hasCall, required DateTime timestamp}) {
     if (!hasCall) {
       return '--';
     }
@@ -95,6 +96,31 @@ class _SupervisorHomeScreenState extends State<SupervisorHomeScreen> {
       _homeDataFuture = nextFuture;
     });
     await nextFuture;
+  }
+
+  int _cardsPerRow(double maxWidth) {
+    final isMobileLayout = !kIsWeb && maxWidth < 700;
+    if (isMobileLayout) {
+      return 1;
+    }
+
+    if (kIsWeb) {
+      if (maxWidth >= 1500) {
+        return 4;
+      }
+      if (maxWidth >= 760) {
+        return 3;
+      }
+      if (maxWidth >= 560) {
+        return 2;
+      }
+      return 1;
+    }
+
+    final compact = _cardMode == _SupervisorCardMode.compact;
+    final minCardWidth = compact ? 300.0 : 340.0;
+    final columns = ((maxWidth + 12) / (minCardWidth + 12)).floor();
+    return columns.clamp(2, 4);
   }
 
   Future<void> _openRoutePreview(AppUser salesman, SalesRoute route) async {
@@ -127,10 +153,7 @@ class _SupervisorHomeScreenState extends State<SupervisorHomeScreen> {
                 onTap: () {
                   context.read<AuthProvider>().logout();
                 },
-                child: const Text(
-                  'Logout',
-                  style: TextStyle(fontSize: 14),
-                ),
+                child: const Text('Logout', style: TextStyle(fontSize: 14)),
               ),
             ),
           ),
@@ -195,68 +218,83 @@ class _SupervisorHomeScreenState extends State<SupervisorHomeScreen> {
             );
           }
 
-          return RefreshIndicator(
-            onRefresh: _refresh,
-            child: ListView.builder(
-              physics: const AlwaysScrollableScrollPhysics(),
-              padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
-              itemCount: data.team.length + 1,
-              itemBuilder: (context, index) {
-                if (index == 0) {
-                  return Padding(
-                    padding: const EdgeInsets.only(bottom: 12),
-                    child: Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                'Assigned Salesmen',
-                                style: Theme.of(context).textTheme.titleLarge,
-                              ),
-                              const SizedBox(height: 4),
-                              Text(
-                                '${data.team.length} team member${data.team.length == 1 ? '' : 's'}',
-                                style: Theme.of(context)
-                                    .textTheme
-                                    .bodyMedium
-                                    ?.copyWith(
-                                      color: Colors.grey.shade700,
-                                    ),
-                              ),
-                            ],
-                          ),
-                        ),
-                        const SizedBox(width: 12),
-                        _CardModeToggle(
-                          mode: _cardMode,
-                          onModeChanged: (mode) {
-                            setState(() {
-                              _cardMode = mode;
-                            });
-                          },
-                        ),
-                      ],
-                    ),
-                  );
-                }
+          return LayoutBuilder(
+            builder: (context, constraints) {
+              final columns = _cardsPerRow(constraints.maxWidth);
+              const spacing = 12.0;
+              final cardExtent = _cardMode == _SupervisorCardMode.wide
+                  ? 284.0
+                  : 110.0;
 
-                final salesman = data.team[index - 1];
-                final route = data.routesBySalesman[salesman.uid];
-                return _SalesmanSummaryCard(
-                  salesman: salesman,
-                  route: route,
-                  submission: data.submissionsBySalesman[salesman.uid],
-                  cardMode: _cardMode,
-                  formatCallTime: _formatCallTime,
-                  onPreviewCalls: route == null
-                      ? null
-                      : () => _openRoutePreview(salesman, route),
-                );
-              },
-            ),
+              return RefreshIndicator(
+                onRefresh: _refresh,
+                child: ListView(
+                  physics: const AlwaysScrollableScrollPhysics(),
+                  padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 12),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  'Assigned Salesmen',
+                                  style: Theme.of(context).textTheme.titleLarge,
+                                ),
+                                const SizedBox(height: 4),
+                                Text(
+                                  '${data.team.length} team member${data.team.length == 1 ? '' : 's'}',
+                                  style: Theme.of(context).textTheme.bodyMedium
+                                      ?.copyWith(color: Colors.grey.shade700),
+                                ),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          _CardModeToggle(
+                            mode: _cardMode,
+                            onModeChanged: (mode) {
+                              setState(() {
+                                _cardMode = mode;
+                              });
+                            },
+                          ),
+                        ],
+                      ),
+                    ),
+                    GridView.builder(
+                      shrinkWrap: true,
+                      physics: const NeverScrollableScrollPhysics(),
+                      itemCount: data.team.length,
+                      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                        crossAxisCount: columns,
+                        crossAxisSpacing: spacing,
+                        mainAxisSpacing: spacing,
+                        mainAxisExtent: cardExtent,
+                      ),
+                      itemBuilder: (context, index) {
+                        final salesman = data.team[index];
+                        final route = data.routesBySalesman[salesman.uid];
+                        return _SalesmanSummaryCard(
+                          salesman: salesman,
+                          route: route,
+                          submission: data.submissionsBySalesman[salesman.uid],
+                          cardMode: _cardMode,
+                          formatCallTime: _formatCallTime,
+                          onPreviewCalls: route == null
+                              ? null
+                              : () => _openRoutePreview(salesman, route),
+                        );
+                      },
+                    ),
+                  ],
+                ),
+              );
+            },
           );
         },
       ),
@@ -270,7 +308,7 @@ class _SalesmanSummaryCard extends StatelessWidget {
   final AgileSubmission? submission;
   final _SupervisorCardMode cardMode;
   final String Function({required bool hasCall, required DateTime timestamp})
-      formatCallTime;
+  formatCallTime;
   final Future<void> Function()? onPreviewCalls;
 
   const _SalesmanSummaryCard({
@@ -335,6 +373,10 @@ class _SalesmanSummaryCard extends StatelessWidget {
     }
   }
 
+  bool get _showEmailLine {
+    return _displayName.toLowerCase() != salesman.email.trim().toLowerCase();
+  }
+
   Widget _buildWideCard(BuildContext context) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -345,62 +387,58 @@ class _SalesmanSummaryCard extends StatelessWidget {
             Expanded(
               child: Text(
                 _displayName,
-                style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                      fontWeight: FontWeight.w700,
-                    ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: Theme.of(
+                  context,
+                ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
               ),
             ),
             const SizedBox(width: 12),
-            Flexible(
-              child: Text(
-                salesman.email,
-                textAlign: TextAlign.right,
-                style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: Colors.grey.shade700,
-                      fontSize: 11,
-                    ),
-              ),
-            ),
+            _StateBadge(active: salesman.active),
           ],
         ),
-        const SizedBox(height: 16),
-        IntrinsicHeight(
-          child: Row(
-            children: [
-              Expanded(
-                child: _MetricCell(
-                  label: 'First Call',
-                  value: _firstCallText,
-                ),
-              ),
-              const VerticalDivider(width: 1),
-              Expanded(
-                child: _MetricCell(
-                  label: 'Last Call',
-                  value: _lastCallText,
-                ),
-              ),
-              const VerticalDivider(width: 1),
-              Expanded(
-                child: _MetricCell(
-                  label: 'Actual Productive Calls',
-                  value: _actualProductiveCallsText,
-                ),
-              ),
-              const VerticalDivider(width: 1),
-              Expanded(
-                child: _MetricCell(
-                  label: 'Actual STT',
-                  value: _actualSttText,
-                ),
-              ),
-            ],
+        if (_showEmailLine) ...[
+          const SizedBox(height: 4),
+          Text(
+            salesman.email,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+              color: Colors.grey.shade700,
+              fontSize: 11,
+            ),
           ),
+        ] else ...[
+          const SizedBox(height: 16),
+        ],
+        const SizedBox(height: 10),
+        GridView.count(
+          crossAxisCount: 2,
+          mainAxisSpacing: 8,
+          crossAxisSpacing: 8,
+          childAspectRatio: 2.7,
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          children: [
+            _MetricCell(label: 'First Call', value: _firstCallText),
+            _MetricCell(label: 'Last Call', value: _lastCallText),
+            _MetricCell(
+              label: 'Actual Productive Calls',
+              value: _actualProductiveCallsText,
+            ),
+            _MetricCell(label: 'Actual STT', value: _actualSttText),
+          ],
         ),
-        const SizedBox(height: 12),
-        Align(
-          alignment: Alignment.centerLeft,
+        const SizedBox(height: 10),
+        SizedBox(
+          width: double.infinity,
           child: OutlinedButton(
+            style: OutlinedButton.styleFrom(
+              minimumSize: const Size(double.infinity, 36),
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              padding: const EdgeInsets.symmetric(vertical: 8),
+            ),
             onPressed: onPreviewCalls == null
                 ? null
                 : () {
@@ -421,9 +459,9 @@ class _SalesmanSummaryCard extends StatelessWidget {
           _displayName,
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
-          style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                fontWeight: FontWeight.w700,
-              ),
+          style: Theme.of(
+            context,
+          ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700),
         ),
         const SizedBox(height: 10),
         Row(
@@ -485,12 +523,43 @@ class _SalesmanSummaryCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Card(
-      margin: const EdgeInsets.only(bottom: 12),
+      margin: EdgeInsets.zero,
+      elevation: 0,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: BorderSide(color: Colors.grey.shade300),
+      ),
       child: Padding(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(12),
         child: cardMode == _SupervisorCardMode.wide
             ? _buildWideCard(context)
             : _buildCompactCard(context),
+      ),
+    );
+  }
+}
+
+class _StateBadge extends StatelessWidget {
+  final bool active;
+
+  const _StateBadge({required this.active});
+
+  @override
+  Widget build(BuildContext context) {
+    final bgColor = active ? Colors.green.shade50 : Colors.orange.shade50;
+    final fgColor = active ? Colors.green.shade700 : Colors.orange.shade700;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: bgColor,
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Text(
+        active ? 'Active' : 'Inactive',
+        style: Theme.of(context).textTheme.labelSmall?.copyWith(
+          color: fgColor,
+          fontWeight: FontWeight.w700,
+        ),
       ),
     );
   }
@@ -512,20 +581,16 @@ class _CompactMetric extends StatelessWidget {
     return Row(
       mainAxisAlignment: MainAxisAlignment.center,
       children: [
-        Icon(
-          icon,
-          size: 16,
-          color: iconColor ?? Colors.grey.shade700,
-        ),
+        Icon(icon, size: 16, color: iconColor ?? Colors.grey.shade700),
         const SizedBox(width: 4),
         Expanded(
           child: Text(
             value,
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
-            style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  fontWeight: FontWeight.w600,
-                ),
+            style: Theme.of(
+              context,
+            ).textTheme.bodySmall?.copyWith(fontWeight: FontWeight.w600),
           ),
         ),
       ],
@@ -537,10 +602,7 @@ class _CardModeToggle extends StatelessWidget {
   final _SupervisorCardMode mode;
   final ValueChanged<_SupervisorCardMode> onModeChanged;
 
-  const _CardModeToggle({
-    required this.mode,
-    required this.onModeChanged,
-  });
+  const _CardModeToggle({required this.mode, required this.onModeChanged});
 
   @override
   Widget build(BuildContext context) {
@@ -598,32 +660,38 @@ class _MetricCell extends StatelessWidget {
   final String label;
   final String value;
 
-  const _MetricCell({
-    required this.label,
-    required this.value,
-  });
+  const _MetricCell({required this.label, required this.value});
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 8),
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      decoration: BoxDecoration(
+        border: Border.all(color: Colors.grey.shade300),
+        borderRadius: BorderRadius.circular(12),
+      ),
       child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
           Text(
             label,
-            textAlign: TextAlign.center,
-            style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                  fontWeight: FontWeight.w700,
-                ),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: Theme.of(context).textTheme.labelSmall?.copyWith(
+              fontWeight: FontWeight.w700,
+              color: Colors.grey.shade700,
+            ),
           ),
-          const SizedBox(height: 10),
+          const SizedBox(height: 4),
           Text(
             value,
-            textAlign: TextAlign.center,
-            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                  color: Colors.grey.shade800,
-                ),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: Theme.of(context).textTheme.titleSmall?.copyWith(
+              fontWeight: FontWeight.w700,
+              color: Colors.grey.shade900,
+            ),
           ),
         ],
       ),
@@ -643,7 +711,4 @@ class _SupervisorHomeData {
   });
 }
 
-enum _SupervisorCardMode {
-  wide,
-  compact,
-}
+enum _SupervisorCardMode { wide, compact }

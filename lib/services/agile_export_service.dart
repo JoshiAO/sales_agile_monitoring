@@ -1,4 +1,3 @@
-import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:archive/archive.dart';
@@ -8,7 +7,7 @@ import 'package:compact_sales_monitoring/models/user_model.dart';
 import 'package:compact_sales_monitoring/services/firestore_service.dart';
 import 'package:excel/excel.dart';
 import 'package:intl/intl.dart';
-import 'package:path_provider/path_provider.dart';
+import 'package:compact_sales_monitoring/services/export_file_saver/export_file_saver.dart';
 
 class AgileExportResult {
   final String outputPath;
@@ -327,37 +326,7 @@ class AgileExportService {
   }
 
   Future<String> _saveToDownloads(String fileName, Uint8List bytes) async {
-    final outputDir = await _resolveDownloadsDirectory();
-    if (!await outputDir.exists()) {
-      await outputDir.create(recursive: true);
-    }
-
-    final outputPath = '${outputDir.path}/$fileName';
-    await File(outputPath).writeAsBytes(bytes, flush: true);
-    return outputPath;
-  }
-
-  Future<Directory> _resolveDownloadsDirectory() async {
-    if (Platform.isAndroid) {
-      final dir = Directory('/storage/emulated/0/Download');
-      if (await dir.exists()) return dir;
-    }
-
-    if (Platform.isWindows) {
-      final userProfile = Platform.environment['USERPROFILE'];
-      if (userProfile != null && userProfile.isNotEmpty) {
-        return Directory('$userProfile/Downloads');
-      }
-    }
-
-    if (Platform.isMacOS || Platform.isLinux) {
-      final home = Platform.environment['HOME'];
-      if (home != null && home.isNotEmpty) {
-        return Directory('$home/Downloads');
-      }
-    }
-
-    return getApplicationDocumentsDirectory();
+    return saveExportFile(fileName, bytes);
   }
 
   String _formatRangeLabel(DateTime startDate, DateTime endDate) {

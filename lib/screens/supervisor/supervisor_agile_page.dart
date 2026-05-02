@@ -170,6 +170,31 @@ class _SupervisorAgilePageState extends State<SupervisorAgilePage> {
     await nextFuture;
   }
 
+  int _cardsPerRow(double maxWidth) {
+    final isMobileLayout = !kIsWeb && maxWidth < 700;
+    if (isMobileLayout) {
+      return 1;
+    }
+
+    if (kIsWeb) {
+      if (maxWidth >= 1500) {
+        return 4;
+      }
+      if (maxWidth >= 760) {
+        return 3;
+      }
+      if (maxWidth >= 560) {
+        return 2;
+      }
+      return 1;
+    }
+
+    final compact = _viewMode == _SupervisorAgileViewMode.compact;
+    final minCardWidth = compact ? 320.0 : 360.0;
+    final columns = ((maxWidth + 12) / (minCardWidth + 12)).floor();
+    return columns.clamp(2, 4);
+  }
+
   void _onDateChanged(DateTime newDate) {
     setState(() {
       _selectedDate = newDate;
@@ -324,21 +349,23 @@ class _SupervisorAgilePageState extends State<SupervisorAgilePage> {
             ],
           ),
           actions: [
-            TextButton(
-              onPressed: () async {
-                await Clipboard.setData(ClipboardData(text: outputPath));
-                if (!dialogContext.mounted) return;
-                ScaffoldMessenger.of(
-                  dialogContext,
-                ).showSnackBar(const SnackBar(content: Text('Path copied')));
-              },
-              child: const Text('Copy Path'),
-            ),
-            TextButton(
-              onPressed: () =>
-                  _openExportFolder(dialogContext, normalizedFolderPath),
-              child: const Text('Open Folder'),
-            ),
+            if (!kIsWeb)
+              TextButton(
+                onPressed: () async {
+                  await Clipboard.setData(ClipboardData(text: outputPath));
+                  if (!dialogContext.mounted) return;
+                  ScaffoldMessenger.of(
+                    dialogContext,
+                  ).showSnackBar(const SnackBar(content: Text('Path copied')));
+                },
+                child: const Text('Copy Path'),
+              ),
+            if (!kIsWeb)
+              TextButton(
+                onPressed: () =>
+                    _openExportFolder(dialogContext, normalizedFolderPath),
+                child: const Text('Open Folder'),
+              ),
             FilledButton(
               onPressed: () => Navigator.of(dialogContext).pop(),
               child: const Text('Close'),
@@ -529,117 +556,142 @@ class _SupervisorAgilePageState extends State<SupervisorAgilePage> {
             child: Form(
               key: _formKey,
               autovalidateMode: AutovalidateMode.onUserInteraction,
-              child: ListView.builder(
-                physics: const AlwaysScrollableScrollPhysics(),
-                padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
-                itemCount: data.team.length + 1,
-                itemBuilder: (context, index) {
-                  if (index == 0) {
-                    return Padding(
-                      padding: const EdgeInsets.only(bottom: 12),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          DateSelectorWidget(
-                            initialDate: _selectedDate,
-                            onDateChanged: _onDateChanged,
-                          ),
-                          const SizedBox(height: 12),
-                          Row(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Text(
-                                      'Agile Team Performance',
-                                      style: Theme.of(
-                                        context,
-                                      ).textTheme.titleLarge,
-                                    ),
-                                    const SizedBox(height: 4),
-                                    Text(
-                                      '${data.team.length} team member${data.team.length == 1 ? '' : 's'} • Date: ${data.date}',
-                                      style: Theme.of(context)
-                                          .textTheme
-                                          .bodyMedium
-                                          ?.copyWith(
-                                            color: Colors.grey.shade700,
-                                          ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                              const SizedBox(width: 12),
-                              _AgileViewToggle(
-                                mode: _viewMode,
-                                onChanged: (mode) {
-                                  setState(() {
-                                    _viewMode = mode;
-                                  });
-                                },
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 12),
-                          LayoutBuilder(
-                            builder: (context, constraints) {
-                              final stacked = constraints.maxWidth < 560;
-                              final first = _SummaryMetricCard(
-                                label: 'Team Total Productive Calls',
-                                value: '$totalProductive',
-                                icon: Icons.storefront,
-                                color: Colors.blue,
-                              );
-                              final second = _SummaryMetricCard(
-                                label: 'Team Total Actual Sale',
-                                value: currency.format(totalActualSale),
-                                icon: Icons.payments_outlined,
-                                color: Colors.teal,
-                              );
+              child: LayoutBuilder(
+                builder: (context, constraints) {
+                  final columns = _cardsPerRow(constraints.maxWidth);
+                  const spacing = 12.0;
+                  final cardExtent = _viewMode == _SupervisorAgileViewMode.wide
+                      ? 294.0
+                      : 118.0;
 
-                              if (stacked) {
-                                return Column(
+                  return ListView(
+                    physics: const AlwaysScrollableScrollPhysics(),
+                    padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
+                    children: [
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 12),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            DateSelectorWidget(
+                              initialDate: _selectedDate,
+                              onDateChanged: _onDateChanged,
+                            ),
+                            const SizedBox(height: 12),
+                            Row(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        'Agile Team Performance',
+                                        style: Theme.of(
+                                          context,
+                                        ).textTheme.titleLarge,
+                                      ),
+                                      const SizedBox(height: 4),
+                                      Text(
+                                        '${data.team.length} team member${data.team.length == 1 ? '' : 's'} • Date: ${data.date}',
+                                        style: Theme.of(context)
+                                            .textTheme
+                                            .bodyMedium
+                                            ?.copyWith(
+                                              color: Colors.grey.shade700,
+                                            ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                const SizedBox(width: 12),
+                                _AgileViewToggle(
+                                  mode: _viewMode,
+                                  onChanged: (mode) {
+                                    setState(() {
+                                      _viewMode = mode;
+                                    });
+                                  },
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 12),
+                            LayoutBuilder(
+                              builder: (context, constraints) {
+                                final stacked = constraints.maxWidth < 560;
+                                final first = _SummaryMetricCard(
+                                  label: 'Team Total Productive Calls',
+                                  value: '$totalProductive',
+                                  icon: Icons.storefront,
+                                  color: Colors.blue,
+                                );
+                                final second = _SummaryMetricCard(
+                                  label: 'Team Total Actual Sale',
+                                  value: currency.format(totalActualSale),
+                                  icon: Icons.payments_outlined,
+                                  color: Colors.teal,
+                                );
+
+                                if (stacked) {
+                                  return Column(
+                                    children: [
+                                      first,
+                                      const SizedBox(height: 10),
+                                      second,
+                                    ],
+                                  );
+                                }
+
+                                return Row(
                                   children: [
-                                    first,
-                                    const SizedBox(height: 10),
-                                    second,
+                                    Expanded(child: first),
+                                    const SizedBox(width: 10),
+                                    Expanded(child: second),
                                   ],
                                 );
-                              }
-
-                              return Row(
-                                children: [
-                                  Expanded(child: first),
-                                  const SizedBox(width: 10),
-                                  Expanded(child: second),
-                                ],
-                              );
-                            },
-                          ),
-                        ],
+                              },
+                            ),
+                          ],
+                        ),
                       ),
-                    );
-                  }
+                      GridView.builder(
+                        shrinkWrap: true,
+                        physics: const NeverScrollableScrollPhysics(),
+                        itemCount: data.team.length,
+                        gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                          crossAxisCount: columns,
+                          crossAxisSpacing: spacing,
+                          mainAxisSpacing: spacing,
+                          mainAxisExtent: cardExtent,
+                        ),
+                        itemBuilder: (context, index) {
+                          final salesman = data.team[index];
+                          final submission =
+                              data.submissionsBySalesman[salesman.uid];
+                          final productiveActual =
+                              submission?.productiveCalls ?? 0;
+                          final sttActual = submission?.sttActual ?? 0.0;
+                          final productiveTarget = _productiveTargetFor(
+                            salesman.uid,
+                          );
+                          final sttTarget = _sttTargetFor(salesman.uid);
 
-                  final salesman = data.team[index - 1];
-                  final submission = data.submissionsBySalesman[salesman.uid];
-                  final productiveActual = submission?.productiveCalls ?? 0;
-                  final sttActual = submission?.sttActual ?? 0.0;
-                  final productiveTarget = _productiveTargetFor(salesman.uid);
-                  final sttTarget = _sttTargetFor(salesman.uid);
-
-                  return _SupervisorSalesmanAgileCard(
-                    salesman: salesman,
-                    productiveTargetController:
-                        _productiveTargetControllers[salesman.uid]!,
-                    sttTargetController: _sttTargetControllers[salesman.uid]!,
-                    productiveActual: productiveActual,
-                    sttActual: sttActual,
-                    productiveTarget: productiveTarget,
-                    sttTarget: sttTarget,
-                    mode: _viewMode,
+                          return _SupervisorSalesmanAgileCard(
+                            salesman: salesman,
+                            productiveTargetController:
+                                _productiveTargetControllers[salesman.uid]!,
+                            sttTargetController:
+                                _sttTargetControllers[salesman.uid]!,
+                            productiveActual: productiveActual,
+                            sttActual: sttActual,
+                            productiveTarget: productiveTarget,
+                            sttTarget: sttTarget,
+                            mode: _viewMode,
+                          );
+                        },
+                      ),
+                    ],
                   );
                 },
               ),
@@ -677,6 +729,10 @@ class _SupervisorSalesmanAgileCard extends StatelessWidget {
     return trimmedName.isNotEmpty ? trimmedName : salesman.email;
   }
 
+  bool get _showEmailLine {
+    return _displayName.toLowerCase() != salesman.email.trim().toLowerCase();
+  }
+
   double _indexValue({required double actual, required double target}) {
     if (target <= 0) return 0;
     return actual / target;
@@ -694,9 +750,14 @@ class _SupervisorSalesmanAgileCard extends StatelessWidget {
     final sttPercent = sttIndex * 100;
 
     return Card(
-      margin: const EdgeInsets.only(bottom: 12),
+      margin: EdgeInsets.zero,
+      elevation: 0,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: BorderSide(color: Colors.grey.shade300),
+      ),
       child: Padding(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(12),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -709,16 +770,23 @@ class _SupervisorSalesmanAgileCard extends StatelessWidget {
                     children: [
                       Text(
                         _displayName,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
                         style: Theme.of(context).textTheme.titleMedium
                             ?.copyWith(fontWeight: FontWeight.w700),
                       ),
-                      const SizedBox(height: 4),
-                      Text(
-                        salesman.email,
-                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: Colors.grey.shade700,
+                      if (_showEmailLine) ...[
+                        const SizedBox(height: 4),
+                        Text(
+                          salesman.email,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: Theme.of(context).textTheme.bodySmall
+                              ?.copyWith(color: Colors.grey.shade700),
                         ),
-                      ),
+                      ] else ...[
+                        const SizedBox(height: 16),
+                      ],
                     ],
                   ),
                 ),
@@ -726,7 +794,7 @@ class _SupervisorSalesmanAgileCard extends StatelessWidget {
                 _StatusTag(active: salesman.active),
               ],
             ),
-            const SizedBox(height: 14),
+            const SizedBox(height: 10),
             if (mode == _SupervisorAgileViewMode.wide) ...[
               LayoutBuilder(
                 builder: (context, constraints) {
@@ -737,9 +805,14 @@ class _SupervisorSalesmanAgileCard extends StatelessWidget {
                     keyboardType: TextInputType.number,
                     inputFormatters: [FilteringTextInputFormatter.digitsOnly],
                     decoration: const InputDecoration(
+                      isDense: true,
                       labelText: 'Productive Calls Target',
                       hintText: 'Enter target (0-100)',
                       border: OutlineInputBorder(),
+                      contentPadding: EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 10,
+                      ),
                     ),
                     validator: (value) {
                       final parsed = int.tryParse((value ?? '').trim());
@@ -758,9 +831,14 @@ class _SupervisorSalesmanAgileCard extends StatelessWidget {
                     ),
                     inputFormatters: const [_TwoDecimalInputFormatter()],
                     decoration: const InputDecoration(
+                      isDense: true,
                       labelText: 'STT Target for today',
                       hintText: 'e.g. 5000.00',
                       border: OutlineInputBorder(),
+                      contentPadding: EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 10,
+                      ),
                     ),
                     validator: (value) {
                       final text = (value ?? '').trim();
@@ -791,7 +869,7 @@ class _SupervisorSalesmanAgileCard extends StatelessWidget {
                   );
                 },
               ),
-              const SizedBox(height: 12),
+              const SizedBox(height: 10),
               Row(
                 children: [
                   Expanded(
@@ -871,7 +949,7 @@ class _MetricWithIndexBox extends StatelessWidget {
         borderRadius: BorderRadius.circular(12),
       ),
       child: Padding(
-        padding: const EdgeInsets.all(12),
+        padding: const EdgeInsets.all(10),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -930,7 +1008,7 @@ class _CompactIndexIcon extends StatelessWidget {
         borderRadius: BorderRadius.circular(12),
       ),
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
         child: Row(
           children: [
             Icon(icon, size: 16, color: color),
@@ -1073,14 +1151,17 @@ class _StatusTag extends StatelessWidget {
     final fgColor = active ? Colors.green.shade700 : Colors.orange.shade700;
 
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       decoration: BoxDecoration(
         color: bgColor,
         borderRadius: BorderRadius.circular(999),
       ),
       child: Text(
         active ? 'Active' : 'Inactive',
-        style: TextStyle(color: fgColor, fontWeight: FontWeight.w600),
+        style: Theme.of(context).textTheme.labelSmall?.copyWith(
+          color: fgColor,
+          fontWeight: FontWeight.w700,
+        ),
       ),
     );
   }
