@@ -55,7 +55,7 @@ class _SuperuserTabsScreenState extends State<SuperuserTabsScreen> {
     if (kIsWeb) {
       return LayoutBuilder(
         builder: (context, constraints) {
-          final isExpandedRail = constraints.maxWidth >= 1180;
+          final isExpandedRail = constraints.maxWidth >= 1450;
           return Scaffold(
             body: SafeArea(
               child: Row(
@@ -68,7 +68,7 @@ class _SuperuserTabsScreenState extends State<SuperuserTabsScreen> {
                     extended: isExpandedRail,
                     labelType: NavigationRailLabelType.none,
                     minWidth: 68,
-                    minExtendedWidth: 210,
+                    minExtendedWidth: 196,
                     destinations: const [
                       NavigationRailDestination(
                         icon: Icon(Icons.home_outlined),
