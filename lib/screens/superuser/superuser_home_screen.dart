@@ -218,8 +218,9 @@ class _SuperuserHomeScreenState extends State<SuperuserHomeScreen> {
             builder: (context, constraints) {
               final columns = _cardsPerRow(constraints.maxWidth);
               const spacing = 12.0;
-              final cardExtent =
-                  _cardMode == _SuperuserCardMode.wide ? 372.0 : 112.0;
+              final cardExtent = _cardMode == _SuperuserCardMode.wide
+                  ? (columns == 1 ? 520.0 : 460.0)
+                  : 112.0;
 
               return RefreshIndicator(
                 onRefresh: _refresh,

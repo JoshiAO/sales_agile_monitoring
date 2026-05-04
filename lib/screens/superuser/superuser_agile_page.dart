@@ -403,8 +403,9 @@ class _SuperuserAgilePageState extends State<SuperuserAgilePage> {
             builder: (context, constraints) {
               final columns = _cardsPerRow(constraints.maxWidth);
               const spacing = 12.0;
-              final cardExtent =
-                  _viewMode == _SuperuserAgileViewMode.wide ? 236.0 : 126.0;
+              final cardExtent = _viewMode == _SuperuserAgileViewMode.wide
+                  ? (columns == 1 ? 300.0 : 270.0)
+                  : 126.0;
 
               return RefreshIndicator(
                 onRefresh: _refresh,

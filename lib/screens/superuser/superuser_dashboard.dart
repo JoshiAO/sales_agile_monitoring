@@ -24,12 +24,17 @@ class SuperUserDashboard extends StatefulWidget {
 }
 
 class _SuperUserDashboardState extends State<SuperUserDashboard> {
+  static const double _checkpointZoomThreshold = 13.5;
+  static const double _checkpointEndpointOverlapMeters = 85;
   late DateTime _selectedDate;
   final FirestoreService _firestoreService = FirestoreService();
   final ArchiveService _archiveService = ArchiveService();
   late MapController _mapController;
   final Map<String, AppUser> _salesmenCache = {};
   bool _isArchiving = false;
+  bool _showLegend = false;
+  double _currentZoom = 12;
+  String? _selectedCheckpointId;
 
   @override
   void initState() {
@@ -269,6 +274,7 @@ class _SuperUserDashboardState extends State<SuperUserDashboard> {
     BuildContext context,
     SalesRoute route,
     RouteCheckpoint checkpoint,
+    bool isSelected,
   ) {
     final checkpointTime = DateFormat('hh:mm a').format(checkpoint.timestamp);
     final routeColor = context.read<RouteProvider>().routeColorForSalesman(
@@ -277,30 +283,97 @@ class _SuperUserDashboardState extends State<SuperUserDashboard> {
 
     return GestureDetector(
       onTap: () {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Checkpoint: $checkpointTime'),
-            duration: const Duration(seconds: 2),
-          ),
-        );
+        setState(() {
+          _selectedCheckpointId = _checkpointId(route, checkpoint);
+        });
       },
-      child: Container(
-        width: 18,
-        height: 18,
-        decoration: BoxDecoration(
-          color: Colors.white,
-          shape: BoxShape.circle,
-          border: Border.all(color: routeColor, width: 2),
-          boxShadow: [
-            BoxShadow(
-              blurRadius: 4,
-              color: Colors.black.withValues(alpha: 0.25),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (isSelected)
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+              decoration: BoxDecoration(
+                color: Colors.black.withValues(alpha: 0.78),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Text(
+                checkpointTime,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 10,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
             ),
-          ],
-        ),
-        child: Icon(Icons.place, size: 10, color: routeColor),
+          if (isSelected) const SizedBox(height: 4),
+          Container(
+            width: isSelected ? 22 : 18,
+            height: isSelected ? 22 : 18,
+            decoration: BoxDecoration(
+              color: Colors.white,
+              shape: BoxShape.circle,
+              border: Border.all(
+                color: routeColor,
+                width: isSelected ? 3.5 : 2,
+              ),
+              boxShadow: [
+                if (isSelected)
+                  BoxShadow(
+                    blurRadius: 10,
+                    spreadRadius: 2,
+                    color: routeColor.withValues(alpha: 0.5),
+                  ),
+                BoxShadow(
+                  blurRadius: 4,
+                  color: Colors.black.withValues(alpha: 0.25),
+                ),
+              ],
+            ),
+            child: Icon(
+              Icons.place,
+              size: isSelected ? 13 : 10,
+              color: routeColor,
+            ),
+          ),
+        ],
       ),
     );
+  }
+
+  String _checkpointId(SalesRoute route, RouteCheckpoint checkpoint) {
+    return '${route.routeId}_${checkpoint.timestamp.millisecondsSinceEpoch}_${checkpoint.lat}_${checkpoint.lon}';
+  }
+
+  bool _shouldShowCheckpoint(SalesRoute route, RouteCheckpoint checkpoint) {
+    if (_currentZoom < _checkpointZoomThreshold) {
+      return false;
+    }
+
+    final distance = const Distance();
+    final checkpointPoint = LatLng(checkpoint.lat, checkpoint.lon);
+    final firstPoint = LatLng(route.first.lat, route.first.lon);
+    final firstDistanceMeters = distance.as(
+      LengthUnit.Meter,
+      checkpointPoint,
+      firstPoint,
+    );
+
+    if (firstDistanceMeters <= _checkpointEndpointOverlapMeters) {
+      return false;
+    }
+
+    if (!route.hasLastCall) {
+      return true;
+    }
+
+    final lastPoint = LatLng(route.last.lat, route.last.lon);
+    final lastDistanceMeters = distance.as(
+      LengthUnit.Meter,
+      checkpointPoint,
+      lastPoint,
+    );
+    return lastDistanceMeters > _checkpointEndpointOverlapMeters;
   }
 
   Widget _buildRouteStatusChip(SalesRoute route, RouteProvider routeProvider) {
@@ -429,6 +502,22 @@ class _SuperUserDashboardState extends State<SuperUserDashboard> {
                           (minLon + maxLon) / 2,
                         ),
                         initialZoom: 12,
+                        onTap: (tapPosition, point) {
+                          if (_selectedCheckpointId != null) {
+                            setState(() => _selectedCheckpointId = null);
+                          }
+                        },
+                        onPositionChanged: (position, hasGesture) {
+                          final zoom = position.zoom;
+                          if (zoom != null && zoom != _currentZoom && mounted) {
+                            setState(() {
+                              _currentZoom = zoom;
+                              if (_currentZoom < _checkpointZoomThreshold) {
+                                _selectedCheckpointId = null;
+                              }
+                            });
+                          }
+                        },
                       ),
                       children: [
                         // Tile Layer
@@ -507,7 +596,48 @@ class _SuperUserDashboardState extends State<SuperUserDashboard> {
                               .toList(),
                         ),
 
-                        // Markers
+                        // Checkpoints under endpoint flags.
+                        MarkerLayer(
+                          markers: routeProvider.routes
+                              .expand(
+                                (route) => [
+                                  ...route.sortedCheckpoints
+                                      .where(
+                                        (checkpoint) => _shouldShowCheckpoint(
+                                          route,
+                                          checkpoint,
+                                        ),
+                                      )
+                                      .map((checkpoint) {
+                                        final checkpointId = _checkpointId(
+                                          route,
+                                          checkpoint,
+                                        );
+                                        final isSelected =
+                                            checkpointId ==
+                                            _selectedCheckpointId;
+                                        return Marker(
+                                          point: LatLng(
+                                            checkpoint.lat,
+                                            checkpoint.lon,
+                                          ),
+                                          width: isSelected ? 90 : 24,
+                                          height: isSelected ? 48 : 24,
+                                          rotate: true,
+                                          child: _buildCheckpointMarker(
+                                            context,
+                                            route,
+                                            checkpoint,
+                                            isSelected,
+                                          ),
+                                        );
+                                      }),
+                                ],
+                              )
+                              .toList(),
+                        ),
+
+                        // First/last flags are rendered above checkpoints.
                         MarkerLayer(
                           markers: routeProvider.routes
                               .expand(
@@ -541,22 +671,6 @@ class _SuperUserDashboardState extends State<SuperUserDashboard> {
                                         isFirstCall: false,
                                       ),
                                     ),
-                                  ...route.sortedCheckpoints.map(
-                                    (checkpoint) => Marker(
-                                      point: LatLng(
-                                        checkpoint.lat,
-                                        checkpoint.lon,
-                                      ),
-                                      width: 24,
-                                      height: 24,
-                                      rotate: true,
-                                      child: _buildCheckpointMarker(
-                                        context,
-                                        route,
-                                        checkpoint,
-                                      ),
-                                    ),
-                                  ),
                                 ],
                               )
                               .toList(),
@@ -616,44 +730,73 @@ class _SuperUserDashboardState extends State<SuperUserDashboard> {
                     Positioned(
                       top: 12,
                       right: 12,
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 10,
-                          vertical: 8,
-                        ),
-                        decoration: BoxDecoration(
-                          color: Colors.white.withValues(alpha: 0.9),
-                          borderRadius: BorderRadius.circular(10),
-                          boxShadow: [
-                            BoxShadow(
-                              blurRadius: 6,
-                              color: Colors.black.withValues(alpha: 0.2),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.end,
+                        children: [
+                          DecoratedBox(
+                            decoration: BoxDecoration(
+                              color: Colors.white.withValues(alpha: 0.92),
+                              shape: BoxShape.circle,
+                              boxShadow: [
+                                BoxShadow(
+                                  blurRadius: 6,
+                                  color: Colors.black.withValues(alpha: 0.2),
+                                ),
+                              ],
+                            ),
+                            child: IconButton(
+                              tooltip: _showLegend
+                                  ? 'Hide legend'
+                                  : 'Show legend',
+                              icon: const Icon(Icons.info_outline),
+                              onPressed: () {
+                                setState(() => _showLegend = !_showLegend);
+                              },
+                            ),
+                          ),
+                          if (_showLegend) ...[
+                            const SizedBox(height: 8),
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 10,
+                                vertical: 8,
+                              ),
+                              decoration: BoxDecoration(
+                                color: Colors.white.withValues(alpha: 0.9),
+                                borderRadius: BorderRadius.circular(10),
+                                boxShadow: [
+                                  BoxShadow(
+                                    blurRadius: 6,
+                                    color: Colors.black.withValues(alpha: 0.2),
+                                  ),
+                                ],
+                              ),
+                              child: const Column(
+                                mainAxisSize: MainAxisSize.min,
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  _LegendItem(
+                                    icon: Icons.flag,
+                                    color: Colors.green,
+                                    label: 'First Call',
+                                  ),
+                                  SizedBox(height: 6),
+                                  _LegendItem(
+                                    icon: Icons.flag,
+                                    color: Colors.red,
+                                    label: 'Last Call',
+                                  ),
+                                  SizedBox(height: 6),
+                                  _LegendItem(
+                                    icon: Icons.place,
+                                    color: Colors.blueGrey,
+                                    label: 'Checkpoint (tap for time)',
+                                  ),
+                                ],
+                              ),
                             ),
                           ],
-                        ),
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            _LegendItem(
-                              color: Colors.green,
-                              label: 'First Call',
-                            ),
-                            SizedBox(height: 6),
-                            _LegendItem(color: Colors.red, label: 'Last Call'),
-                            SizedBox(height: 6),
-                            _LegendItem(
-                              color: Colors.blueGrey,
-                              label: 'Checkpoint (tap for time)',
-                            ),
-                            SizedBox(height: 6),
-                            _LegendItem(
-                              color: Colors.grey,
-                              label: 'Approximate (offline)',
-                              isDashed: true,
-                            ),
-                          ],
-                        ),
+                        ],
                       ),
                     ),
                     if (_isArchiving)
@@ -692,14 +835,14 @@ class _SuperUserDashboardState extends State<SuperUserDashboard> {
 }
 
 class _LegendItem extends StatelessWidget {
+  final IconData icon;
   final Color color;
   final String label;
-  final bool isDashed;
 
   const _LegendItem({
+    required this.icon,
     required this.color,
     required this.label,
-    this.isDashed = false,
   });
 
   @override
@@ -707,17 +850,7 @@ class _LegendItem extends StatelessWidget {
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        isDashed
-            ? SizedBox(
-                width: 24,
-                height: 12,
-                child: CustomPaint(painter: _DashPainter(color: color)),
-              )
-            : Container(
-                width: 12,
-                height: 12,
-                decoration: BoxDecoration(color: color, shape: BoxShape.circle),
-              ),
+        Icon(icon, size: 16, color: color),
         const SizedBox(width: 8),
         Text(
           label,
@@ -790,28 +923,4 @@ class _RouteStatusChip extends StatelessWidget {
       ),
     );
   }
-}
-
-class _DashPainter extends CustomPainter {
-  final Color color;
-  const _DashPainter({required this.color});
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final paint = Paint()
-      ..color = color
-      ..strokeWidth = 2
-      ..style = PaintingStyle.stroke;
-    const dashWidth = 4.0;
-    const dashSpace = 3.0;
-    double x = 0;
-    final y = size.height / 2;
-    while (x < size.width) {
-      canvas.drawLine(Offset(x, y), Offset(x + dashWidth, y), paint);
-      x += dashWidth + dashSpace;
-    }
-  }
-
-  @override
-  bool shouldRepaint(_DashPainter old) => old.color != color;
 }
