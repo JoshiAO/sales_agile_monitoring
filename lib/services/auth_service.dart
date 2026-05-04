@@ -27,7 +27,10 @@ class AuthService {
           .doc(user.uid)
           .get();
 
-      if (!userData.exists) return null;
+      if (!userData.exists) {
+        await _firebaseService.auth.signOut();
+        throw Exception('User profile was not found. Please contact your administrator.');
+      }
 
       final appUser = AppUser.fromMap(userData.data() ?? {}, uid: user.uid);
 
@@ -58,7 +61,10 @@ class AuthService {
         .doc(user.uid)
         .get();
 
-    if (!userData.exists) return null;
+    if (!userData.exists) {
+      await _firebaseService.auth.signOut();
+      throw Exception('User profile was not found. Please contact your administrator.');
+    }
 
     return AppUser.fromMap(userData.data() ?? {}, uid: user.uid);
   }

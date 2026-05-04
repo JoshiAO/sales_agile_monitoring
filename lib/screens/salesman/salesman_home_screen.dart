@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 import 'dart:math';
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:geolocator/geolocator.dart' as geo;
 import 'package:geolocator/geolocator.dart' show Position;
 import 'package:intl/intl.dart';
@@ -801,23 +802,28 @@ class _SalesmanHomeScreenState extends State<SalesmanHomeScreen> {
         !_isUploading &&
         firstCallTaken &&
         (!lastCallTaken || _lastRetakeApproved);
+    final currentUser = context.watch<AuthProvider>().currentUser;
+    final displayName = (currentUser?.name?.trim().isNotEmpty ?? false)
+      ? currentUser!.name!.trim()
+      : currentUser?.email ?? '';
 
     return Scaffold(
       appBar: AppBar(
         title: const Text('Sales Route'),
         elevation: 0,
         actions: [
-          Padding(
-            padding: const EdgeInsets.all(16.0),
-            child: Center(
-              child: GestureDetector(
-                onTap: () {
-                  context.read<AuthProvider>().logout();
-                },
-                child: const Text('Logout', style: TextStyle(fontSize: 14)),
+          if (!kIsWeb)
+            Padding(
+              padding: const EdgeInsets.all(16.0),
+              child: Center(
+                child: GestureDetector(
+                  onTap: () {
+                    context.read<AuthProvider>().logout();
+                  },
+                  child: const Text('Logout', style: TextStyle(fontSize: 14)),
+                ),
               ),
             ),
-          ),
         ],
       ),
       body: SafeArea(
@@ -835,6 +841,20 @@ class _SalesmanHomeScreenState extends State<SalesmanHomeScreen> {
                 _todayDate,
                 style: const TextStyle(fontSize: 16, color: Colors.grey),
               ),
+              if (!kIsWeb && currentUser != null) ...[
+                const SizedBox(height: 10),
+                Text(
+                  displayName,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(fontSize: 16, color: Colors.grey),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  currentUser.email,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(fontSize: 13, color: Colors.grey),
+                ),
+              ],
               const SizedBox(height: 48),
 
               // Status Cards

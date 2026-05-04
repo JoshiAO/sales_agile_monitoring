@@ -1,7 +1,10 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+import 'package:compact_sales_monitoring/providers/auth_provider.dart';
 import 'package:compact_sales_monitoring/screens/salesman/salesman_home_screen.dart';
 import 'package:compact_sales_monitoring/widgets/agile_call_form_card.dart';
+
 
 class SalesmanTabsScreen extends StatefulWidget {
   const SalesmanTabsScreen({super.key});
@@ -48,6 +51,42 @@ class _SalesmanTabsScreenState extends State<SalesmanTabsScreen> {
     );
   }
 
+  Widget _buildLogoutButton(bool isExpandedRail) {
+    return Builder(
+      builder: (context) {
+        if (!isExpandedRail) {
+          return Padding(
+            padding: const EdgeInsets.only(bottom: 16),
+            child: IconButton(
+              tooltip: 'Logout',
+              icon: const Icon(Icons.logout),
+              onPressed: () => context.read<AuthProvider>().logout(),
+            ),
+          );
+        }
+        return Padding(
+          padding: const EdgeInsets.fromLTRB(12, 0, 12, 16),
+          child: SizedBox(
+            width: 172,
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: TextButton.icon(
+                style: TextButton.styleFrom(
+                  minimumSize: const Size(172, 40),
+                  maximumSize: const Size(172, 40),
+                  alignment: Alignment.centerLeft,
+                ),
+                icon: const Icon(Icons.logout),
+                label: const Text('Logout'),
+                onPressed: () => context.read<AuthProvider>().logout(),
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     if (kIsWeb) {
@@ -58,26 +97,34 @@ class _SalesmanTabsScreenState extends State<SalesmanTabsScreen> {
             body: SafeArea(
               child: Row(
                 children: [
-                  NavigationRail(
-                    selectedIndex: _currentIndex,
-                    onDestinationSelected: (index) =>
-                        setState(() => _currentIndex = index),
-                    leading: _buildMenuHeader(isExpandedRail),
-                    extended: isExpandedRail,
-                    labelType: NavigationRailLabelType.none,
-                    minWidth: 68,
-                    minExtendedWidth: 210,
-                    destinations: const [
-                      NavigationRailDestination(
-                        icon: Icon(Icons.co_present_outlined),
-                        selectedIcon: Icon(Icons.co_present),
-                        label: Text('Calls'),
+                  Column(
+                    mainAxisSize: MainAxisSize.max,
+                    children: [
+                      Expanded(
+                        child: NavigationRail(
+                          selectedIndex: _currentIndex,
+                          onDestinationSelected: (index) =>
+                              setState(() => _currentIndex = index),
+                          leading: _buildMenuHeader(isExpandedRail),
+                          extended: isExpandedRail,
+                          labelType: NavigationRailLabelType.none,
+                          minWidth: 68,
+                          minExtendedWidth: 210,
+                          destinations: const [
+                            NavigationRailDestination(
+                              icon: Icon(Icons.co_present_outlined),
+                              selectedIcon: Icon(Icons.co_present),
+                              label: Text('Calls'),
+                            ),
+                            NavigationRailDestination(
+                              icon: Icon(Icons.auto_graph_outlined),
+                              selectedIcon: Icon(Icons.auto_graph),
+                              label: Text('Agile'),
+                            ),
+                          ],
+                        ),
                       ),
-                      NavigationRailDestination(
-                        icon: Icon(Icons.auto_graph_outlined),
-                        selectedIcon: Icon(Icons.auto_graph),
-                        label: Text('Agile'),
-                      ),
+                      _buildLogoutButton(isExpandedRail),
                     ],
                   ),
                   const VerticalDivider(width: 1),

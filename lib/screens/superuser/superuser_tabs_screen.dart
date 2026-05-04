@@ -1,8 +1,11 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+import 'package:compact_sales_monitoring/providers/auth_provider.dart';
 import 'package:compact_sales_monitoring/screens/superuser/superuser_dashboard.dart';
 import 'package:compact_sales_monitoring/screens/superuser/superuser_home_screen.dart';
 import 'package:compact_sales_monitoring/screens/superuser/superuser_agile_page.dart';
+import 'package:compact_sales_monitoring/screens/superuser/user_management_screen.dart';
 
 class SuperuserTabsScreen extends StatefulWidget {
   const SuperuserTabsScreen({super.key});
@@ -18,6 +21,7 @@ class _SuperuserTabsScreenState extends State<SuperuserTabsScreen> {
     const SuperuserHomeScreen(),
     const SuperUserDashboard(),
     const SuperuserAgilePage(),
+    const UserManagementScreen(),
   ];
 
   Widget _buildMenuHeader(bool isExpandedRail) {
@@ -50,6 +54,42 @@ class _SuperuserTabsScreenState extends State<SuperuserTabsScreen> {
     );
   }
 
+  Widget _buildLogoutButton(bool isExpandedRail) {
+    return Builder(
+      builder: (context) {
+        if (!isExpandedRail) {
+          return Padding(
+            padding: const EdgeInsets.only(bottom: 16),
+            child: IconButton(
+              tooltip: 'Logout',
+              icon: const Icon(Icons.logout),
+              onPressed: () => context.read<AuthProvider>().logout(),
+            ),
+          );
+        }
+        return Padding(
+          padding: const EdgeInsets.fromLTRB(12, 0, 12, 16),
+          child: SizedBox(
+            width: 172,
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: TextButton.icon(
+                style: TextButton.styleFrom(
+                  minimumSize: const Size(172, 40),
+                  maximumSize: const Size(172, 40),
+                  alignment: Alignment.centerLeft,
+                ),
+                icon: const Icon(Icons.logout),
+                label: const Text('Logout'),
+                onPressed: () => context.read<AuthProvider>().logout(),
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     if (kIsWeb) {
@@ -60,31 +100,44 @@ class _SuperuserTabsScreenState extends State<SuperuserTabsScreen> {
             body: SafeArea(
               child: Row(
                 children: [
-                  NavigationRail(
-                    selectedIndex: _currentIndex,
-                    onDestinationSelected: (index) =>
-                        setState(() => _currentIndex = index),
-                    leading: _buildMenuHeader(isExpandedRail),
-                    extended: isExpandedRail,
-                    labelType: NavigationRailLabelType.none,
-                    minWidth: 68,
-                    minExtendedWidth: 196,
-                    destinations: const [
-                      NavigationRailDestination(
-                        icon: Icon(Icons.home_outlined),
-                        selectedIcon: Icon(Icons.home),
-                        label: Text('Home'),
+                  Column(
+                    mainAxisSize: MainAxisSize.max,
+                    children: [
+                      Expanded(
+                        child: NavigationRail(
+                          selectedIndex: _currentIndex,
+                          onDestinationSelected: (index) =>
+                              setState(() => _currentIndex = index),
+                          leading: _buildMenuHeader(isExpandedRail),
+                          extended: isExpandedRail,
+                          labelType: NavigationRailLabelType.none,
+                          minWidth: 68,
+                          minExtendedWidth: 196,
+                          destinations: const [
+                            NavigationRailDestination(
+                              icon: Icon(Icons.home_outlined),
+                              selectedIcon: Icon(Icons.home),
+                              label: Text('Home'),
+                            ),
+                            NavigationRailDestination(
+                              icon: Icon(Icons.map_outlined),
+                              selectedIcon: Icon(Icons.map),
+                              label: Text('Map'),
+                            ),
+                            NavigationRailDestination(
+                              icon: Icon(Icons.auto_graph_outlined),
+                              selectedIcon: Icon(Icons.auto_graph),
+                              label: Text('Agile'),
+                            ),
+                            NavigationRailDestination(
+                              icon: Icon(Icons.manage_accounts_outlined),
+                              selectedIcon: Icon(Icons.manage_accounts),
+                              label: Text('Users'),
+                            ),
+                          ],
+                        ),
                       ),
-                      NavigationRailDestination(
-                        icon: Icon(Icons.map_outlined),
-                        selectedIcon: Icon(Icons.map),
-                        label: Text('Map'),
-                      ),
-                      NavigationRailDestination(
-                        icon: Icon(Icons.auto_graph_outlined),
-                        selectedIcon: Icon(Icons.auto_graph),
-                        label: Text('Agile'),
-                      ),
+                      _buildLogoutButton(isExpandedRail),
                     ],
                   ),
                   const VerticalDivider(width: 1),
@@ -102,6 +155,11 @@ class _SuperuserTabsScreenState extends State<SuperuserTabsScreen> {
     return Scaffold(
       body: IndexedStack(index: _currentIndex, children: _pages),
       bottomNavigationBar: BottomNavigationBar(
+        type: BottomNavigationBarType.fixed,
+        backgroundColor: Theme.of(context).colorScheme.surface,
+        selectedItemColor: Theme.of(context).colorScheme.primary,
+        unselectedItemColor: Colors.grey.shade700,
+        selectedLabelStyle: const TextStyle(fontWeight: FontWeight.w600),
         currentIndex: _currentIndex,
         onTap: (index) => setState(() => _currentIndex = index),
         items: const [
@@ -119,6 +177,11 @@ class _SuperuserTabsScreenState extends State<SuperuserTabsScreen> {
             icon: Icon(Icons.auto_graph_outlined),
             activeIcon: Icon(Icons.auto_graph),
             label: 'Agile',
+          ),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.manage_accounts_outlined),
+            activeIcon: Icon(Icons.manage_accounts),
+            label: 'Users',
           ),
         ],
       ),

@@ -7,7 +7,6 @@ import 'package:compact_sales_monitoring/models/user_model.dart';
 import 'package:compact_sales_monitoring/providers/route_provider.dart';
 import 'package:compact_sales_monitoring/services/archive_service.dart';
 import 'package:compact_sales_monitoring/services/firestore_service.dart';
-import 'package:compact_sales_monitoring/screens/superuser/user_management_screen.dart';
 import 'package:compact_sales_monitoring/widgets/date_selector_widget.dart';
 import 'package:compact_sales_monitoring/widgets/route_detail_modal.dart';
 import 'package:compact_sales_monitoring/widgets/loading_skeletons.dart';
@@ -424,23 +423,6 @@ class _SuperUserDashboardState extends State<SuperUserDashboard> {
             onPressed: _isArchiving ? null : _openArchivePicker,
             tooltip: 'Archive',
             icon: const Icon(Icons.archive_outlined),
-          ),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 8.0),
-            child: Center(
-              child: ElevatedButton.icon(
-                onPressed: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (context) => const UserManagementScreen(),
-                    ),
-                  );
-                },
-                icon: const Icon(Icons.people, size: 18),
-                label: const Text('Manage Users'),
-              ),
-            ),
           ),
         ],
       ),

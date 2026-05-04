@@ -146,17 +146,18 @@ class _SupervisorHomeScreenState extends State<SupervisorHomeScreen> {
       appBar: AppBar(
         title: const Text('Home'),
         actions: [
-          Padding(
-            padding: const EdgeInsets.all(16.0),
-            child: Center(
-              child: GestureDetector(
-                onTap: () {
-                  context.read<AuthProvider>().logout();
-                },
-                child: const Text('Logout', style: TextStyle(fontSize: 14)),
+          if (!kIsWeb)
+            Padding(
+              padding: const EdgeInsets.all(16.0),
+              child: Center(
+                child: GestureDetector(
+                  onTap: () {
+                    context.read<AuthProvider>().logout();
+                  },
+                  child: const Text('Logout', style: TextStyle(fontSize: 14)),
+                ),
               ),
             ),
-          ),
         ],
       ),
       body: FutureBuilder<_SupervisorHomeData>(
@@ -222,9 +223,16 @@ class _SupervisorHomeScreenState extends State<SupervisorHomeScreen> {
             builder: (context, constraints) {
               final columns = _cardsPerRow(constraints.maxWidth);
               const spacing = 12.0;
-              final cardExtent = _cardMode == _SupervisorCardMode.wide
-                  ? 284.0
-                  : 110.0;
+              const horizontalListPadding = 32.0;
+              final scrollbarCompensation = kIsWeb ? 14.0 : 0.0;
+              final availableWidth =
+                  constraints.maxWidth -
+                  horizontalListPadding -
+                  ((columns - 1) * spacing) -
+                  scrollbarCompensation;
+              final cardWidth = (availableWidth / columns)
+                  .floorToDouble()
+                  .clamp(0.0, constraints.maxWidth);
 
               return RefreshIndicator(
                 onRefresh: _refresh,
@@ -266,30 +274,26 @@ class _SupervisorHomeScreenState extends State<SupervisorHomeScreen> {
                         ],
                       ),
                     ),
-                    GridView.builder(
-                      shrinkWrap: true,
-                      physics: const NeverScrollableScrollPhysics(),
-                      itemCount: data.team.length,
-                      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                        crossAxisCount: columns,
-                        crossAxisSpacing: spacing,
-                        mainAxisSpacing: spacing,
-                        mainAxisExtent: cardExtent,
-                      ),
-                      itemBuilder: (context, index) {
-                        final salesman = data.team[index];
+                    Wrap(
+                      spacing: spacing,
+                      runSpacing: spacing,
+                      children: data.team.map((salesman) {
                         final route = data.routesBySalesman[salesman.uid];
-                        return _SalesmanSummaryCard(
-                          salesman: salesman,
-                          route: route,
-                          submission: data.submissionsBySalesman[salesman.uid],
-                          cardMode: _cardMode,
-                          formatCallTime: _formatCallTime,
-                          onPreviewCalls: route == null
-                              ? null
-                              : () => _openRoutePreview(salesman, route),
+                        return SizedBox(
+                          width: cardWidth,
+                          child: _SalesmanSummaryCard(
+                            salesman: salesman,
+                            route: route,
+                            submission:
+                                data.submissionsBySalesman[salesman.uid],
+                            cardMode: _cardMode,
+                            formatCallTime: _formatCallTime,
+                            onPreviewCalls: route == null
+                                ? null
+                                : () => _openRoutePreview(salesman, route),
+                          ),
                         );
-                      },
+                      }).toList(),
                     ),
                   ],
                 ),

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:compact_sales_monitoring/models/user_model.dart';
 import 'package:compact_sales_monitoring/services/firestore_service.dart';
 import 'package:compact_sales_monitoring/services/user_provisioning_service.dart';
@@ -17,6 +18,7 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
   List<AppUser> _allUsers = [];
   List<AppUser> _supervisors = [];
   List<AppUser> _superusers = [];
+  String? _selectedSupervisorFilterId;
   bool _isLoading = false;
 
   @override
@@ -28,16 +30,20 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
   Future<void> _loadUsers() async {
     setState(() => _isLoading = true);
     try {
-      _supervisors = await _firestoreService.getUsersByRole(UserRole.supervisor);
+      _supervisors = await _firestoreService.getUsersByRole(
+        UserRole.supervisor,
+      );
       _superusers = await _firestoreService.getUsersByRole(UserRole.superuser);
 
-      final salesmen = await _firestoreService.getUsersByRole(UserRole.salesman);
+      final salesmen = await _firestoreService.getUsersByRole(
+        UserRole.salesman,
+      );
       _allUsers = [..._superusers, ..._supervisors, ...salesmen];
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error loading users: $e')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Error loading users: $e')));
     } finally {
       setState(() => _isLoading = false);
     }
@@ -45,7 +51,9 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
 
   String _getSupervisorName(String? supervisorId) {
     if (supervisorId == null) return 'Not assigned';
-    final supervisor = _supervisors.where((u) => u.uid == supervisorId).firstOrNull;
+    final supervisor = _supervisors
+        .where((u) => u.uid == supervisorId)
+        .firstOrNull;
     if (supervisor == null) return 'Not assigned';
     return supervisor.name ?? supervisor.email;
   }
@@ -66,6 +74,31 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
     return message.startsWith('Exception: ')
         ? message.substring('Exception: '.length)
         : message;
+  }
+
+  String _emailCode(String email) {
+    final atIndex = email.indexOf('@');
+    if (atIndex <= 0) return email.toUpperCase();
+    return email.substring(0, atIndex).toUpperCase();
+  }
+
+  int _compareByEmailCode(AppUser left, AppUser right) {
+    final codeCompare = _emailCode(
+      left.email,
+    ).compareTo(_emailCode(right.email));
+    if (codeCompare != 0) return codeCompare;
+    return left.email.toLowerCase().compareTo(right.email.toLowerCase());
+  }
+
+  String _activeFilterLabel() {
+    final filterId = _selectedSupervisorFilterId;
+    if (filterId == null) return '';
+    final supervisor = _supervisors.where((u) => u.uid == filterId).firstOrNull;
+    return supervisor == null
+        ? ''
+        : (supervisor.name?.trim().isNotEmpty == true
+              ? supervisor.name!
+              : supervisor.email);
   }
 
   Future<T> _runWithBlockingLoader<T>(
@@ -95,10 +128,7 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
         children: [
           Text(
             title,
-            style: const TextStyle(
-              fontSize: 16,
-              fontWeight: FontWeight.bold,
-            ),
+            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
           ),
         ],
       ),
@@ -106,38 +136,148 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
   }
 
   Widget _buildUserCard(AppUser user) {
+    final isFilterSelected =
+        user.role == UserRole.supervisor &&
+        _selectedSupervisorFilterId == user.uid;
+    final displayName = user.name?.trim() ?? '';
+    final showNameLine = displayName.isNotEmpty;
+    final title = showNameLine ? displayName : user.email;
+    final showEmailLine =
+        showNameLine &&
+        displayName.toLowerCase() != user.email.trim().toLowerCase();
+
+    final roleBg = switch (user.role) {
+      UserRole.superuser => Colors.purple.shade50,
+      UserRole.supervisor => Colors.blue.shade50,
+      UserRole.salesman => Colors.grey.shade100,
+    };
+    final roleFg = switch (user.role) {
+      UserRole.superuser => Colors.purple.shade700,
+      UserRole.supervisor => Colors.blue.shade700,
+      UserRole.salesman => Colors.grey.shade700,
+    };
+    final statusBg = user.active ? Colors.green.shade50 : Colors.orange.shade50;
+    final statusFg = user.active
+        ? Colors.green.shade700
+        : Colors.orange.shade700;
+
     return Card(
-      child: ListTile(
-        leading: CircleAvatar(
-          child: Icon(
-            user.role == UserRole.salesman
-                ? Icons.person
-                : Icons.supervisor_account,
-          ),
+      margin: EdgeInsets.zero,
+      elevation: 0,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: BorderSide(
+          color: isFilterSelected
+              ? Theme.of(context).colorScheme.primary
+              : Colors.grey.shade300,
+          width: isFilterSelected ? 1.4 : 1.0,
         ),
-        title: Text(user.name ?? user.email),
-        subtitle: Text(
-          user.role == UserRole.salesman
-              ? 'Supervisor/FS Assigned: ${_getSupervisorName(user.supervisorId)}\n'
-                  'Role: ${_roleLabel(user.role)}\n'
-                  'Status: ${user.active ? 'Active' : 'Inactive'}'
-              : 'Role: ${_roleLabel(user.role)}\n'
-                  'Status: ${user.active ? 'Active' : 'Inactive'}\n'
-                  'Email: ${user.email}',
-        ),
-        isThreeLine: true,
-        trailing: Row(
-          mainAxisSize: MainAxisSize.min,
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            if (user.role != UserRole.superuser)
-              IconButton(
-                icon: const Icon(Icons.delete_outline, color: Colors.red),
-                onPressed: () => _showDeleteUserDialog(user),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(
+                  child: Text(
+                    title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                _UserBadge(
+                  label: _roleLabel(user.role),
+                  backgroundColor: roleBg,
+                  foregroundColor: roleFg,
+                ),
+              ],
+            ),
+            if (showEmailLine) ...[
+              const SizedBox(height: 4),
+              Text(
+                user.email,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: Theme.of(
+                  context,
+                ).textTheme.bodySmall?.copyWith(color: Colors.grey.shade600),
               ),
+            ],
+            const SizedBox(height: 8),
+            _UserBadge(
+              label: user.active ? 'Active' : 'Inactive',
+              backgroundColor: statusBg,
+              foregroundColor: statusFg,
+            ),
+            if (isFilterSelected) ...[
+              const SizedBox(height: 6),
+              _UserBadge(
+                label: 'Filter Active',
+                backgroundColor: Theme.of(context).colorScheme.primaryContainer,
+                foregroundColor: Theme.of(
+                  context,
+                ).colorScheme.onPrimaryContainer,
+              ),
+            ],
+            if (user.role == UserRole.salesman) ...[
+              const SizedBox(height: 6),
+              Text(
+                'Supervisor: ${_getSupervisorName(user.supervisorId)}',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: Theme.of(
+                  context,
+                ).textTheme.bodySmall?.copyWith(color: Colors.grey.shade700),
+              ),
+            ],
+            const Spacer(),
             if (user.role != UserRole.superuser)
-              IconButton(
-                icon: const Icon(Icons.edit),
-                onPressed: () => _showEditUserDialog(user),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  if (user.role == UserRole.supervisor)
+                    IconButton(
+                      tooltip: 'Filter Salesmen',
+                      icon: Icon(
+                        _selectedSupervisorFilterId == user.uid
+                            ? Icons.filter_alt
+                            : Icons.filter_alt_outlined,
+                        size: 20,
+                        color: _selectedSupervisorFilterId == user.uid
+                            ? Theme.of(context).colorScheme.primary
+                            : null,
+                      ),
+                      onPressed: () {
+                        setState(() {
+                          _selectedSupervisorFilterId =
+                              _selectedSupervisorFilterId == user.uid
+                              ? null
+                              : user.uid;
+                        });
+                      },
+                    ),
+                  IconButton(
+                    tooltip: 'Delete',
+                    icon: const Icon(
+                      Icons.delete_outline,
+                      color: Colors.red,
+                      size: 20,
+                    ),
+                    onPressed: () => _showDeleteUserDialog(user),
+                  ),
+                  IconButton(
+                    tooltip: 'Edit',
+                    icon: const Icon(Icons.edit_outlined, size: 20),
+                    onPressed: () => _showEditUserDialog(user),
+                  ),
+                ],
               ),
           ],
         ),
@@ -259,9 +399,7 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
                   if (emailController.text.isEmpty ||
                       passwordController.text.isEmpty) {
                     ScaffoldMessenger.of(rootContext).showSnackBar(
-                      const SnackBar(
-                        content: Text('Please fill all fields'),
-                      ),
+                      const SnackBar(content: Text('Please fill all fields')),
                     );
                     return;
                   }
@@ -298,7 +436,9 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
                     Navigator.pop(dialogContext);
                     if (!rootContext.mounted) return;
                     ScaffoldMessenger.of(rootContext).showSnackBar(
-                      const SnackBar(content: Text('User created successfully')),
+                      const SnackBar(
+                        content: Text('User created successfully'),
+                      ),
                     );
                   } catch (e) {
                     if (!mounted) return;
@@ -366,16 +506,13 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
                   const SizedBox(height: 16),
                   TextField(
                     controller: nameController,
-                    decoration: const InputDecoration(
-                      labelText: 'Name',
-                    ),
+                    decoration: const InputDecoration(labelText: 'Name'),
                   ),
                   const SizedBox(height: 16),
                   DropdownButton<UserRole>(
                     value: selectedRole,
                     isExpanded: true,
-                    items: [UserRole.salesman, UserRole.supervisor]
-                        .map((role) {
+                    items: [UserRole.salesman, UserRole.supervisor].map((role) {
                       return DropdownMenuItem(
                         value: role,
                         child: Text(_roleLabel(role)),
@@ -427,7 +564,9 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
               ),
               ElevatedButton(
                 onPressed: () async {
-                  final normalizedEmail = emailController.text.trim().toLowerCase();
+                  final normalizedEmail = emailController.text
+                      .trim()
+                      .toLowerCase();
                   if (normalizedEmail.isEmpty) {
                     ScaffoldMessenger.of(rootContext).showSnackBar(
                       const SnackBar(content: Text('Email is required')),
@@ -438,7 +577,9 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
                   if (selectedRole == UserRole.salesman &&
                       selectedSupervisorId == null) {
                     ScaffoldMessenger.of(rootContext).showSnackBar(
-                      const SnackBar(content: Text('Please select a supervisor')),
+                      const SnackBar(
+                        content: Text('Please select a supervisor'),
+                      ),
                     );
                     return;
                   }
@@ -526,9 +667,9 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
                 } catch (e) {
                   if (!mounted) return;
                   if (!rootContext.mounted) return;
-                  ScaffoldMessenger.of(rootContext).showSnackBar(
-                    SnackBar(content: Text('Delete error: $e')),
-                  );
+                  ScaffoldMessenger.of(
+                    rootContext,
+                  ).showSnackBar(SnackBar(content: Text('Delete error: $e')));
                 }
               },
               child: const Text('Delete'),
@@ -543,7 +684,20 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('User Management'),
+        title: const Text('Manage Users'),
+        actions: [
+          if (_selectedSupervisorFilterId != null)
+            Padding(
+              padding: const EdgeInsets.only(right: 8),
+              child: TextButton.icon(
+                onPressed: () {
+                  setState(() => _selectedSupervisorFilterId = null);
+                },
+                icon: const Icon(Icons.filter_alt_off),
+                label: const Text('Remove Filter'),
+              ),
+            ),
+        ],
       ),
       floatingActionButton: FloatingActionButton(
         onPressed: _showAddUserDialog,
@@ -553,34 +707,126 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
           ? const Center(child: CircularProgressIndicator())
           : Builder(
               builder: (context) {
-                final supervisorsOnly = _allUsers
-                    .where((u) => u.role == UserRole.supervisor)
-                    .toList();
-                final salesmenOnly = _allUsers
-                    .where((u) => u.role == UserRole.salesman)
-                    .toList();
+                final supervisorsOnly =
+                    _allUsers
+                        .where((u) => u.role == UserRole.supervisor)
+                        .toList()
+                      ..sort(_compareByEmailCode);
+                final salesmenOnly =
+                    _allUsers.where((u) => u.role == UserRole.salesman).toList()
+                      ..sort(_compareByEmailCode);
+                final visibleSalesmen = _selectedSupervisorFilterId == null
+                    ? salesmenOnly
+                    : salesmenOnly
+                          .where(
+                            (u) =>
+                                u.supervisorId == _selectedSupervisorFilterId,
+                          )
+                          .toList();
+                final filterLabel = _activeFilterLabel();
 
-                return ListView(
-                  padding: const EdgeInsets.all(16),
-                  children: [
-                    _buildSectionHeader('Supervisors'),
-                    if (supervisorsOnly.isEmpty)
-                      const Padding(
-                        padding: EdgeInsets.only(bottom: 8),
-                        child: Text('No supervisors found.'),
-                      ),
-                    ...supervisorsOnly.map(_buildUserCard),
-                    _buildSectionHeader('Salesmen'),
-                    if (salesmenOnly.isEmpty)
-                      const Padding(
-                        padding: EdgeInsets.only(bottom: 8),
-                        child: Text('No salesmen found.'),
-                      ),
-                    ...salesmenOnly.map(_buildUserCard),
-                  ],
+                return LayoutBuilder(
+                  builder: (context, constraints) {
+                    final columns = _cardsPerRow(constraints.maxWidth);
+                    const spacing = 12.0;
+                    const cardHeight = 180.0;
+
+                    Widget buildSectionGrid(List<AppUser> users) {
+                      if (users.isEmpty) return const SizedBox.shrink();
+                      return GridView.builder(
+                        shrinkWrap: true,
+                        physics: const NeverScrollableScrollPhysics(),
+                        itemCount: users.length,
+                        gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                          crossAxisCount: columns,
+                          crossAxisSpacing: spacing,
+                          mainAxisSpacing: spacing,
+                          mainAxisExtent: cardHeight,
+                        ),
+                        itemBuilder: (_, i) => _buildUserCard(users[i]),
+                      );
+                    }
+
+                    return ListView(
+                      padding: const EdgeInsets.fromLTRB(16, 8, 16, 80),
+                      children: [
+                        _buildSectionHeader('Supervisors'),
+                        if (supervisorsOnly.isEmpty)
+                          const Padding(
+                            padding: EdgeInsets.only(bottom: 8),
+                            child: Text('No supervisors found.'),
+                          )
+                        else
+                          buildSectionGrid(supervisorsOnly),
+                        _buildSectionHeader('Salesmen'),
+                        if (_selectedSupervisorFilterId != null)
+                          Padding(
+                            padding: const EdgeInsets.only(bottom: 8),
+                            child: Text(
+                              filterLabel.isEmpty
+                                  ? 'Filter active'
+                                  : 'Filtered by: $filterLabel',
+                              style: Theme.of(context).textTheme.bodySmall
+                                  ?.copyWith(
+                                    color: Theme.of(
+                                      context,
+                                    ).colorScheme.primary,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                            ),
+                          ),
+                        if (visibleSalesmen.isEmpty)
+                          const Padding(
+                            padding: EdgeInsets.only(bottom: 8),
+                            child: Text('No salesmen found for this filter.'),
+                          )
+                        else
+                          buildSectionGrid(visibleSalesmen),
+                      ],
+                    );
+                  },
                 );
               },
             ),
+    );
+  }
+
+  int _cardsPerRow(double maxWidth) {
+    final isMobileLayout = !kIsWeb && maxWidth < 700;
+    if (isMobileLayout) return 1;
+    const minCardWidth = 320.0;
+    final columns = ((maxWidth + 12) / (minCardWidth + 12)).floor();
+    return columns.clamp(2, 4);
+  }
+}
+
+class _UserBadge extends StatelessWidget {
+  final String label;
+  final Color backgroundColor;
+  final Color foregroundColor;
+
+  const _UserBadge({
+    required this.label,
+    required this.backgroundColor,
+    required this.foregroundColor,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(
+        color: backgroundColor,
+        borderRadius: BorderRadius.circular(6),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(
+          fontSize: 11,
+          fontWeight: FontWeight.w600,
+          color: foregroundColor,
+        ),
+      ),
     );
   }
 }

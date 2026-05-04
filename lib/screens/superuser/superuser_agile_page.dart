@@ -403,9 +403,16 @@ class _SuperuserAgilePageState extends State<SuperuserAgilePage> {
             builder: (context, constraints) {
               final columns = _cardsPerRow(constraints.maxWidth);
               const spacing = 12.0;
-              final cardExtent = _viewMode == _SuperuserAgileViewMode.wide
-                  ? (columns == 1 ? 300.0 : 270.0)
-                  : 126.0;
+              const horizontalListPadding = 32.0;
+              final scrollbarCompensation = kIsWeb ? 14.0 : 0.0;
+              final availableWidth =
+                  constraints.maxWidth -
+                  horizontalListPadding -
+                  ((columns - 1) * spacing) -
+                  scrollbarCompensation;
+              final cardWidth = (availableWidth / columns)
+                  .floorToDouble()
+                  .clamp(0.0, constraints.maxWidth);
 
               return RefreshIndicator(
                 onRefresh: _refresh,
@@ -499,18 +506,10 @@ class _SuperuserAgilePageState extends State<SuperuserAgilePage> {
                         ],
                       ),
                     ),
-                    GridView.builder(
-                      shrinkWrap: true,
-                      physics: const NeverScrollableScrollPhysics(),
-                      itemCount: filtered.length,
-                      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                        crossAxisCount: columns,
-                        crossAxisSpacing: spacing,
-                        mainAxisSpacing: spacing,
-                        mainAxisExtent: cardExtent,
-                      ),
-                      itemBuilder: (context, index) {
-                        final summary = filtered[index];
+                    Wrap(
+                      spacing: spacing,
+                      runSpacing: spacing,
+                      children: filtered.map((summary) {
                         final teamProductiveTarget = summary.team
                             .map(
                               (salesman) =>
@@ -548,17 +547,20 @@ class _SuperuserAgilePageState extends State<SuperuserAgilePage> {
                             )
                             .fold<double>(0.0, (sum, value) => sum + value);
 
-                        return _SupervisorAggregateCard(
-                          summary: summary,
-                          mode: _viewMode,
-                          productiveTarget: teamProductiveTarget,
-                          productiveActual: teamProductiveActual,
-                          sttTarget: teamSttTarget,
-                          sttActual: teamSttActual,
-                          targetsBySalesman: data.targetsBySalesman,
-                          submissionsBySalesman: data.submissionsBySalesman,
+                        return SizedBox(
+                          width: cardWidth,
+                          child: _SupervisorAggregateCard(
+                            summary: summary,
+                            mode: _viewMode,
+                            productiveTarget: teamProductiveTarget,
+                            productiveActual: teamProductiveActual,
+                            sttTarget: teamSttTarget,
+                            sttActual: teamSttActual,
+                            targetsBySalesman: data.targetsBySalesman,
+                            submissionsBySalesman: data.submissionsBySalesman,
+                          ),
                         );
-                      },
+                      }).toList(),
                     ),
                   ],
                 ),

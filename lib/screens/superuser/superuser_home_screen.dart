@@ -161,17 +161,18 @@ class _SuperuserHomeScreenState extends State<SuperuserHomeScreen> {
       appBar: AppBar(
         title: const Text('Home'),
         actions: [
-          Padding(
-            padding: const EdgeInsets.all(16.0),
-            child: Center(
-              child: GestureDetector(
-                onTap: () {
-                  context.read<AuthProvider>().logout();
-                },
-                child: const Text('Logout', style: TextStyle(fontSize: 14)),
+          if (!kIsWeb)
+            Padding(
+              padding: const EdgeInsets.all(16.0),
+              child: Center(
+                child: GestureDetector(
+                  onTap: () {
+                    context.read<AuthProvider>().logout();
+                  },
+                  child: const Text('Logout', style: TextStyle(fontSize: 14)),
+                ),
               ),
             ),
-          ),
         ],
       ),
       body: FutureBuilder<_SuperuserHomeData>(
@@ -218,9 +219,16 @@ class _SuperuserHomeScreenState extends State<SuperuserHomeScreen> {
             builder: (context, constraints) {
               final columns = _cardsPerRow(constraints.maxWidth);
               const spacing = 12.0;
-              final cardExtent = _cardMode == _SuperuserCardMode.wide
-                  ? (columns == 1 ? 520.0 : 460.0)
-                  : 112.0;
+              const horizontalListPadding = 32.0;
+              final scrollbarCompensation = kIsWeb ? 14.0 : 0.0;
+              final availableWidth =
+                  constraints.maxWidth -
+                  horizontalListPadding -
+                  ((columns - 1) * spacing) -
+                  scrollbarCompensation;
+              final cardWidth = (availableWidth / columns)
+                  .floorToDouble()
+                  .clamp(0.0, constraints.maxWidth);
 
               return RefreshIndicator(
                 onRefresh: _refresh,
@@ -278,31 +286,26 @@ class _SuperuserHomeScreenState extends State<SuperuserHomeScreen> {
                         ],
                       ),
                     ),
-                    GridView.builder(
-                      shrinkWrap: true,
-                      physics: const NeverScrollableScrollPhysics(),
-                      itemCount: data.supervisorSummaries.length,
-                      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                        crossAxisCount: columns,
-                        crossAxisSpacing: spacing,
-                        mainAxisSpacing: spacing,
-                        mainAxisExtent: cardExtent,
-                      ),
-                      itemBuilder: (context, index) {
-                        final summary = data.supervisorSummaries[index];
-                        return _SupervisorSummaryCard(
-                          summary: summary,
-                          cardMode: _cardMode,
-                          routesBySalesman: data.routesBySalesman,
-                          submissionsBySalesman: data.submissionsBySalesman,
-                          onPreviewTeam: () {
-                            _openTeamPreview(
-                              supervisor: summary.supervisor,
-                              selectedDate: data.selectedDate,
-                            );
-                          },
+                    Wrap(
+                      spacing: spacing,
+                      runSpacing: spacing,
+                      children: data.supervisorSummaries.map((summary) {
+                        return SizedBox(
+                          width: cardWidth,
+                          child: _SupervisorSummaryCard(
+                            summary: summary,
+                            cardMode: _cardMode,
+                            routesBySalesman: data.routesBySalesman,
+                            submissionsBySalesman: data.submissionsBySalesman,
+                            onPreviewTeam: () {
+                              _openTeamPreview(
+                                supervisor: summary.supervisor,
+                                selectedDate: data.selectedDate,
+                              );
+                            },
+                          ),
                         );
-                      },
+                      }).toList(),
                     ),
                   ],
                 ),
@@ -388,6 +391,8 @@ class _SupervisorSummaryCard extends StatelessWidget {
                 children: [
                   Text(
                     _displayName,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                     style: Theme.of(context).textTheme.titleMedium?.copyWith(
                       fontWeight: FontWeight.w700,
                     ),
@@ -416,6 +421,8 @@ class _SupervisorSummaryCard extends StatelessWidget {
             Flexible(
               child: Text(
                 summary.supervisor.email,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
                 textAlign: TextAlign.right,
                 style: Theme.of(context).textTheme.bodySmall?.copyWith(
                   color: Colors.grey.shade700,
