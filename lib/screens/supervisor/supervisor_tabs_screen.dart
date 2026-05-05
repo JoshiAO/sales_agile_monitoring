@@ -3,6 +3,8 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:provider/provider.dart';
 import 'package:compact_sales_monitoring/providers/auth_provider.dart';
+import 'package:compact_sales_monitoring/screens/shared/announcement_page.dart';
+import 'package:compact_sales_monitoring/screens/shared/feeds_page.dart';
 import 'package:compact_sales_monitoring/screens/supervisor/supervisor_dashboard.dart';
 import 'package:compact_sales_monitoring/screens/supervisor/supervisor_home_screen.dart';
 import 'package:compact_sales_monitoring/screens/supervisor/supervisor_agile_page.dart';
@@ -24,6 +26,8 @@ class _SupervisorTabsScreenState extends State<SupervisorTabsScreen> {
       SupervisorHomeScreen(key: ValueKey('sp-home-$_refreshTick')),
       SupervisorDashboard(key: ValueKey('sp-map-$_refreshTick')),
       SupervisorAgilePage(key: ValueKey('sp-agile-$_refreshTick')),
+      const FeedsPage(),
+      AnnouncementPage(key: ValueKey('sp-announcement-$_refreshTick')),
     ];
   }
 
@@ -240,6 +244,16 @@ class _SupervisorTabsScreenState extends State<SupervisorTabsScreen> {
                               selectedIcon: Icon(Icons.auto_graph),
                               label: Text('Agile'),
                             ),
+                            NavigationRailDestination(
+                              icon: Icon(Icons.feed_outlined),
+                              selectedIcon: Icon(Icons.feed),
+                              label: Text('Feeds'),
+                            ),
+                            NavigationRailDestination(
+                              icon: Icon(Icons.campaign_outlined),
+                              selectedIcon: Icon(Icons.campaign),
+                              label: Text('Announcements'),
+                            ),
                           ],
                         ),
                       ),
@@ -288,6 +302,16 @@ class _SupervisorTabsScreenState extends State<SupervisorTabsScreen> {
             icon: Icon(Icons.auto_graph_outlined),
             activeIcon: Icon(Icons.auto_graph),
             label: 'Agile',
+          ),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.feed_outlined),
+            activeIcon: Icon(Icons.feed),
+            label: 'Feeds',
+          ),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.campaign_outlined),
+            activeIcon: Icon(Icons.campaign),
+            label: 'Announce',
           ),
         ],
       ),

@@ -1,6 +1,10 @@
-import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
+import 'package:provider/provider.dart';
+
 import 'package:compact_sales_monitoring/models/user_model.dart';
+import 'package:compact_sales_monitoring/providers/auth_provider.dart';
 import 'package:compact_sales_monitoring/services/firestore_service.dart';
 import 'package:compact_sales_monitoring/services/user_provisioning_service.dart';
 
@@ -15,9 +19,9 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
   final FirestoreService _firestoreService = FirestoreService();
   final UserProvisioningService _userProvisioningService =
       UserProvisioningService();
+
   List<AppUser> _allUsers = [];
   List<AppUser> _supervisors = [];
-  List<AppUser> _superusers = [];
   String? _selectedSupervisorFilterId;
   bool _isLoading = false;
 
@@ -30,32 +34,27 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
   Future<void> _loadUsers() async {
     setState(() => _isLoading = true);
     try {
+      final superusers = await _firestoreService.getUsersByRole(
+        UserRole.superuser,
+      );
       _supervisors = await _firestoreService.getUsersByRole(
         UserRole.supervisor,
       );
-      _superusers = await _firestoreService.getUsersByRole(UserRole.superuser);
-
       final salesmen = await _firestoreService.getUsersByRole(
         UserRole.salesman,
       );
-      _allUsers = [..._superusers, ..._supervisors, ...salesmen];
+
+      _allUsers = [...superusers, ..._supervisors, ...salesmen];
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(SnackBar(content: Text('Error loading users: $e')));
     } finally {
-      setState(() => _isLoading = false);
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
     }
-  }
-
-  String _getSupervisorName(String? supervisorId) {
-    if (supervisorId == null) return 'Not assigned';
-    final supervisor = _supervisors
-        .where((u) => u.uid == supervisorId)
-        .firstOrNull;
-    if (supervisor == null) return 'Not assigned';
-    return supervisor.name ?? supervisor.email;
   }
 
   String _roleLabel(UserRole role) {
@@ -76,6 +75,11 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
         : message;
   }
 
+  String _formatDateTime(DateTime? value) {
+    if (value == null) return 'Not available';
+    return DateFormat('MMM d, yyyy h:mm a').format(value.toLocal());
+  }
+
   String _emailCode(String email) {
     final atIndex = email.indexOf('@');
     if (atIndex <= 0) return email.toUpperCase();
@@ -83,11 +87,18 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
   }
 
   int _compareByEmailCode(AppUser left, AppUser right) {
-    final codeCompare = _emailCode(
-      left.email,
-    ).compareTo(_emailCode(right.email));
+    final codeCompare = _emailCode(left.email).compareTo(_emailCode(right.email));
     if (codeCompare != 0) return codeCompare;
     return left.email.toLowerCase().compareTo(right.email.toLowerCase());
+  }
+
+  String _getSupervisorName(String? supervisorId) {
+    if (supervisorId == null) return 'Not assigned';
+    final supervisor = _supervisors.where((u) => u.uid == supervisorId).firstOrNull;
+    if (supervisor == null) return 'Not assigned';
+    return (supervisor.name?.trim().isNotEmpty == true)
+        ? supervisor.name!
+        : supervisor.email;
   }
 
   String _activeFilterLabel() {
@@ -136,15 +147,17 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
   }
 
   Widget _buildUserCard(AppUser user) {
+    final hasLogoutRequest =
+        user.role == UserRole.salesman && user.logoutRequestPending;
     final isFilterSelected =
         user.role == UserRole.supervisor &&
         _selectedSupervisorFilterId == user.uid;
+
     final displayName = user.name?.trim() ?? '';
     final showNameLine = displayName.isNotEmpty;
     final title = showNameLine ? displayName : user.email;
     final showEmailLine =
-        showNameLine &&
-        displayName.toLowerCase() != user.email.trim().toLowerCase();
+        showNameLine && displayName.toLowerCase() != user.email.trim().toLowerCase();
 
     final roleBg = switch (user.role) {
       UserRole.superuser => Colors.purple.shade50,
@@ -157,130 +170,286 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
       UserRole.salesman => Colors.grey.shade700,
     };
     final statusBg = user.active ? Colors.green.shade50 : Colors.orange.shade50;
-    final statusFg = user.active
-        ? Colors.green.shade700
-        : Colors.orange.shade700;
+    final statusFg = user.active ? Colors.green.shade700 : Colors.orange.shade700;
 
-    return Card(
-      margin: EdgeInsets.zero,
-      elevation: 0,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(12),
-        side: BorderSide(
-          color: isFilterSelected
-              ? Theme.of(context).colorScheme.primary
-              : Colors.grey.shade300,
-          width: isFilterSelected ? 1.4 : 1.0,
-        ),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.all(12),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
+    return Stack(
+      children: [
+        Card(
+          margin: EdgeInsets.zero,
+          elevation: 0,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+            side: BorderSide(
+              color: isFilterSelected
+                  ? Theme.of(context).colorScheme.primary
+                  : Colors.grey.shade300,
+              width: isFilterSelected ? 1.4 : 1.0,
+            ),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.all(12),
+            child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Expanded(
-                  child: Text(
-                    title,
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
+                      child: Text(
+                        title,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    _UserBadge(
+                      label: _roleLabel(user.role),
+                      backgroundColor: roleBg,
+                      foregroundColor: roleFg,
+                    ),
+                  ],
+                ),
+                if (showEmailLine) ...[
+                  const SizedBox(height: 4),
+                  Text(
+                    user.email,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                _UserBadge(
-                  label: _roleLabel(user.role),
-                  backgroundColor: roleBg,
-                  foregroundColor: roleFg,
-                ),
-              ],
-            ),
-            if (showEmailLine) ...[
-              const SizedBox(height: 4),
-              Text(
-                user.email,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: Theme.of(
-                  context,
-                ).textTheme.bodySmall?.copyWith(color: Colors.grey.shade600),
-              ),
-            ],
-            const SizedBox(height: 8),
-            _UserBadge(
-              label: user.active ? 'Active' : 'Inactive',
-              backgroundColor: statusBg,
-              foregroundColor: statusFg,
-            ),
-            if (isFilterSelected) ...[
-              const SizedBox(height: 6),
-              _UserBadge(
-                label: 'Filter Active',
-                backgroundColor: Theme.of(context).colorScheme.primaryContainer,
-                foregroundColor: Theme.of(
-                  context,
-                ).colorScheme.onPrimaryContainer,
-              ),
-            ],
-            if (user.role == UserRole.salesman) ...[
-              const SizedBox(height: 6),
-              Text(
-                'Supervisor: ${_getSupervisorName(user.supervisorId)}',
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: Theme.of(
-                  context,
-                ).textTheme.bodySmall?.copyWith(color: Colors.grey.shade700),
-              ),
-            ],
-            const Spacer(),
-            if (user.role != UserRole.superuser)
-              Row(
-                mainAxisAlignment: MainAxisAlignment.end,
-                children: [
-                  if (user.role == UserRole.supervisor)
-                    IconButton(
-                      tooltip: 'Filter Salesmen',
-                      icon: Icon(
-                        _selectedSupervisorFilterId == user.uid
-                            ? Icons.filter_alt
-                            : Icons.filter_alt_outlined,
-                        size: 20,
-                        color: _selectedSupervisorFilterId == user.uid
-                            ? Theme.of(context).colorScheme.primary
-                            : null,
-                      ),
-                      onPressed: () {
-                        setState(() {
-                          _selectedSupervisorFilterId =
-                              _selectedSupervisorFilterId == user.uid
-                              ? null
-                              : user.uid;
-                        });
-                      },
-                    ),
-                  IconButton(
-                    tooltip: 'Delete',
-                    icon: const Icon(
-                      Icons.delete_outline,
-                      color: Colors.red,
-                      size: 20,
-                    ),
-                    onPressed: () => _showDeleteUserDialog(user),
-                  ),
-                  IconButton(
-                    tooltip: 'Edit',
-                    icon: const Icon(Icons.edit_outlined, size: 20),
-                    onPressed: () => _showEditUserDialog(user),
+                    style: Theme.of(
+                      context,
+                    ).textTheme.bodySmall?.copyWith(color: Colors.grey.shade600),
                   ),
                 ],
+                const SizedBox(height: 8),
+                _UserBadge(
+                  label: user.active ? 'Active' : 'Inactive',
+                  backgroundColor: statusBg,
+                  foregroundColor: statusFg,
+                ),
+                if (isFilterSelected) ...[
+                  const SizedBox(height: 6),
+                  _UserBadge(
+                    label: 'Filter Active',
+                    backgroundColor: Theme.of(context).colorScheme.primaryContainer,
+                    foregroundColor:
+                        Theme.of(context).colorScheme.onPrimaryContainer,
+                  ),
+                ],
+                if (user.role == UserRole.salesman) ...[
+                  const SizedBox(height: 6),
+                  Text(
+                    'Supervisor: ${_getSupervisorName(user.supervisorId)}',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: Theme.of(
+                      context,
+                    ).textTheme.bodySmall?.copyWith(color: Colors.grey.shade700),
+                  ),
+                ],
+                const Spacer(),
+                if (user.role != UserRole.superuser)
+                  Wrap(
+                    alignment: WrapAlignment.end,
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    spacing: 2,
+                    runSpacing: 2,
+                    children: [
+                      if (user.role == UserRole.supervisor)
+                        IconButton(
+                          tooltip: 'Filter Salesmen',
+                          icon: Icon(
+                            _selectedSupervisorFilterId == user.uid
+                                ? Icons.filter_alt
+                                : Icons.filter_alt_outlined,
+                            size: 20,
+                            color: _selectedSupervisorFilterId == user.uid
+                                ? Theme.of(context).colorScheme.primary
+                                : null,
+                          ),
+                          onPressed: () {
+                            setState(() {
+                              _selectedSupervisorFilterId =
+                                  _selectedSupervisorFilterId == user.uid
+                                  ? null
+                                  : user.uid;
+                            });
+                          },
+                        ),
+                      IconButton(
+                        tooltip: 'Delete',
+                        icon: const Icon(
+                          Icons.delete_outline,
+                          color: Colors.red,
+                          size: 20,
+                        ),
+                        onPressed: () => _showDeleteUserDialog(user),
+                      ),
+                      IconButton(
+                        tooltip: 'Edit',
+                        icon: const Icon(Icons.edit_outlined, size: 20),
+                        onPressed: () => _showEditUserDialog(user),
+                      ),
+                    ],
+                  ),
+              ],
+            ),
+          ),
+        ),
+        if (hasLogoutRequest)
+          Positioned(
+            left: 10,
+            bottom: 10,
+            child: InkWell(
+              borderRadius: BorderRadius.circular(999),
+              onTap: () => _showLogoutRequestDecisionDialog(user),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                decoration: BoxDecoration(
+                  color: Colors.red.shade600,
+                  borderRadius: BorderRadius.circular(999),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Text(
+                      'Logout Request',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    Text(
+                      _formatDateTime(user.logoutRequestedAt),
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 10,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ],
+                ),
               ),
+            ),
+          ),
+      ],
+    );
+  }
+
+  void _showLogoutRequestDecisionDialog(AppUser user) {
+    final rootContext = context;
+    final requesterName = user.name?.trim().isNotEmpty == true
+        ? user.name!
+        : user.email;
+    final requestedAtText = _formatDateTime(user.logoutRequestedAt);
+    final lastResolvedAtText = _formatDateTime(user.logoutResolvedAt);
+    final lastResolvedByText = user.logoutResolvedByName ?? 'Not available';
+
+    showDialog(
+      context: rootContext,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Logout Request'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('$requesterName requested to log out.'),
+            const SizedBox(height: 8),
+            Text('Requested at: $requestedAtText'),
+            const SizedBox(height: 4),
+            Text('Last approver: $lastResolvedByText'),
+            const SizedBox(height: 4),
+            Text('Last resolved at: $lastResolvedAtText'),
+            const SizedBox(height: 12),
+            const Text('Approve or reject this request?'),
           ],
         ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () async {
+              try {
+                final approver = rootContext.read<AuthProvider>().currentUser;
+                final approverId = approver?.uid ?? 'unknown';
+                final approverName = approver?.name?.trim().isNotEmpty == true
+                    ? approver!.name!
+                    : (approver?.email ?? 'Unknown');
+
+                await _firestoreService.resolveLogoutApproval(
+                  uid: user.uid,
+                  approved: false,
+                  resolvedBy: approverId,
+                  resolvedByName: approverName,
+                );
+
+                if (dialogContext.mounted) {
+                  Navigator.pop(dialogContext);
+                }
+                if (!mounted) return;
+                await _loadUsers();
+                if (!rootContext.mounted) return;
+                ScaffoldMessenger.of(rootContext).showSnackBar(
+                  const SnackBar(content: Text('Logout request rejected.')),
+                );
+              } catch (error) {
+                if (dialogContext.mounted) {
+                  Navigator.pop(dialogContext);
+                }
+                if (!mounted) return;
+                if (!rootContext.mounted) return;
+                ScaffoldMessenger.of(rootContext).showSnackBar(
+                  SnackBar(content: Text('Failed to reject request: $error')),
+                );
+              }
+            },
+            child: const Text('Reject'),
+          ),
+          FilledButton(
+            onPressed: () async {
+              try {
+                final approver = rootContext.read<AuthProvider>().currentUser;
+                final approverId = approver?.uid ?? 'unknown';
+                final approverName = approver?.name?.trim().isNotEmpty == true
+                    ? approver!.name!
+                    : (approver?.email ?? 'Unknown');
+
+                await _firestoreService.resolveLogoutApproval(
+                  uid: user.uid,
+                  approved: true,
+                  resolvedBy: approverId,
+                  resolvedByName: approverName,
+                );
+
+                if (dialogContext.mounted) {
+                  Navigator.pop(dialogContext);
+                }
+                if (!mounted) return;
+                await _loadUsers();
+                if (!rootContext.mounted) return;
+                ScaffoldMessenger.of(rootContext).showSnackBar(
+                  const SnackBar(content: Text('Logout request approved.')),
+                );
+              } catch (error) {
+                if (dialogContext.mounted) {
+                  Navigator.pop(dialogContext);
+                }
+                if (!mounted) return;
+                if (!rootContext.mounted) return;
+                ScaffoldMessenger.of(rootContext).showSnackBar(
+                  SnackBar(content: Text('Failed to approve request: $error')),
+                );
+              }
+            },
+            child: const Text('Approve'),
+          ),
+        ],
       ),
     );
   }
@@ -436,9 +605,7 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
                     Navigator.pop(dialogContext);
                     if (!rootContext.mounted) return;
                     ScaffoldMessenger.of(rootContext).showSnackBar(
-                      const SnackBar(
-                        content: Text('User created successfully'),
-                      ),
+                      const SnackBar(content: Text('User created successfully')),
                     );
                   } catch (e) {
                     if (!mounted) return;
@@ -680,8 +847,21 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
     );
   }
 
+  int _cardsPerRow(double maxWidth) {
+    final isMobileLayout = maxWidth < 700;
+    if (isMobileLayout) {
+      return 1;
+    }
+
+    const minCardWidth = 300.0;
+    final columns = ((maxWidth + 12) / (minCardWidth + 12)).floor();
+    return columns.clamp(1, 4);
+  }
+
   @override
   Widget build(BuildContext context) {
+    final compactAppBarAction = MediaQuery.sizeOf(context).width < 620;
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('Manage Users'),
@@ -689,13 +869,21 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
           if (_selectedSupervisorFilterId != null)
             Padding(
               padding: const EdgeInsets.only(right: 8),
-              child: TextButton.icon(
-                onPressed: () {
-                  setState(() => _selectedSupervisorFilterId = null);
-                },
-                icon: const Icon(Icons.filter_alt_off),
-                label: const Text('Remove Filter'),
-              ),
+              child: compactAppBarAction
+                  ? IconButton(
+                      tooltip: 'Remove Filter',
+                      onPressed: () {
+                        setState(() => _selectedSupervisorFilterId = null);
+                      },
+                      icon: const Icon(Icons.filter_alt_off),
+                    )
+                  : TextButton.icon(
+                      onPressed: () {
+                        setState(() => _selectedSupervisorFilterId = null);
+                      },
+                      icon: const Icon(Icons.filter_alt_off),
+                      label: const Text('Remove Filter'),
+                    ),
             ),
         ],
       ),
@@ -707,20 +895,19 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
           ? const Center(child: CircularProgressIndicator())
           : Builder(
               builder: (context) {
-                final supervisorsOnly =
-                    _allUsers
-                        .where((u) => u.role == UserRole.supervisor)
-                        .toList()
-                      ..sort(_compareByEmailCode);
+                final supervisorsOnly = _allUsers
+                    .where((u) => u.role == UserRole.supervisor)
+                    .toList()
+                  ..sort(_compareByEmailCode);
                 final salesmenOnly =
                     _allUsers.where((u) => u.role == UserRole.salesman).toList()
                       ..sort(_compareByEmailCode);
+
                 final visibleSalesmen = _selectedSupervisorFilterId == null
                     ? salesmenOnly
                     : salesmenOnly
                           .where(
-                            (u) =>
-                                u.supervisorId == _selectedSupervisorFilterId,
+                            (u) => u.supervisorId == _selectedSupervisorFilterId,
                           )
                           .toList();
                 final filterLabel = _activeFilterLabel();
@@ -729,7 +916,7 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
                   builder: (context, constraints) {
                     final columns = _cardsPerRow(constraints.maxWidth);
                     const spacing = 12.0;
-                    const cardHeight = 180.0;
+                    final cardHeight = constraints.maxWidth < 720 ? 206.0 : 186.0;
 
                     Widget buildSectionGrid(List<AppUser> users) {
                       if (users.isEmpty) return const SizedBox.shrink();
@@ -751,37 +938,31 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
                       padding: const EdgeInsets.fromLTRB(16, 8, 16, 80),
                       children: [
                         _buildSectionHeader('Supervisors'),
-                        if (supervisorsOnly.isEmpty)
-                          const Padding(
-                            padding: EdgeInsets.only(bottom: 8),
-                            child: Text('No supervisors found.'),
-                          )
-                        else
-                          buildSectionGrid(supervisorsOnly),
-                        _buildSectionHeader('Salesmen'),
+                        buildSectionGrid(supervisorsOnly),
+                        _buildSectionHeader(
+                          _selectedSupervisorFilterId == null
+                              ? 'Salesmen'
+                              : 'Salesmen ($filterLabel)',
+                        ),
                         if (_selectedSupervisorFilterId != null)
                           Padding(
                             padding: const EdgeInsets.only(bottom: 8),
                             child: Text(
-                              filterLabel.isEmpty
-                                  ? 'Filter active'
-                                  : 'Filtered by: $filterLabel',
-                              style: Theme.of(context).textTheme.bodySmall
-                                  ?.copyWith(
-                                    color: Theme.of(
-                                      context,
-                                    ).colorScheme.primary,
-                                    fontWeight: FontWeight.w600,
-                                  ),
+                              'Filtered by supervisor: $filterLabel',
+                              style: TextStyle(color: Colors.grey.shade700),
                             ),
                           ),
+                        buildSectionGrid(visibleSalesmen),
                         if (visibleSalesmen.isEmpty)
-                          const Padding(
-                            padding: EdgeInsets.only(bottom: 8),
-                            child: Text('No salesmen found for this filter.'),
-                          )
-                        else
-                          buildSectionGrid(visibleSalesmen),
+                          Padding(
+                            padding: const EdgeInsets.only(top: 8),
+                            child: Text(
+                              _selectedSupervisorFilterId == null
+                                  ? 'No salesmen found.'
+                                  : 'No salesmen assigned to this supervisor.',
+                              style: TextStyle(color: Colors.grey.shade700),
+                            ),
+                          ),
                       ],
                     );
                   },
@@ -789,14 +970,6 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
               },
             ),
     );
-  }
-
-  int _cardsPerRow(double maxWidth) {
-    final isMobileLayout = !kIsWeb && maxWidth < 700;
-    if (isMobileLayout) return 1;
-    const minCardWidth = 320.0;
-    final columns = ((maxWidth + 12) / (minCardWidth + 12)).floor();
-    return columns.clamp(2, 4);
   }
 }
 
@@ -814,17 +987,17 @@ class _UserBadge extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       decoration: BoxDecoration(
         color: backgroundColor,
-        borderRadius: BorderRadius.circular(6),
+        borderRadius: BorderRadius.circular(999),
       ),
       child: Text(
         label,
         style: TextStyle(
-          fontSize: 11,
-          fontWeight: FontWeight.w600,
           color: foregroundColor,
+          fontSize: 11,
+          fontWeight: FontWeight.w700,
         ),
       ),
     );

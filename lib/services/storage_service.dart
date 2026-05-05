@@ -1,8 +1,10 @@
 import 'dart:io';
+import 'dart:typed_data';
 import 'dart:developer' as developer;
 import 'package:uuid/uuid.dart';
 import 'package:firebase_core/firebase_core.dart';
-import 'package:firebase_storage/firebase_storage.dart' show Reference;
+import 'package:firebase_storage/firebase_storage.dart'
+  show Reference, SettableMetadata;
 import 'firebase_service.dart';
 
 class StorageService {
@@ -27,6 +29,32 @@ class StorageService {
       final ref = _firebaseService.storage.ref('$folder/$fileName');
 
       await ref.putFile(file);
+      final downloadUrl = await _getDownloadUrlWithRetry(ref);
+
+      return downloadUrl;
+    } on FirebaseException catch (e) {
+      throw Exception('Upload error [${e.code}]: ${e.message}');
+    } catch (e) {
+      throw Exception('Upload error: $e');
+    }
+  }
+
+  Future<String> uploadImageBytes({
+    required Uint8List bytes,
+    required String folder,
+    String? filename,
+    String? contentType,
+  }) async {
+    try {
+      final fileName = _sanitizeFileName(filename ?? uuid.v4());
+      final ref = _firebaseService.storage.ref('$folder/$fileName');
+
+      await ref.putData(
+        bytes,
+        contentType == null
+            ? null
+            : SettableMetadata(contentType: contentType),
+      );
       final downloadUrl = await _getDownloadUrlWithRetry(ref);
 
       return downloadUrl;

@@ -1,4 +1,5 @@
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/foundation.dart';
 import 'package:compact_sales_monitoring/models/user_model.dart';
 import 'firebase_service.dart';
 
@@ -12,6 +13,30 @@ class AuthService {
   AuthService._internal();
 
   final FirebaseService _firebaseService = FirebaseService();
+
+  bool _isRoleAllowedForCurrentPlatform(UserRole role) {
+    if (kIsWeb) {
+      return role == UserRole.supervisor || role == UserRole.superuser;
+    }
+
+    if (defaultTargetPlatform == TargetPlatform.android) {
+      return role == UserRole.salesman;
+    }
+
+    return false;
+  }
+
+  String _platformRoleAccessMessage() {
+    if (kIsWeb) {
+      return 'This web app is for supervisor and superuser accounts only.';
+    }
+
+    if (defaultTargetPlatform == TargetPlatform.android) {
+      return 'This Android app is for salesman accounts only.';
+    }
+
+    return 'This platform is not supported for this app. Use Android for salesman or Web for supervisor/superuser access.';
+  }
 
   Future<AppUser?> loginWithEmail(String email, String password) async {
     try {
@@ -40,6 +65,11 @@ class AuthService {
         throw Exception('User account is inactive');
       }
 
+      if (!_isRoleAllowedForCurrentPlatform(appUser.role)) {
+        await _firebaseService.auth.signOut();
+        throw Exception(_platformRoleAccessMessage());
+      }
+
       return appUser;
     } on FirebaseAuthException catch (e) {
       throw Exception('Login error: ${e.message}');
@@ -66,7 +96,14 @@ class AuthService {
       throw Exception('User profile was not found. Please contact your administrator.');
     }
 
-    return AppUser.fromMap(userData.data() ?? {}, uid: user.uid);
+    final appUser = AppUser.fromMap(userData.data() ?? {}, uid: user.uid);
+
+    if (!_isRoleAllowedForCurrentPlatform(appUser.role)) {
+      await _firebaseService.auth.signOut();
+      throw Exception(_platformRoleAccessMessage());
+    }
+
+    return appUser;
   }
 
   Stream<User?> get authStateChanges => _firebaseService.auth.authStateChanges();

@@ -12,6 +12,7 @@ import 'package:permission_handler/permission_handler.dart';
 import 'package:provider/provider.dart';
 import 'package:qr/qr.dart';
 import 'package:saver_gallery/saver_gallery.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:compact_sales_monitoring/models/route_model.dart';
 import 'package:compact_sales_monitoring/providers/auth_provider.dart';
 import 'package:compact_sales_monitoring/screens/salesman/camera_screen.dart';
@@ -54,6 +55,112 @@ class _SalesmanHomeScreenState extends State<SalesmanHomeScreen> {
 
   String _googleMapsLink(double lat, double lon) {
     return 'https://www.google.com/maps/search/?api=1&query=$lat,$lon';
+  }
+
+  Future<void> _handleLogoutTapped() async {
+    final authProvider = context.read<AuthProvider>();
+    final user = authProvider.currentUser;
+    if (user == null) {
+      return;
+    }
+
+    final latestUser = await _firestoreService.getUser(user.uid);
+    if (!mounted) return;
+
+    if (latestUser == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Unable to validate logout access.')),
+      );
+      return;
+    }
+
+    if (latestUser.logoutRequestApproved) {
+      await _firestoreService.clearLogoutApproval(uid: latestUser.uid);
+      if (!mounted) return;
+      await authProvider.logout();
+      return;
+    }
+
+    if (latestUser.logoutRequestPending) {
+      await showDialog<void>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: const Text('Logout Request Pending'),
+          content: const Text(
+            'Your logout request is still pending. Please wait for superuser approval.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: const Text('OK'),
+            ),
+          ],
+        ),
+      );
+      return;
+    }
+
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Request Logout Approval'),
+        content: const Text(
+          'Do you want to send a logout request to superuser?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () async {
+              try {
+                await _firestoreService.requestLogoutApproval(uid: user.uid);
+                if (dialogContext.mounted) {
+                  Navigator.pop(dialogContext);
+                }
+                if (!mounted) return;
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text(
+                      'Logout request sent. Wait for superuser response.',
+                    ),
+                  ),
+                );
+              } catch (error) {
+                if (dialogContext.mounted) {
+                  Navigator.pop(dialogContext);
+                }
+                if (!mounted) return;
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text('Failed to send request: $error')),
+                );
+              }
+            },
+            child: const Text('Send Request'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showAlertsModal() {
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (modalContext) => DraggableScrollableSheet(
+        initialChildSize: 0.7,
+        minChildSize: 0.4,
+        maxChildSize: 0.95,
+        expand: false,
+        builder: (_, scrollController) =>
+            SalesmanAlertsModalContent(scrollController: scrollController),
+      ),
+    );
   }
 
   Future<_StampedImageResult> _createStampedCallImage({
@@ -812,18 +919,65 @@ class _SalesmanHomeScreenState extends State<SalesmanHomeScreen> {
         title: const Text('Sales Route'),
         elevation: 0,
         actions: [
-          if (!kIsWeb)
+          if (!kIsWeb) ...[
+            StreamBuilder<int>(
+              stream: currentUser == null
+                  ? const Stream<int>.empty()
+                  : _firestoreService.watchUnreadSalesmanNotificationCount(
+                      uid: currentUser.uid,
+                    ),
+              initialData: 0,
+              builder: (context, snapshot) {
+                final unread = snapshot.data ?? 0;
+                return Padding(
+                  padding: const EdgeInsets.only(right: 8),
+                  child: Stack(
+                    alignment: Alignment.center,
+                    children: [
+                      IconButton(
+                        tooltip: 'Notifications',
+                        icon: const Icon(Icons.notifications_outlined),
+                        onPressed: _showAlertsModal,
+                      ),
+                      if (unread > 0)
+                        Positioned(
+                          top: 8,
+                          right: 4,
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 4,
+                              vertical: 1,
+                            ),
+                            decoration: BoxDecoration(
+                              color: Colors.red,
+                              borderRadius: BorderRadius.circular(999),
+                            ),
+                            constraints: const BoxConstraints(minWidth: 16),
+                            child: Text(
+                              unread > 99 ? '99+' : '$unread',
+                              textAlign: TextAlign.center,
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 10,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+                );
+              },
+            ),
             Padding(
-              padding: const EdgeInsets.all(16.0),
-              child: Center(
-                child: GestureDetector(
-                  onTap: () {
-                    context.read<AuthProvider>().logout();
-                  },
-                  child: const Text('Logout', style: TextStyle(fontSize: 14)),
-                ),
+              padding: const EdgeInsets.only(right: 8),
+              child: TextButton.icon(
+                onPressed: _handleLogoutTapped,
+                icon: const Icon(Icons.logout),
+                label: const Text('Logout'),
               ),
             ),
+          ],
         ],
       ),
       body: SafeArea(
@@ -1010,4 +1164,192 @@ class _StampedImageResult {
   final File uploadFile;
 
   _StampedImageResult({required this.localFile, required this.uploadFile});
+}
+
+class SalesmanAlertsModalContent extends StatefulWidget {
+  final ScrollController scrollController;
+
+  const SalesmanAlertsModalContent({super.key, required this.scrollController});
+
+  @override
+  State<SalesmanAlertsModalContent> createState() =>
+      _SalesmanAlertsModalContentState();
+}
+
+class _SalesmanAlertsModalContentState
+    extends State<SalesmanAlertsModalContent> {
+  final FirestoreService _firestoreService = FirestoreService();
+  bool _isMarkingRead = false;
+
+  String _formatDate(dynamic value) {
+    if (value is Timestamp) {
+      return DateFormat('MMM d, yyyy h:mm a').format(value.toDate().toLocal());
+    }
+    return 'Unknown time';
+  }
+
+  Future<void> _markAllAsRead(String uid) async {
+    setState(() => _isMarkingRead = true);
+    try {
+      await _firestoreService.markAllSalesmanNotificationsRead(uid: uid);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Notifications marked as read.')),
+      );
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed to mark as read: $error')),
+      );
+    } finally {
+      if (mounted) setState(() => _isMarkingRead = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final user = context.watch<AuthProvider>().currentUser;
+    if (user == null) {
+      return const Center(child: Text('Please sign in again.'));
+    }
+
+    return Column(
+      children: [
+        Container(
+          width: 40,
+          height: 4,
+          margin: const EdgeInsets.symmetric(vertical: 12),
+          decoration: BoxDecoration(
+            color: Colors.grey.shade300,
+            borderRadius: BorderRadius.circular(2),
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 0, 8, 8),
+          child: Row(
+            children: [
+              Text(
+                'Notifications',
+                style: Theme.of(context).textTheme.titleLarge,
+              ),
+              const Spacer(),
+              StreamBuilder<int>(
+                stream: _firestoreService.watchUnreadSalesmanNotificationCount(
+                  uid: user.uid,
+                ),
+                initialData: 0,
+                builder: (context, snapshot) {
+                  final unread = snapshot.data ?? 0;
+                  return TextButton.icon(
+                    onPressed: unread == 0 || _isMarkingRead
+                        ? null
+                        : () => _markAllAsRead(user.uid),
+                    icon: const Icon(Icons.mark_email_read_outlined),
+                    label: Text('Mark all ($unread)'),
+                  );
+                },
+              ),
+            ],
+          ),
+        ),
+        const Divider(height: 1),
+        Expanded(
+          child: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+            stream: _firestoreService.watchSalesmanNotifications(uid: user.uid),
+            builder: (context, snapshot) {
+              if (snapshot.connectionState == ConnectionState.waiting) {
+                return const Center(child: CircularProgressIndicator());
+              }
+              if (snapshot.hasError) {
+                return Center(
+                  child: Padding(
+                    padding: const EdgeInsets.all(24),
+                    child: Text(
+                      'Unable to load notifications: ${snapshot.error}',
+                      textAlign: TextAlign.center,
+                    ),
+                  ),
+                );
+              }
+              final docs = (snapshot.data?.docs ?? const []).where((doc) {
+                final data = doc.data();
+                final occurrence =
+                    ((data['occurrence'] as String?) ?? '').toLowerCase();
+                final isRead = data['readAt'] != null;
+                // One-time notifications are removed from the list once read.
+                return !(occurrence == 'once' && isRead);
+              }).toList();
+
+              if (docs.isEmpty) {
+                return const Center(child: Text('No notifications yet.'));
+              }
+              return ListView.separated(
+                controller: widget.scrollController,
+                padding: const EdgeInsets.all(12),
+                itemCount: docs.length,
+                separatorBuilder: (separatorContext, separatorIndex) =>
+                    const SizedBox(height: 8),
+                itemBuilder: (context, index) {
+                  final data = docs[index].data();
+                  final title = (data['title'] as String?) ?? 'Notification';
+                  final message = (data['message'] as String?) ?? '';
+                  final status = (data['status'] as String?) ?? 'info';
+                  final createdAt = data['createdAt'];
+                  final isUnread = data['readAt'] == null;
+
+                  final statusColor = switch (status) {
+                    'approved' => Colors.green,
+                    'rejected' => Colors.red,
+                    _ => Colors.blueGrey,
+                  };
+
+                  return ListTile(
+                    tileColor: isUnread ? Colors.yellow.shade50 : null,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(10),
+                      side: BorderSide(color: Colors.grey.shade300),
+                    ),
+                    leading: CircleAvatar(
+                      backgroundColor: statusColor.withValues(alpha: 0.12),
+                      child: Icon(Icons.notifications, color: statusColor),
+                    ),
+                    title: Row(
+                      children: [
+                        Expanded(child: Text(title)),
+                        if (isUnread)
+                          Container(
+                            width: 9,
+                            height: 9,
+                            decoration: const BoxDecoration(
+                              color: Colors.red,
+                              shape: BoxShape.circle,
+                            ),
+                          ),
+                      ],
+                    ),
+                    subtitle: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const SizedBox(height: 4),
+                        Text(message),
+                        const SizedBox(height: 6),
+                        Text(
+                          _formatDate(createdAt),
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: Colors.grey.shade700,
+                          ),
+                        ),
+                      ],
+                    ),
+                    isThreeLine: true,
+                  );
+                },
+              );
+            },
+          ),
+        ),
+      ],
+    );
+  }
 }

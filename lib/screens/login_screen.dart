@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:provider/provider.dart';
 import 'package:compact_sales_monitoring/providers/auth_provider.dart';
 
@@ -13,6 +14,18 @@ class _LoginScreenState extends State<LoginScreen> {
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
   bool _isPasswordVisible = false;
+
+  String _platformHintMessage() {
+    if (kIsWeb) {
+      return 'Web access: supervisor and superuser accounts';
+    }
+
+    if (defaultTargetPlatform == TargetPlatform.android) {
+      return 'Android access: salesman accounts only';
+    }
+
+    return 'Use your assigned account to sign in';
+  }
 
   @override
   void dispose() {
@@ -55,6 +68,12 @@ class _LoginScreenState extends State<LoginScreen> {
                 const Text(
                   'Created by: Joshua A. Ocampo',
                   style: TextStyle(fontSize: 14, color: Colors.grey),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  _platformHintMessage(),
+                  textAlign: TextAlign.center,
+                  style: TextStyle(fontSize: 13, color: Colors.grey.shade700),
                 ),
                 const SizedBox(height: 48),
 

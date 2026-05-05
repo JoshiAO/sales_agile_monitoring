@@ -28,8 +28,14 @@ class _SupervisorDashboardState extends State<SupervisorDashboard> {
   late MapController _mapController;
   final Map<String, AppUser> _salesmenCache = {};
   bool _showLegend = false;
+  bool _showRouteStatusPanel = true;
+  bool _showRouteLabels = true;
+  bool _showFirstCallMarkers = true;
+  bool _showLastCallMarkers = true;
+  double _flagPinScale = 1.0;
   double _currentZoom = 12;
   String? _selectedCheckpointId;
+  String? _focusedRouteId;
 
   @override
   void initState() {
@@ -102,6 +108,8 @@ class _SupervisorDashboardState extends State<SupervisorDashboard> {
             : (salesman?.email.isNotEmpty == true
                   ? salesman!.email
                   : route.salesmanId);
+        final flagSize = (34 * _flagPinScale).clamp(18.0, 52.0);
+        final flagPadding = (6 * _flagPinScale).clamp(4.0, 10.0);
 
         return GestureDetector(
           onTap: () async {
@@ -120,35 +128,36 @@ class _SupervisorDashboardState extends State<SupervisorDashboard> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              SizedBox(
-                width: 170,
-                child: Center(
-                  child: Container(
-                    constraints: const BoxConstraints(maxWidth: 165),
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 8,
-                      vertical: 4,
-                    ),
-                    decoration: BoxDecoration(
-                      color: Colors.black.withValues(alpha: 0.75),
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: Text(
-                      displayName,
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 11,
-                        fontWeight: FontWeight.w600,
+              if (_showRouteLabels)
+                SizedBox(
+                  width: 170,
+                  child: Center(
+                    child: Container(
+                      constraints: const BoxConstraints(maxWidth: 165),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 4,
                       ),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
+                      decoration: BoxDecoration(
+                        color: Colors.black.withValues(alpha: 0.75),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Text(
+                        displayName,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 11,
+                          fontWeight: FontWeight.w600,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
                     ),
                   ),
                 ),
-              ),
-              const SizedBox(height: 6),
+              SizedBox(height: _showRouteLabels ? 6 : 2),
               Container(
-                padding: const EdgeInsets.all(6),
+                padding: EdgeInsets.all(flagPadding),
                 decoration: BoxDecoration(
                   color: Colors.white,
                   borderRadius: BorderRadius.circular(999),
@@ -161,7 +170,7 @@ class _SupervisorDashboardState extends State<SupervisorDashboard> {
                 ),
                 child: Icon(
                   Icons.flag,
-                  size: 34,
+                  size: flagSize,
                   color: isFirstCall
                       ? Colors.green.shade700
                       : Colors.red.shade700,
@@ -299,10 +308,52 @@ class _SupervisorDashboardState extends State<SupervisorDashboard> {
           salesmanLabel: salesmanLabel,
           routeColor: lineColor,
           isFallback: isFallback,
+          isSelected: _focusedRouteId == route.routeId,
+          onTap: () => _focusRoute(route, routeProvider),
         );
       },
     );
   }
+
+  List<LatLng> _routeViewportPoints(
+    SalesRoute route,
+    RouteProvider routeProvider,
+  ) {
+    final cached = routeProvider.routePolylines[route.routeId];
+    if (cached != null && cached.isNotEmpty) {
+      return cached;
+    }
+
+    return [
+      LatLng(route.first.lat, route.first.lon),
+      ...route.sortedCheckpoints.map((c) => LatLng(c.lat, c.lon)),
+      if (route.hasLastCall) LatLng(route.last.lat, route.last.lon),
+    ];
+  }
+
+  void _focusRoute(SalesRoute route, RouteProvider routeProvider) {
+    final points = _routeViewportPoints(route, routeProvider);
+    if (points.isEmpty) return;
+
+    setState(() {
+      _focusedRouteId = route.routeId;
+    });
+
+    if (points.length == 1) {
+      _mapController.move(points.first, 15);
+      return;
+    }
+
+    _mapController.fitCamera(
+      CameraFit.coordinates(
+        coordinates: points,
+        padding: const EdgeInsets.all(44),
+      ),
+    );
+  }
+
+  double _flagMarkerWidth() => _showRouteLabels ? 180 : 92;
+  double _flagMarkerHeight() => _showRouteLabels ? 110 : 84;
 
   @override
   void dispose() {
@@ -524,28 +575,31 @@ class _SupervisorDashboardState extends State<SupervisorDashboard> {
                           markers: routeProvider.routes
                               .expand(
                                 (route) => [
-                                  Marker(
-                                    point: LatLng(
-                                      route.first.lat,
-                                      route.first.lon,
+                                  if (_showFirstCallMarkers &&
+                                      route.hasFirstCall)
+                                    Marker(
+                                      point: LatLng(
+                                        route.first.lat,
+                                        route.first.lon,
+                                      ),
+                                      width: _flagMarkerWidth(),
+                                      height: _flagMarkerHeight(),
+                                      rotate: true,
+                                      child: _buildSalesmanMarker(
+                                        route,
+                                        route.first,
+                                        isFirstCall: true,
+                                      ),
                                     ),
-                                    width: 180,
-                                    height: 110,
-                                    rotate: true,
-                                    child: _buildSalesmanMarker(
-                                      route,
-                                      route.first,
-                                      isFirstCall: true,
-                                    ),
-                                  ),
-                                  if (route.hasLastCall)
+                                  if (_showLastCallMarkers &&
+                                      route.hasLastCall)
                                     Marker(
                                       point: LatLng(
                                         route.last.lat,
                                         route.last.lon,
                                       ),
-                                      width: 180,
-                                      height: 110,
+                                      width: _flagMarkerWidth(),
+                                      height: _flagMarkerHeight(),
                                       rotate: true,
                                       child: _buildSalesmanMarker(
                                         route,
@@ -562,8 +616,9 @@ class _SupervisorDashboardState extends State<SupervisorDashboard> {
                     Positioned(
                       top: 12,
                       left: 12,
+                      bottom: _showRouteStatusPanel ? 12 : null,
                       child: Container(
-                        width: 240,
+                        width: 260,
                         padding: const EdgeInsets.symmetric(
                           horizontal: 10,
                           vertical: 8,
@@ -579,32 +634,58 @@ class _SupervisorDashboardState extends State<SupervisorDashboard> {
                           ],
                         ),
                         child: Column(
-                          mainAxisSize: MainAxisSize.min,
+                          mainAxisSize: _showRouteStatusPanel
+                              ? MainAxisSize.max
+                              : MainAxisSize.min,
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            const Text(
-                              'Route Status',
-                              style: TextStyle(
-                                fontSize: 12,
-                                fontWeight: FontWeight.w700,
-                              ),
+                            Row(
+                              children: [
+                                const Expanded(
+                                  child: Text(
+                                    'Route Status',
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                  ),
+                                ),
+                                IconButton(
+                                  tooltip: _showRouteStatusPanel
+                                      ? 'Collapse'
+                                      : 'Expand',
+                                  visualDensity: VisualDensity.compact,
+                                  icon: Icon(
+                                    _showRouteStatusPanel
+                                        ? Icons.unfold_less
+                                        : Icons.unfold_more,
+                                    size: 18,
+                                  ),
+                                  onPressed: () {
+                                    setState(() {
+                                      _showRouteStatusPanel =
+                                          !_showRouteStatusPanel;
+                                    });
+                                  },
+                                ),
+                              ],
                             ),
-                            const SizedBox(height: 6),
-                            ConstrainedBox(
-                              constraints: const BoxConstraints(maxHeight: 180),
-                              child: SingleChildScrollView(
-                                child: Column(
-                                  children: routeProvider.routes
-                                      .map(
-                                        (route) => _buildRouteStatusChip(
-                                          route,
-                                          routeProvider,
-                                        ),
-                                      )
-                                      .toList(),
+                            if (_showRouteStatusPanel) const SizedBox(height: 6),
+                            if (_showRouteStatusPanel)
+                              Expanded(
+                                child: SingleChildScrollView(
+                                  child: Column(
+                                    children: routeProvider.routes
+                                        .map(
+                                          (route) => _buildRouteStatusChip(
+                                            route,
+                                            routeProvider,
+                                          ),
+                                        )
+                                        .toList(),
+                                  ),
                                 ),
                               ),
-                            ),
                           ],
                         ),
                       ),
@@ -612,32 +693,10 @@ class _SupervisorDashboardState extends State<SupervisorDashboard> {
                     Positioned(
                       top: 12,
                       right: 12,
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.end,
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          DecoratedBox(
-                            decoration: BoxDecoration(
-                              color: Colors.white.withValues(alpha: 0.92),
-                              shape: BoxShape.circle,
-                              boxShadow: [
-                                BoxShadow(
-                                  blurRadius: 6,
-                                  color: Colors.black.withValues(alpha: 0.2),
-                                ),
-                              ],
-                            ),
-                            child: IconButton(
-                              tooltip: _showLegend
-                                  ? 'Hide legend'
-                                  : 'Show legend',
-                              icon: const Icon(Icons.info_outline),
-                              onPressed: () {
-                                setState(() => _showLegend = !_showLegend);
-                              },
-                            ),
-                          ),
                           if (_showLegend) ...[
-                            const SizedBox(height: 8),
                             Container(
                               padding: const EdgeInsets.symmetric(
                                 horizontal: 10,
@@ -654,30 +713,165 @@ class _SupervisorDashboardState extends State<SupervisorDashboard> {
                                 ],
                               ),
                               child: const Column(
-                                mainAxisSize: MainAxisSize.min,
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
                                   _LegendItem(
-                                    icon: Icons.flag,
                                     color: Colors.green,
                                     label: 'First Call',
+                                    icon: Icons.flag,
                                   ),
                                   SizedBox(height: 6),
                                   _LegendItem(
-                                    icon: Icons.flag,
                                     color: Colors.red,
                                     label: 'Last Call',
+                                    icon: Icons.flag,
                                   ),
                                   SizedBox(height: 6),
                                   _LegendItem(
-                                    icon: Icons.place,
-                                    color: Colors.blueGrey,
-                                    label: 'Checkpoint (tap for time)',
+                                    color: Colors.orange,
+                                    label: 'Checkpoint',
+                                    icon: Icons.circle,
                                   ),
                                 ],
                               ),
                             ),
+                            const SizedBox(width: 8),
                           ],
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 8,
+                              vertical: 4,
+                            ),
+                            decoration: BoxDecoration(
+                              color: Colors.white.withValues(alpha: 0.92),
+                              borderRadius: BorderRadius.circular(12),
+                              boxShadow: [
+                                BoxShadow(
+                                  blurRadius: 6,
+                                  color: Colors.black.withValues(alpha: 0.2),
+                                ),
+                              ],
+                            ),
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              crossAxisAlignment: CrossAxisAlignment.center,
+                              children: [
+                                IconButton(
+                                  tooltip: _showLegend
+                                      ? 'Hide legend'
+                                      : 'Show legend',
+                                  icon: const Icon(Icons.info_outline),
+                                  visualDensity: VisualDensity.compact,
+                                  padding: EdgeInsets.zero,
+                                  constraints: const BoxConstraints.tightFor(
+                                    width: 30,
+                                    height: 30,
+                                  ),
+                                  onPressed: () {
+                                    setState(() => _showLegend = !_showLegend);
+                                  },
+                                ),
+                                const SizedBox(height: 2),
+                                IconButton(
+                                  tooltip: _showRouteLabels
+                                      ? 'Hide labels'
+                                      : 'Show labels',
+                                  icon: Icon(
+                                    _showRouteLabels
+                                        ? Icons.label
+                                        : Icons.label_off,
+                                  ),
+                                  visualDensity: VisualDensity.compact,
+                                  padding: EdgeInsets.zero,
+                                  constraints: const BoxConstraints.tightFor(
+                                    width: 30,
+                                    height: 30,
+                                  ),
+                                  onPressed: () {
+                                    setState(() {
+                                      _showRouteLabels = !_showRouteLabels;
+                                    });
+                                  },
+                                ),
+                                const SizedBox(height: 4),
+                                const Text(
+                                  'Pin Size',
+                                  style: TextStyle(
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                                SizedBox(
+                                  height: 140,
+                                  width: 36,
+                                  child: RotatedBox(
+                                    quarterTurns: 3,
+                                    child: Slider(
+                                      value: _flagPinScale,
+                                      min: 0.1,
+                                      max: 1.4,
+                                      divisions: 26,
+                                      label: '${(_flagPinScale * 100).round()}%',
+                                      onChanged: (value) {
+                                        setState(() {
+                                          _flagPinScale = value;
+                                        });
+                                      },
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(height: 2),
+                                IconButton(
+                                  tooltip: _showFirstCallMarkers
+                                      ? 'Hide first call markers'
+                                      : 'Show first call markers',
+                                  icon: Icon(
+                                    Icons.outlined_flag,
+                                    color: _showFirstCallMarkers
+                                        ? Colors.green
+                                        : Colors.grey,
+                                  ),
+                                  visualDensity: VisualDensity.compact,
+                                  padding: EdgeInsets.zero,
+                                  constraints: const BoxConstraints.tightFor(
+                                    width: 30,
+                                    height: 30,
+                                  ),
+                                  onPressed: () {
+                                    setState(() {
+                                      _showFirstCallMarkers =
+                                          !_showFirstCallMarkers;
+                                    });
+                                  },
+                                ),
+                                IconButton(
+                                  tooltip: _showLastCallMarkers
+                                      ? 'Hide last call markers'
+                                      : 'Show last call markers',
+                                  icon: Icon(
+                                    _showLastCallMarkers
+                                        ? Icons.flag
+                                        : Icons.flag_outlined,
+                                    color: _showLastCallMarkers
+                                        ? Colors.red
+                                        : Colors.grey,
+                                  ),
+                                  visualDensity: VisualDensity.compact,
+                                  padding: EdgeInsets.zero,
+                                  constraints: const BoxConstraints.tightFor(
+                                    width: 30,
+                                    height: 30,
+                                  ),
+                                  onPressed: () {
+                                    setState(() {
+                                      _showLastCallMarkers =
+                                          !_showLastCallMarkers;
+                                    });
+                                  },
+                                ),
+                              ],
+                            ),
+                          ),
                         ],
                       ),
                     ),
@@ -723,11 +917,15 @@ class _RouteStatusChip extends StatelessWidget {
   final String salesmanLabel;
   final Color routeColor;
   final bool isFallback;
+  final bool isSelected;
+  final VoidCallback? onTap;
 
   const _RouteStatusChip({
     required this.salesmanLabel,
     required this.routeColor,
     required this.isFallback,
+    required this.isSelected,
+    this.onTap,
   });
 
   @override
@@ -739,44 +937,55 @@ class _RouteStatusChip extends StatelessWidget {
 
     return Padding(
       padding: const EdgeInsets.only(bottom: 6),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-        decoration: BoxDecoration(
-          color: bgColor,
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
           borderRadius: BorderRadius.circular(8),
-        ),
-        child: Row(
-          children: [
-            Container(
-              width: 10,
-              height: 10,
-              decoration: BoxDecoration(
-                color: routeColor,
-                shape: BoxShape.circle,
+          onTap: onTap,
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+            decoration: BoxDecoration(
+              color: bgColor,
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(
+                color: isSelected ? routeColor : Colors.transparent,
+                width: 1.2,
               ),
             ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Text(
-                salesmanLabel,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                  fontSize: 11,
-                  fontWeight: FontWeight.w600,
+            child: Row(
+              children: [
+                Container(
+                  width: 10,
+                  height: 10,
+                  decoration: BoxDecoration(
+                    color: routeColor,
+                    shape: BoxShape.circle,
+                  ),
                 ),
-              ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    salesmanLabel,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Text(
+                  isFallback ? 'Fallback' : 'Road',
+                  style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
+                    color: statusColor,
+                  ),
+                ),
+              ],
             ),
-            const SizedBox(width: 8),
-            Text(
-              isFallback ? 'Fallback' : 'Road',
-              style: TextStyle(
-                fontSize: 11,
-                fontWeight: FontWeight.w700,
-                color: statusColor,
-              ),
-            ),
-          ],
+          ),
         ),
       ),
     );

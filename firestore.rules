@@ -7,7 +7,12 @@ service cloud.firestore {
     }
 
     function myRole() {
-      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role;
+      let userPath = /databases/$(database)/documents/users/$(request.auth.uid);
+      return exists(userPath) ? get(userPath).data.role : null;
+    }
+
+    function isOwner(userId) {
+      return signedIn() && request.auth.uid == userId;
     }
 
     function isSuperuser() {
@@ -18,18 +23,71 @@ service cloud.firestore {
       return signedIn() && myRole() == 'supervisor';
     }
 
+    function isSupervisorOf(userId) {
+      let userPath = /databases/$(database)/documents/users/$(userId);
+      return signedIn() &&
+        isSupervisor() &&
+        exists(userPath) &&
+        get(userPath).data.supervisorId == request.auth.uid;
+    }
+
+    function isValidAnnouncementWindow(data) {
+      return data.startAt is timestamp &&
+        data.endAt is timestamp &&
+        data.startAt <= data.endAt;
+    }
+
     function isOwnedAgileDoc(docId) {
       return signedIn() && docId.matches('^.+_' + request.auth.uid + '$');
     }
 
     match /users/{userId} {
       allow read: if signedIn() && (
-        request.auth.uid == userId ||
+        isOwner(userId) ||
         isSuperuser() ||
         (isSupervisor() && resource.data.supervisorId == request.auth.uid)
       );
-      allow update: if signedIn() && (request.auth.uid == userId || isSuperuser());
+      allow update: if signedIn() && (isOwner(userId) || isSuperuser());
       allow create, delete: if isSuperuser();
+
+      match /notifications/{notificationId} {
+        allow read: if signedIn() && (
+          isOwner(userId) ||
+          isSuperuser() ||
+          isSupervisorOf(userId)
+        );
+        allow create: if signedIn() && (isSuperuser() || isSupervisorOf(userId));
+        allow update: if signedIn() && (isOwner(userId) || isSuperuser() || isSupervisorOf(userId));
+        allow delete: if signedIn() && (isSuperuser() || isSupervisorOf(userId));
+      }
+    }
+
+    match /announcements/{announcementId} {
+      allow read: if signedIn();
+
+      allow create: if signedIn() && (
+        (isSuperuser() &&
+          request.resource.data.createdBy == request.auth.uid &&
+          request.resource.data.creatorRole == 'superuser' &&
+          isValidAnnouncementWindow(request.resource.data)) ||
+        (isSupervisor() &&
+          request.resource.data.createdBy == request.auth.uid &&
+          request.resource.data.creatorRole == 'supervisor' &&
+          isValidAnnouncementWindow(request.resource.data))
+      );
+
+      allow delete: if signedIn() && (
+        isSuperuser() || resource.data.createdBy == request.auth.uid
+      );
+
+      allow update: if signedIn() &&
+        (isSuperuser() || resource.data.createdBy == request.auth.uid) &&
+        isValidAnnouncementWindow(request.resource.data);
+
+      match /likes/{userId} {
+        allow read: if signedIn();
+        allow create, update, delete: if signedIn() && request.auth.uid == userId;
+      }
     }
 
     match /routes/{routeId} {

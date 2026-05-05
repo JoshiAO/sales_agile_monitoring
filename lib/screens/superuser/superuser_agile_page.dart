@@ -101,7 +101,7 @@ class _SuperuserAgilePageState extends State<SuperuserAgilePage> {
   }
 
   int _cardsPerRow(double maxWidth) {
-    final isMobileLayout = !kIsWeb && maxWidth < 700;
+    final isMobileLayout = maxWidth < 700;
     if (isMobileLayout) {
       return 1;
     }
@@ -430,42 +430,61 @@ class _SuperuserAgilePageState extends State<SuperuserAgilePage> {
                             onDateChanged: _onDateChanged,
                           ),
                           const SizedBox(height: 12),
-                          Row(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Text(
-                                      'Supervisor Agile Overview',
-                                      style: Theme.of(
-                                        context,
-                                      ).textTheme.titleLarge,
-                                    ),
-                                    const SizedBox(height: 4),
-                                    Text(
-                                      '${data.summaries.length} supervisor${data.summaries.length == 1 ? '' : 's'} • Date: ${data.date}',
-                                      style: Theme.of(context)
-                                          .textTheme
-                                          .bodyMedium
-                                          ?.copyWith(
-                                            color: Colors.grey.shade700,
-                                          ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                              const SizedBox(width: 12),
-                              _AgileViewToggle(
+                          LayoutBuilder(
+                            builder: (context, headerConstraints) {
+                              final compactHeader = headerConstraints.maxWidth <
+                                  760;
+
+                              final headerText = Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    'Supervisor Agile Overview',
+                                    style: Theme.of(context).textTheme.titleLarge,
+                                  ),
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    '${data.summaries.length} supervisor${data.summaries.length == 1 ? '' : 's'} • Date: ${data.date}',
+                                    style: Theme.of(context)
+                                        .textTheme
+                                        .bodyMedium
+                                        ?.copyWith(color: Colors.grey.shade700),
+                                  ),
+                                ],
+                              );
+
+                              final toggle = _AgileViewToggle(
                                 mode: _viewMode,
                                 onChanged: (mode) {
                                   setState(() {
                                     _viewMode = mode;
                                   });
                                 },
-                              ),
-                            ],
+                              );
+
+                              if (compactHeader) {
+                                return Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    headerText,
+                                    const SizedBox(height: 10),
+                                    Align(
+                                      alignment: Alignment.centerRight,
+                                      child: toggle,
+                                    ),
+                                  ],
+                                );
+                              }
+
+                              return Row(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Expanded(child: headerText),
+                                  const SizedBox(width: 12),
+                                  toggle,
+                                ],
+                              );
+                            },
                           ),
                           const SizedBox(height: 12),
                           LayoutBuilder(
@@ -679,53 +698,84 @@ class _SupervisorAggregateCard extends StatelessWidget {
             ),
             const SizedBox(height: 10),
             if (mode == _SuperuserAgileViewMode.wide) ...[
-              Row(
-                children: [
-                  Expanded(
-                    child: _MetricWithIndexBox(
-                      icon: Icons.storefront,
-                      iconColor: Colors.blue.shade700,
-                      label: 'Productive Calls Target / Actual',
-                      value: '$productiveTarget / $productiveActual',
-                      indexValue: productiveIndex,
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: _MetricWithIndexBox(
-                      icon: Icons.payments_outlined,
-                      iconColor: Colors.teal.shade700,
-                      label: 'STT Target / Actual',
-                      value:
-                          '${currency.format(sttTarget)} / ${currency.format(sttActual)}',
-                      indexValue: sttIndex,
-                    ),
-                  ),
-                ],
+              LayoutBuilder(
+                builder: (context, constraints) {
+                  final stacked = constraints.maxWidth < 560;
+
+                  final productiveBox = _MetricWithIndexBox(
+                    icon: Icons.storefront,
+                    iconColor: Colors.blue.shade700,
+                    label: 'Productive Calls Target / Actual',
+                    value: '$productiveTarget / $productiveActual',
+                    indexValue: productiveIndex,
+                  );
+
+                  final sttBox = _MetricWithIndexBox(
+                    icon: Icons.payments_outlined,
+                    iconColor: Colors.teal.shade700,
+                    label: 'STT Target / Actual',
+                    value:
+                        '${currency.format(sttTarget)} / ${currency.format(sttActual)}',
+                    indexValue: sttIndex,
+                  );
+
+                  if (stacked) {
+                    return Column(
+                      children: [
+                        productiveBox,
+                        const SizedBox(height: 10),
+                        sttBox,
+                      ],
+                    );
+                  }
+
+                  return Row(
+                    children: [
+                      Expanded(child: productiveBox),
+                      const SizedBox(width: 10),
+                      Expanded(child: sttBox),
+                    ],
+                  );
+                },
               ),
               const SizedBox(height: 10),
             ],
             if (mode == _SuperuserAgileViewMode.compact) ...[
-              Row(
-                children: [
-                  Expanded(
-                    child: _CompactIndexIcon(
-                      icon: Icons.storefront,
-                      label: 'Productive',
-                      percent: productivePercent,
-                      color: Colors.blue.shade700,
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: _CompactIndexIcon(
-                      icon: Icons.payments_outlined,
-                      label: 'STT',
-                      percent: sttPercent,
-                      color: Colors.teal.shade700,
-                    ),
-                  ),
-                ],
+              LayoutBuilder(
+                builder: (context, constraints) {
+                  final stacked = constraints.maxWidth < 460;
+
+                  final productiveIcon = _CompactIndexIcon(
+                    icon: Icons.storefront,
+                    label: 'Productive',
+                    percent: productivePercent,
+                    color: Colors.blue.shade700,
+                  );
+                  final sttIcon = _CompactIndexIcon(
+                    icon: Icons.payments_outlined,
+                    label: 'STT',
+                    percent: sttPercent,
+                    color: Colors.teal.shade700,
+                  );
+
+                  if (stacked) {
+                    return Column(
+                      children: [
+                        productiveIcon,
+                        const SizedBox(height: 10),
+                        sttIcon,
+                      ],
+                    );
+                  }
+
+                  return Row(
+                    children: [
+                      Expanded(child: productiveIcon),
+                      const SizedBox(width: 10),
+                      Expanded(child: sttIcon),
+                    ],
+                  );
+                },
               ),
             ],
             if (mode == _SuperuserAgileViewMode.wide) ...[
@@ -776,8 +826,15 @@ class _SalesmanPerformancePreviewPage extends StatelessWidget {
       ),
       body: LayoutBuilder(
         builder: (context, constraints) {
-          final isMobileLayout = !kIsWeb && constraints.maxWidth < 700;
-          final columns = isMobileLayout ? 1 : 4;
+          final maxWidth = constraints.maxWidth;
+          final columns = maxWidth >= 1200
+              ? 4
+              : maxWidth >= 920
+              ? 3
+              : maxWidth >= 620
+              ? 2
+              : 1;
+          final cardExtent = columns == 1 ? 312.0 : 278.0;
 
           return GridView.builder(
             padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
@@ -785,7 +842,7 @@ class _SalesmanPerformancePreviewPage extends StatelessWidget {
               crossAxisCount: columns,
               crossAxisSpacing: 12,
               mainAxisSpacing: 12,
-              mainAxisExtent: isMobileLayout ? 230 : 250,
+              mainAxisExtent: cardExtent,
             ),
             itemCount: summary.team.length,
             itemBuilder: (context, index) {
@@ -833,29 +890,44 @@ class _SalesmanPerformancePreviewPage extends StatelessWidget {
                         ],
                       ),
                       const SizedBox(height: 14),
-                      Row(
-                        children: [
-                          Expanded(
-                            child: _MetricWithIndexBox(
-                              icon: Icons.storefront,
-                              iconColor: Colors.blue.shade700,
-                              label: 'Productive Calls Target / Actual',
-                              value: '$productiveTarget / $productiveActual',
-                              indexValue: productiveIndex,
-                            ),
-                          ),
-                          const SizedBox(width: 10),
-                          Expanded(
-                            child: _MetricWithIndexBox(
-                              icon: Icons.payments_outlined,
-                              iconColor: Colors.teal.shade700,
-                              label: 'STT Target / Actual',
-                              value:
-                                  '${currency.format(sttTarget)} / ${currency.format(sttActual)}',
-                              indexValue: sttIndex,
-                            ),
-                          ),
-                        ],
+                      LayoutBuilder(
+                        builder: (context, metricConstraints) {
+                          final stacked = metricConstraints.maxWidth < 560;
+
+                          final productiveBox = _MetricWithIndexBox(
+                            icon: Icons.storefront,
+                            iconColor: Colors.blue.shade700,
+                            label: 'Productive Calls Target / Actual',
+                            value: '$productiveTarget / $productiveActual',
+                            indexValue: productiveIndex,
+                          );
+                          final sttBox = _MetricWithIndexBox(
+                            icon: Icons.payments_outlined,
+                            iconColor: Colors.teal.shade700,
+                            label: 'STT Target / Actual',
+                            value:
+                                '${currency.format(sttTarget)} / ${currency.format(sttActual)}',
+                            indexValue: sttIndex,
+                          );
+
+                          if (stacked) {
+                            return Column(
+                              children: [
+                                productiveBox,
+                                const SizedBox(height: 10),
+                                sttBox,
+                              ],
+                            );
+                          }
+
+                          return Row(
+                            children: [
+                              Expanded(child: productiveBox),
+                              const SizedBox(width: 10),
+                              Expanded(child: sttBox),
+                            ],
+                          );
+                        },
                       ),
                     ],
                   ),

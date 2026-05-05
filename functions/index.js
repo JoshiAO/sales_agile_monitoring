@@ -8,6 +8,7 @@ const ACTIVATION_PROJECT_ID = 'joshiao-active-projects';
 const ACTIVATION_APP_NAME = 'activation-project';
 const ACTIVATION_COLLECTION = 'company_codes';
 const ACTIVATION_LEASE_DAYS = 7;
+const FCM_MAX_RETRIES = 4;
 
 let activationFirestore;
 
@@ -33,6 +34,47 @@ function evaluateActivationPayload(payload) {
     valid: active && !isExpired,
     companyName: payload.companyName || null,
   };
+}
+
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function isTransientFcmError(error) {
+  const code = (error && error.code ? String(error.code) : '').toLowerCase();
+  const message = (error && error.message ? String(error.message) : '').toLowerCase();
+
+  return (
+    code.includes('unavailable') ||
+    code.includes('internal') ||
+    code.includes('deadline-exceeded') ||
+    code.includes('resource-exhausted') ||
+    message.includes('temporar') ||
+    message.includes('timeout')
+  );
+}
+
+async function sendFcmWithRetry(message) {
+  let lastError;
+
+  for (let attempt = 0; attempt < FCM_MAX_RETRIES; attempt++) {
+    try {
+      await admin.messaging().send(message);
+      return;
+    } catch (error) {
+      lastError = error;
+
+      const shouldRetry = isTransientFcmError(error) && attempt < FCM_MAX_RETRIES - 1;
+      if (!shouldRetry) {
+        throw error;
+      }
+
+      const backoffMs = 400 * Math.pow(2, attempt);
+      await delay(backoffMs);
+    }
+  }
+
+  throw lastError;
 }
 
 async function getCodeDocByRawCode(activationDb, rawCode) {
@@ -177,4 +219,73 @@ exports.adminUpdateUserCredentials = functions
     } catch (error) {
       throw new functions.https.HttpsError('internal', error.message || 'Failed to update auth user.');
     }
+  });
+
+exports.notifyLogoutRequestResolution = functions
+  .region('us-central1')
+  .firestore.document('users/{userId}')
+  .onUpdate(async (change, context) => {
+    const before = change.before.data() || {};
+    const after = change.after.data() || {};
+
+    const beforeStatus = before.logoutRequestStatus || null;
+    const afterStatus = after.logoutRequestStatus || null;
+
+    if (beforeStatus === afterStatus) {
+      return null;
+    }
+
+    if (afterStatus !== 'approved' && afterStatus !== 'rejected') {
+      return null;
+    }
+
+    const token = after.fcmToken;
+    if (!token) {
+      return null;
+    }
+
+    const title = afterStatus === 'approved'
+      ? 'Logout Request Approved'
+      : 'Logout Request Rejected';
+    const body = afterStatus === 'approved'
+      ? 'Your logout request was approved. You can now log out.'
+      : 'Your logout request was rejected by superuser.';
+
+    const notificationData = {
+      type: 'logout_request_resolution',
+      status: afterStatus,
+      userId: context.params.userId,
+    };
+
+    await change.after.ref.collection('notifications').add({
+      title,
+      message: body,
+      status: afterStatus,
+      type: 'logout_request_resolution',
+      readAt: null,
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      meta: {
+        resolvedBy: after.logoutResolvedBy || null,
+        resolvedByName: after.logoutResolvedByName || null,
+        resolvedAt: after.logoutResolvedAt || null,
+      },
+    });
+
+    try {
+      await sendFcmWithRetry({
+        token,
+        notification: {
+          title,
+          body,
+        },
+        data: notificationData,
+      });
+    } catch (error) {
+      functions.logger.error('Failed to send logout resolution notification', {
+        userId: context.params.userId,
+        error: error.message || error,
+      });
+    }
+
+    return null;
   });

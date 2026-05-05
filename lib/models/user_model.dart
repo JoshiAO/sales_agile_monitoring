@@ -1,5 +1,19 @@
 enum UserRole { salesman, supervisor, superuser }
 
+DateTime? _dateTimeFromDynamic(dynamic value) {
+  if (value == null) return null;
+  if (value is DateTime) return value;
+  if (value is int) {
+    return DateTime.fromMillisecondsSinceEpoch(value);
+  }
+
+  try {
+    return (value as dynamic).toDate() as DateTime;
+  } catch (_) {
+    return null;
+  }
+}
+
 class AppUser {
   final String uid;
   final String email;
@@ -9,6 +23,13 @@ class AppUser {
   final bool active;
   final String? supervisorId;
   final String? profilePic;
+  final bool logoutRequestPending;
+  final bool logoutRequestApproved;
+  final String? logoutRequestStatus;
+  final DateTime? logoutRequestedAt;
+  final DateTime? logoutResolvedAt;
+  final String? logoutResolvedBy;
+  final String? logoutResolvedByName;
 
   AppUser({
     required this.uid,
@@ -19,6 +40,13 @@ class AppUser {
     required this.active,
     this.supervisorId,
     this.profilePic,
+    required this.logoutRequestPending,
+    required this.logoutRequestApproved,
+    this.logoutRequestStatus,
+    this.logoutRequestedAt,
+    this.logoutResolvedAt,
+    this.logoutResolvedBy,
+    this.logoutResolvedByName,
   });
 
   factory AppUser.fromMap(Map<String, dynamic> data, {required String uid}) {
@@ -31,6 +59,13 @@ class AppUser {
       active: data['active'] as bool? ?? false,
       supervisorId: data['supervisorId'] as String?,
       profilePic: data['profilePic'] as String?,
+      logoutRequestPending: data['logoutRequestPending'] as bool? ?? false,
+      logoutRequestApproved: data['logoutRequestApproved'] as bool? ?? false,
+      logoutRequestStatus: data['logoutRequestStatus'] as String?,
+      logoutRequestedAt: _dateTimeFromDynamic(data['logoutRequestedAt']),
+      logoutResolvedAt: _dateTimeFromDynamic(data['logoutResolvedAt']),
+      logoutResolvedBy: data['logoutResolvedBy'] as String?,
+      logoutResolvedByName: data['logoutResolvedByName'] as String?,
     );
   }
 
@@ -43,6 +78,13 @@ class AppUser {
       'active': active,
       'supervisorId': supervisorId,
       'profilePic': profilePic,
+      'logoutRequestPending': logoutRequestPending,
+      'logoutRequestApproved': logoutRequestApproved,
+      'logoutRequestStatus': logoutRequestStatus,
+      'logoutRequestedAt': logoutRequestedAt,
+      'logoutResolvedAt': logoutResolvedAt,
+      'logoutResolvedBy': logoutResolvedBy,
+      'logoutResolvedByName': logoutResolvedByName,
     };
   }
 
@@ -55,6 +97,13 @@ class AppUser {
     bool? active,
     String? supervisorId,
     String? profilePic,
+    bool? logoutRequestPending,
+    bool? logoutRequestApproved,
+    String? logoutRequestStatus,
+    DateTime? logoutRequestedAt,
+    DateTime? logoutResolvedAt,
+    String? logoutResolvedBy,
+    String? logoutResolvedByName,
   }) {
     return AppUser(
       uid: uid ?? this.uid,
@@ -65,6 +114,14 @@ class AppUser {
       active: active ?? this.active,
       supervisorId: supervisorId ?? this.supervisorId,
       profilePic: profilePic ?? this.profilePic,
+      logoutRequestPending: logoutRequestPending ?? this.logoutRequestPending,
+      logoutRequestApproved:
+          logoutRequestApproved ?? this.logoutRequestApproved,
+      logoutRequestStatus: logoutRequestStatus ?? this.logoutRequestStatus,
+      logoutRequestedAt: logoutRequestedAt ?? this.logoutRequestedAt,
+      logoutResolvedAt: logoutResolvedAt ?? this.logoutResolvedAt,
+      logoutResolvedBy: logoutResolvedBy ?? this.logoutResolvedBy,
+      logoutResolvedByName: logoutResolvedByName ?? this.logoutResolvedByName,
     );
   }
 }

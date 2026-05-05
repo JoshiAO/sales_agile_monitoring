@@ -2,9 +2,12 @@ import 'package:flutter/material.dart';
 import 'dart:async';
 import 'package:compact_sales_monitoring/models/user_model.dart';
 import 'package:compact_sales_monitoring/services/auth_service.dart';
+import 'package:compact_sales_monitoring/services/push_notification_service.dart';
 
 class AuthProvider extends ChangeNotifier {
   final AuthService _authService = AuthService();
+  final PushNotificationService _pushNotificationService =
+      PushNotificationService();
   StreamSubscription? _authSubscription;
 
   AppUser? _currentUser;
@@ -20,7 +23,9 @@ class AuthProvider extends ChangeNotifier {
   AuthProvider() {
     _authSubscription = _authService.authStateChanges.listen((user) async {
       if (user == null) {
+        final previousUserId = _currentUser?.uid;
         _currentUser = null;
+        await _pushNotificationService.unbindCurrentUser(uid: previousUserId);
         notifyListeners();
         return;
       }
@@ -35,6 +40,7 @@ class AuthProvider extends ChangeNotifier {
         final fetchedUser = await _authService.getCurrentUser();
         _currentUser = fetchedUser;
         _error = null;
+        await _pushNotificationService.bindUser(_currentUser);
       } catch (e) {
         // Keep existing authenticated session on transient profile fetch errors.
         if (_currentUser == null) {
@@ -60,6 +66,7 @@ class AuthProvider extends ChangeNotifier {
       } else {
         _currentUser = user;
         _error = null;
+        await _pushNotificationService.bindUser(_currentUser);
       }
     } catch (e) {
       _error = e.toString().replaceFirst('Exception: ', '');
@@ -80,10 +87,12 @@ class AuthProvider extends ChangeNotifier {
     notifyListeners();
 
     final sw = Stopwatch()..start();
+    final previousUserId = _currentUser?.uid;
     try {
       await _authService.logout();
       _currentUser = null;
       _error = null;
+      await _pushNotificationService.unbindCurrentUser(uid: previousUserId);
     } catch (e) {
       _error = e.toString();
     } finally {
@@ -100,6 +109,7 @@ class AuthProvider extends ChangeNotifier {
     try {
       final user = await _authService.getCurrentUser();
       _currentUser = user;
+      await _pushNotificationService.bindUser(_currentUser);
     } catch (e) {
       _currentUser = null;
     }
@@ -114,6 +124,7 @@ class AuthProvider extends ChangeNotifier {
   @override
   void dispose() {
     _authSubscription?.cancel();
+    _pushNotificationService.unbindCurrentUser(uid: _currentUser?.uid);
     super.dispose();
   }
 }

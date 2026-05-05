@@ -24,6 +24,8 @@ class FirestoreService {
     return '${date}_$salesmanId';
   }
 
+  static String _announcementDocId() => uuid.v4();
+
   // User Management
   Future<void> createUser({
     required String uid,
@@ -42,6 +44,15 @@ class FirestoreService {
       'active': active,
       'supervisorId': supervisorId,
       'profilePic': null,
+      'logoutRequestPending': false,
+      'logoutRequestApproved': false,
+      'logoutRequestStatus': null,
+      'logoutRequestedAt': null,
+      'logoutResolvedAt': null,
+      'logoutResolvedBy': null,
+      'logoutResolvedByName': null,
+      'fcmToken': null,
+      'fcmTokenUpdatedAt': null,
       'createdAt': FieldValue.serverTimestamp(),
     });
   }
@@ -324,6 +335,45 @@ class FirestoreService {
     await firestore.collection('users').doc(uid).delete();
   }
 
+  Future<void> requestLogoutApproval({required String uid}) async {
+    await _firebaseService.firestore.collection('users').doc(uid).update({
+      'logoutRequestPending': true,
+      'logoutRequestApproved': false,
+      'logoutRequestStatus': 'pending',
+      'logoutRequestedAt': FieldValue.serverTimestamp(),
+      'logoutResolvedAt': null,
+      'logoutResolvedBy': null,
+    });
+  }
+
+  Future<void> resolveLogoutApproval({
+    required String uid,
+    required bool approved,
+    required String resolvedBy,
+    required String resolvedByName,
+  }) async {
+    await _firebaseService.firestore.collection('users').doc(uid).update({
+      'logoutRequestPending': false,
+      'logoutRequestApproved': approved,
+      'logoutRequestStatus': approved ? 'approved' : 'rejected',
+      'logoutResolvedAt': FieldValue.serverTimestamp(),
+      'logoutResolvedBy': resolvedBy,
+      'logoutResolvedByName': resolvedByName,
+    });
+  }
+
+  Future<void> clearLogoutApproval({required String uid}) async {
+    await _firebaseService.firestore.collection('users').doc(uid).update({
+      'logoutRequestPending': false,
+      'logoutRequestApproved': false,
+      'logoutRequestStatus': null,
+      'logoutRequestedAt': null,
+      'logoutResolvedAt': null,
+      'logoutResolvedBy': null,
+      'logoutResolvedByName': null,
+    });
+  }
+
   // Agile Targets
   Future<void> upsertAgileTarget({
     required String supervisorId,
@@ -551,6 +601,362 @@ class FirestoreService {
           submission;
     }
     return map;
+  }
+
+  Future<void> createAnnouncement({
+    required String createdBy,
+    required UserRole creatorRole,
+    required String title,
+    required String message,
+    required DateTime startAt,
+    required DateTime endAt,
+    required String occurrence,
+    String? imageUrl,
+  }) async {
+    final firestore = _firebaseService.firestore;
+    final trimmedTitle = title.trim();
+    final trimmedMessage = message.trim();
+    final now = DateTime.now();
+
+    final announcementId = _announcementDocId();
+
+    final announcementData = <String, dynamic>{
+      'id': announcementId,
+      'createdBy': createdBy,
+      'creatorRole': _roleToString(creatorRole),
+      'title': trimmedTitle,
+      'message': trimmedMessage,
+      'startAt': Timestamp.fromDate(startAt),
+      'endAt': Timestamp.fromDate(endAt),
+      'occurrence': occurrence,
+      'imageUrl': imageUrl?.trim() ?? '',
+      'createdAt': FieldValue.serverTimestamp(),
+      'updatedAt': FieldValue.serverTimestamp(),
+      'audience': creatorRole == UserRole.supervisor
+          ? 'supervisor_team'
+          : 'all_staff',
+      if (creatorRole == UserRole.supervisor) 'supervisorId': createdBy,
+    };
+
+    final recipientIds = <String>{};
+    if (creatorRole == UserRole.supervisor) {
+      final team = await firestore
+          .collection('users')
+          .where('role', isEqualTo: 'salesman')
+          .where('supervisorId', isEqualTo: createdBy)
+          .get();
+      recipientIds.addAll(team.docs.map((doc) => doc.id));
+    } else {
+      final salesmen = await firestore
+          .collection('users')
+          .where('role', isEqualTo: 'salesman')
+          .get();
+      final supervisors = await firestore
+          .collection('users')
+          .where('role', isEqualTo: 'supervisor')
+          .get();
+      recipientIds.addAll(salesmen.docs.map((doc) => doc.id));
+      recipientIds.addAll(supervisors.docs.map((doc) => doc.id));
+    }
+
+    final batch = firestore.batch();
+    batch.set(
+      firestore.collection('announcements').doc(announcementId),
+      announcementData,
+    );
+
+    for (final recipientId in recipientIds) {
+      final notificationRef = firestore
+          .collection('users')
+          .doc(recipientId)
+          .collection('notifications')
+          .doc();
+      batch.set(notificationRef, {
+        'announcementId': announcementId,
+        'title': trimmedTitle,
+        'message': trimmedMessage,
+        'status': 'info',
+        'occurrence': occurrence,
+        'imageUrl': imageUrl?.trim() ?? '',
+        'startAt': Timestamp.fromDate(startAt),
+        'endAt': Timestamp.fromDate(endAt),
+        'createdAt': FieldValue.serverTimestamp(),
+        'publishedAt': Timestamp.fromDate(now),
+        'readAt': null,
+      });
+    }
+
+    await batch.commit();
+  }
+
+  Future<void> updateAnnouncement({
+    required String announcementId,
+    required String title,
+    required String message,
+    required DateTime startAt,
+    required DateTime endAt,
+    required String occurrence,
+    String? imageUrl,
+  }) async {
+    final firestore = _firebaseService.firestore;
+    final trimmedTitle = title.trim();
+    final trimmedMessage = message.trim();
+
+    final announcementRef = firestore.collection('announcements').doc(announcementId);
+    final announcementSnap = await announcementRef.get();
+    if (!announcementSnap.exists) {
+      throw Exception('Announcement not found.');
+    }
+
+    final announcementData = announcementSnap.data() ?? const <String, dynamic>{};
+    final audience = announcementData['audience'] as String? ?? 'all_staff';
+    final supervisorId = announcementData['supervisorId'] as String?;
+
+    final recipientIds = <String>{};
+    if (audience == 'supervisor_team' && supervisorId != null) {
+      final team = await firestore
+          .collection('users')
+          .where('role', isEqualTo: 'salesman')
+          .where('supervisorId', isEqualTo: supervisorId)
+          .get();
+      recipientIds.addAll(team.docs.map((doc) => doc.id));
+    } else {
+      final salesmen = await firestore
+          .collection('users')
+          .where('role', isEqualTo: 'salesman')
+          .get();
+      final supervisors = await firestore
+          .collection('users')
+          .where('role', isEqualTo: 'supervisor')
+          .get();
+      recipientIds.addAll(salesmen.docs.map((doc) => doc.id));
+      recipientIds.addAll(supervisors.docs.map((doc) => doc.id));
+    }
+
+    await announcementRef.update({
+      'title': trimmedTitle,
+      'message': trimmedMessage,
+      'startAt': Timestamp.fromDate(startAt),
+      'endAt': Timestamp.fromDate(endAt),
+      'occurrence': occurrence,
+      'imageUrl': imageUrl?.trim() ?? '',
+      'updatedAt': FieldValue.serverTimestamp(),
+    });
+
+    try {
+      final notificationDocs = <QueryDocumentSnapshot<Map<String, dynamic>>>[];
+      for (final recipientId in recipientIds) {
+        final snapshot = await firestore
+            .collection('users')
+            .doc(recipientId)
+            .collection('notifications')
+            .where('announcementId', isEqualTo: announcementId)
+            .get();
+        notificationDocs.addAll(snapshot.docs);
+      }
+
+      for (var i = 0; i < notificationDocs.length; i += 400) {
+        final upper =
+            (i + 400 > notificationDocs.length) ? notificationDocs.length : i + 400;
+        final batch = firestore.batch();
+        for (final doc in notificationDocs.sublist(i, upper)) {
+          batch.update(doc.reference, {
+            'title': trimmedTitle,
+            'message': trimmedMessage,
+            'startAt': Timestamp.fromDate(startAt),
+            'endAt': Timestamp.fromDate(endAt),
+            'occurrence': occurrence,
+            'imageUrl': imageUrl?.trim() ?? '',
+            'updatedAt': FieldValue.serverTimestamp(),
+          });
+        }
+        await batch.commit();
+      }
+    } on FirebaseException catch (e) {
+      // Announcement update already succeeded; do not fail edit UI on fan-out permission gaps.
+      if (e.code != 'permission-denied') {
+        rethrow;
+      }
+    }
+  }
+
+  Future<void> deleteAnnouncement({required String announcementId}) async {
+    final firestore = _firebaseService.firestore;
+
+    final announcementRef = firestore.collection('announcements').doc(announcementId);
+    final announcementSnap = await announcementRef.get();
+    final announcementData = announcementSnap.data() ?? const <String, dynamic>{};
+    final audience = announcementData['audience'] as String? ?? 'all_staff';
+    final supervisorId = announcementData['supervisorId'] as String?;
+
+    final recipientIds = <String>{};
+    if (audience == 'supervisor_team' && supervisorId != null) {
+      final team = await firestore
+          .collection('users')
+          .where('role', isEqualTo: 'salesman')
+          .where('supervisorId', isEqualTo: supervisorId)
+          .get();
+      recipientIds.addAll(team.docs.map((doc) => doc.id));
+    } else {
+      final salesmen = await firestore
+          .collection('users')
+          .where('role', isEqualTo: 'salesman')
+          .get();
+      final supervisors = await firestore
+          .collection('users')
+          .where('role', isEqualTo: 'supervisor')
+          .get();
+      recipientIds.addAll(salesmen.docs.map((doc) => doc.id));
+      recipientIds.addAll(supervisors.docs.map((doc) => doc.id));
+    }
+
+    await announcementRef.delete();
+
+    try {
+      final notificationDocs = <QueryDocumentSnapshot<Map<String, dynamic>>>[];
+      for (final recipientId in recipientIds) {
+        final snapshot = await firestore
+            .collection('users')
+            .doc(recipientId)
+            .collection('notifications')
+            .where('announcementId', isEqualTo: announcementId)
+            .get();
+        notificationDocs.addAll(snapshot.docs);
+      }
+
+      for (var i = 0; i < notificationDocs.length; i += 400) {
+        final upper =
+            (i + 400 > notificationDocs.length) ? notificationDocs.length : i + 400;
+        final batch = firestore.batch();
+        for (final doc in notificationDocs.sublist(i, upper)) {
+          batch.delete(doc.reference);
+        }
+        await batch.commit();
+      }
+    } on FirebaseException catch (e) {
+      if (e.code != 'permission-denied') {
+        rethrow;
+      }
+    }
+  }
+
+  Stream<QuerySnapshot<Map<String, dynamic>>> watchAnnouncementsByCreator({
+    required String creatorId,
+  }) {
+    return _firebaseService.firestore
+        .collection('announcements')
+        .where('createdBy', isEqualTo: creatorId)
+        .orderBy('createdAt', descending: true)
+        .snapshots();
+  }
+
+  Stream<QuerySnapshot<Map<String, dynamic>>> watchActiveAnnouncements() {
+    return _firebaseService.firestore
+        .collection('announcements')
+        .where('endAt', isGreaterThanOrEqualTo: Timestamp.now())
+        .orderBy('endAt')
+        .snapshots();
+  }
+
+  Stream<int> watchAnnouncementLikeCount({required String announcementId}) {
+    return _firebaseService.firestore
+        .collection('announcements')
+        .doc(announcementId)
+        .collection('likes')
+        .snapshots()
+        .map((snapshot) => snapshot.docs.length);
+  }
+
+  Stream<bool> watchIsAnnouncementLiked({
+    required String announcementId,
+    required String uid,
+  }) {
+    return _firebaseService.firestore
+        .collection('announcements')
+        .doc(announcementId)
+        .collection('likes')
+        .doc(uid)
+        .snapshots()
+        .map((snapshot) => snapshot.exists);
+  }
+
+  Future<void> likeAnnouncement({
+    required String announcementId,
+    required String uid,
+  }) async {
+    await _firebaseService.firestore
+        .collection('announcements')
+        .doc(announcementId)
+        .collection('likes')
+        .doc(uid)
+        .set({
+          'uid': uid,
+          'likedAt': FieldValue.serverTimestamp(),
+        });
+  }
+
+  Future<void> unlikeAnnouncement({
+    required String announcementId,
+    required String uid,
+  }) async {
+    await _firebaseService.firestore
+        .collection('announcements')
+        .doc(announcementId)
+        .collection('likes')
+        .doc(uid)
+        .delete();
+  }
+
+  Stream<QuerySnapshot<Map<String, dynamic>>> watchUserNotifications({
+    required String uid,
+  }) {
+    return _firebaseService.firestore
+        .collection('users')
+        .doc(uid)
+        .collection('notifications')
+        .orderBy('createdAt', descending: true)
+        .snapshots();
+  }
+
+  Stream<int> watchUnreadUserNotificationCount({required String uid}) {
+    return _firebaseService.firestore
+        .collection('users')
+        .doc(uid)
+        .collection('notifications')
+        .where('readAt', isNull: true)
+        .snapshots()
+        .map((snapshot) => snapshot.docs.length);
+  }
+
+  Future<void> markAllUserNotificationsRead({required String uid}) async {
+    final unread = await _firebaseService.firestore
+        .collection('users')
+        .doc(uid)
+        .collection('notifications')
+        .where('readAt', isNull: true)
+        .get();
+
+    if (unread.docs.isEmpty) return;
+
+    final batch = _firebaseService.firestore.batch();
+    for (final doc in unread.docs) {
+      batch.update(doc.reference, {'readAt': FieldValue.serverTimestamp()});
+    }
+    await batch.commit();
+  }
+
+  Stream<QuerySnapshot<Map<String, dynamic>>> watchSalesmanNotifications({
+    required String uid,
+  }) {
+    return watchUserNotifications(uid: uid);
+  }
+
+  Stream<int> watchUnreadSalesmanNotificationCount({required String uid}) {
+    return watchUnreadUserNotificationCount(uid: uid);
+  }
+
+  Future<void> markAllSalesmanNotificationsRead({required String uid}) async {
+    await markAllUserNotificationsRead(uid: uid);
   }
 }
 

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 import 'package:compact_sales_monitoring/models/agile_model.dart';
@@ -21,6 +22,8 @@ class _SupervisorHomeScreenState extends State<SupervisorHomeScreen> {
   final FirestoreService _firestoreService = FirestoreService();
   late Future<_SupervisorHomeData> _homeDataFuture;
   _SupervisorCardMode _cardMode = _SupervisorCardMode.wide;
+  bool _showNotificationsPanel = false;
+  bool _isMarkingNotificationsRead = false;
 
   @override
   void initState() {
@@ -98,6 +101,191 @@ class _SupervisorHomeScreenState extends State<SupervisorHomeScreen> {
     await nextFuture;
   }
 
+  String _formatNotificationTime(dynamic value) {
+    if (value is Timestamp) {
+      return DateFormat('MMM d, yyyy h:mm a').format(value.toDate().toLocal());
+    }
+    return 'Unknown time';
+  }
+
+  Future<void> _markAllNotificationsAsRead(String uid) async {
+    setState(() => _isMarkingNotificationsRead = true);
+    try {
+      await _firestoreService.markAllUserNotificationsRead(uid: uid);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Notifications marked as read.')),
+      );
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed to mark as read: $error')),
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _isMarkingNotificationsRead = false);
+      }
+    }
+  }
+
+  Widget _buildNotificationsPanel(String uid) {
+    final screenWidth = MediaQuery.sizeOf(context).width;
+    final panelWidth = (screenWidth - 24).clamp(280.0, 360.0).toDouble();
+
+    return Align(
+      alignment: Alignment.centerRight,
+      child: GestureDetector(
+        onTap: () {},
+        child: Container(
+          width: panelWidth,
+          margin: const EdgeInsets.fromLTRB(0, 16, 16, 16),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: Colors.grey.shade300),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.16),
+                blurRadius: 14,
+                offset: const Offset(0, 4),
+              ),
+            ],
+          ),
+          child: Column(
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(12, 10, 8, 8),
+                child: Row(
+                  children: [
+                    Text(
+                      'Notifications',
+                      style: Theme.of(context).textTheme.titleMedium,
+                    ),
+                    const Spacer(),
+                    StreamBuilder<int>(
+                      stream: _firestoreService.watchUnreadUserNotificationCount(
+                        uid: uid,
+                      ),
+                      initialData: 0,
+                      builder: (context, snapshot) {
+                        final unread = snapshot.data ?? 0;
+                        return TextButton(
+                          onPressed: unread == 0 || _isMarkingNotificationsRead
+                              ? null
+                              : () => _markAllNotificationsAsRead(uid),
+                          child: Text('Mark all ($unread)'),
+                        );
+                      },
+                    ),
+                    IconButton(
+                      tooltip: 'Close notifications',
+                      onPressed: () {
+                        setState(() => _showNotificationsPanel = false);
+                      },
+                      icon: const Icon(Icons.close),
+                    ),
+                  ],
+                ),
+              ),
+              const Divider(height: 1),
+              Expanded(
+                child: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+                  stream: _firestoreService.watchUserNotifications(uid: uid),
+                  builder: (context, snapshot) {
+                    if (snapshot.connectionState == ConnectionState.waiting) {
+                      return const Center(child: CircularProgressIndicator());
+                    }
+                    if (snapshot.hasError) {
+                      return Center(
+                        child: Padding(
+                          padding: const EdgeInsets.all(16),
+                          child: Text(
+                            'Unable to load notifications: ${snapshot.error}',
+                            textAlign: TextAlign.center,
+                          ),
+                        ),
+                      );
+                    }
+
+                    final docs = (snapshot.data?.docs ?? const []).where((doc) {
+                      final data = doc.data();
+                      final occurrence =
+                          ((data['occurrence'] as String?) ?? '').toLowerCase();
+                      final isRead = data['readAt'] != null;
+                      // One-time notifications are removed from the list once read.
+                      return !(occurrence == 'once' && isRead);
+                    }).toList();
+                    if (docs.isEmpty) {
+                      return const Center(child: Text('No notifications yet.'));
+                    }
+
+                    return ListView.separated(
+                      padding: const EdgeInsets.all(10),
+                      itemCount: docs.length,
+                      separatorBuilder: (_, __) => const SizedBox(height: 8),
+                      itemBuilder: (context, index) {
+                        final data = docs[index].data();
+                        final title =
+                            (data['title'] as String?) ?? 'Notification';
+                        final message = (data['message'] as String?) ?? '';
+                        final isUnread = data['readAt'] == null;
+
+                        return ListTile(
+                          tileColor: isUnread ? Colors.yellow.shade50 : null,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(10),
+                            side: BorderSide(color: Colors.grey.shade300),
+                          ),
+                          leading: CircleAvatar(
+                            backgroundColor:
+                                Colors.blueGrey.withValues(alpha: 0.12),
+                            child: const Icon(
+                              Icons.notifications,
+                              color: Colors.blueGrey,
+                            ),
+                          ),
+                          title: Row(
+                            children: [
+                              Expanded(child: Text(title)),
+                              if (isUnread)
+                                Container(
+                                  width: 8,
+                                  height: 8,
+                                  decoration: const BoxDecoration(
+                                    color: Colors.red,
+                                    shape: BoxShape.circle,
+                                  ),
+                                ),
+                            ],
+                          ),
+                          subtitle: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const SizedBox(height: 4),
+                              Text(message),
+                              const SizedBox(height: 6),
+                              Text(
+                                _formatNotificationTime(data['createdAt']),
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color: Colors.grey.shade700,
+                                ),
+                              ),
+                            ],
+                          ),
+                        );
+                      },
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   int _cardsPerRow(double maxWidth) {
     final isMobileLayout = !kIsWeb && maxWidth < 700;
     if (isMobileLayout) {
@@ -142,10 +330,65 @@ class _SupervisorHomeScreenState extends State<SupervisorHomeScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final uid = context.watch<AuthProvider>().currentUser?.uid;
+    final unreadStream = uid == null
+        ? const Stream<int>.empty()
+        : _firestoreService.watchUnreadUserNotificationCount(uid: uid);
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('Home'),
         actions: [
+          if (uid != null)
+            StreamBuilder<int>(
+              stream: unreadStream,
+              initialData: 0,
+              builder: (context, snapshot) {
+                final unread = snapshot.data ?? 0;
+                return Padding(
+                  padding: const EdgeInsets.only(right: 8),
+                  child: Stack(
+                    alignment: Alignment.center,
+                    children: [
+                      IconButton(
+                        tooltip: 'Notifications',
+                        onPressed: () {
+                          setState(() {
+                            _showNotificationsPanel = !_showNotificationsPanel;
+                          });
+                        },
+                        icon: const Icon(Icons.notifications_outlined),
+                      ),
+                      if (unread > 0)
+                        Positioned(
+                          top: 8,
+                          right: 4,
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 4,
+                              vertical: 1,
+                            ),
+                            decoration: BoxDecoration(
+                              color: Colors.red,
+                              borderRadius: BorderRadius.circular(999),
+                            ),
+                            constraints: const BoxConstraints(minWidth: 16),
+                            child: Text(
+                              unread > 99 ? '99+' : '$unread',
+                              textAlign: TextAlign.center,
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 10,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+                );
+              },
+            ),
           if (!kIsWeb)
             Padding(
               padding: const EdgeInsets.all(16.0),
@@ -160,9 +403,11 @@ class _SupervisorHomeScreenState extends State<SupervisorHomeScreen> {
             ),
         ],
       ),
-      body: FutureBuilder<_SupervisorHomeData>(
-        future: _homeDataFuture,
-        builder: (context, snapshot) {
+      body: Stack(
+        children: [
+          FutureBuilder<_SupervisorHomeData>(
+            future: _homeDataFuture,
+            builder: (context, snapshot) {
           if (snapshot.connectionState == ConnectionState.waiting) {
             return const CardsLoadingSkeleton(cardCount: 6);
           }
@@ -300,7 +545,21 @@ class _SupervisorHomeScreenState extends State<SupervisorHomeScreen> {
               );
             },
           );
-        },
+            },
+          ),
+          if (_showNotificationsPanel && uid != null) ...[
+            Positioned.fill(
+              child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: () {
+                  setState(() => _showNotificationsPanel = false);
+                },
+                child: const SizedBox.expand(),
+              ),
+            ),
+            _buildNotificationsPanel(uid),
+          ],
+        ],
       ),
     );
   }

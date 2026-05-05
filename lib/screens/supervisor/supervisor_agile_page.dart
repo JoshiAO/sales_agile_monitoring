@@ -171,7 +171,7 @@ class _SupervisorAgilePageState extends State<SupervisorAgilePage> {
   }
 
   int _cardsPerRow(double maxWidth) {
-    final isMobileLayout = !kIsWeb && maxWidth < 700;
+    final isMobileLayout = maxWidth < 700;
     if (isMobileLayout) {
       return 1;
     }
@@ -423,6 +423,7 @@ class _SupervisorAgilePageState extends State<SupervisorAgilePage> {
   @override
   Widget build(BuildContext context) {
     final currency = NumberFormat.currency(symbol: '', decimalDigits: 2);
+    final compactActions = MediaQuery.sizeOf(context).width < 680;
 
     return Scaffold(
       appBar: AppBar(
@@ -431,50 +432,91 @@ class _SupervisorAgilePageState extends State<SupervisorAgilePage> {
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 4),
             child: Center(
-              child: OutlinedButton.icon(
-                onPressed: _isExporting ? null : _exportAgile,
-                icon: _isExporting
-                    ? const SizedBox(
-                        width: 14,
-                        height: 14,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : const Icon(Icons.file_download_outlined, size: 18),
-                label: const Text('Export'),
-              ),
+              child: compactActions
+                  ? IconButton(
+                      tooltip: 'Export',
+                      onPressed: _isExporting ? null : _exportAgile,
+                      icon: _isExporting
+                          ? const SizedBox(
+                              width: 18,
+                              height: 18,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : const Icon(Icons.file_download_outlined),
+                    )
+                  : OutlinedButton.icon(
+                      onPressed: _isExporting ? null : _exportAgile,
+                      icon: _isExporting
+                          ? const SizedBox(
+                              width: 14,
+                              height: 14,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : const Icon(Icons.file_download_outlined, size: 18),
+                      label: const Text('Export'),
+                    ),
             ),
           ),
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 8),
             child: Center(
-              child: FilledButton.icon(
-                onPressed: _isSavingTargets
-                    ? null
-                    : () async {
-                        try {
-                          final data = await _pageFuture;
-                          if (!context.mounted) return;
-                          await _saveAllTargets(data);
-                        } catch (_) {
-                          if (!context.mounted) return;
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(
-                              content: Text(
-                                'Unable to save targets right now.',
-                              ),
-                            ),
-                          );
-                        }
-                      },
-                icon: _isSavingTargets
-                    ? const SizedBox(
-                        width: 14,
-                        height: 14,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : const Icon(Icons.save_outlined, size: 18),
-                label: const Text('Save'),
-              ),
+              child: compactActions
+                  ? IconButton(
+                      tooltip: 'Save',
+                      onPressed: _isSavingTargets
+                          ? null
+                          : () async {
+                              try {
+                                final data = await _pageFuture;
+                                if (!context.mounted) return;
+                                await _saveAllTargets(data);
+                              } catch (_) {
+                                if (!context.mounted) return;
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(
+                                    content: Text(
+                                      'Unable to save targets right now.',
+                                    ),
+                                  ),
+                                );
+                              }
+                            },
+                      icon: _isSavingTargets
+                          ? const SizedBox(
+                              width: 18,
+                              height: 18,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : const Icon(Icons.save_outlined),
+                    )
+                  : FilledButton.icon(
+                      onPressed: _isSavingTargets
+                          ? null
+                          : () async {
+                              try {
+                                final data = await _pageFuture;
+                                if (!context.mounted) return;
+                                await _saveAllTargets(data);
+                              } catch (_) {
+                                if (!context.mounted) return;
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(
+                                    content: Text(
+                                      'Unable to save targets right now.',
+                                    ),
+                                  ),
+                                );
+                              }
+                            },
+                      icon: _isSavingTargets
+                          ? const SizedBox(
+                              width: 14,
+                              height: 14,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : const Icon(Icons.save_outlined, size: 18),
+                      label: const Text('Save'),
+                    ),
             ),
           ),
         ],
@@ -578,43 +620,65 @@ class _SupervisorAgilePageState extends State<SupervisorAgilePage> {
                               onDateChanged: _onDateChanged,
                             ),
                             const SizedBox(height: 12),
-                            Row(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Expanded(
-                                  child: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    children: [
-                                      Text(
-                                        'Agile Team Performance',
-                                        style: Theme.of(
-                                          context,
-                                        ).textTheme.titleLarge,
-                                      ),
-                                      const SizedBox(height: 4),
-                                      Text(
-                                        '${data.team.length} team member${data.team.length == 1 ? '' : 's'} • Date: ${data.date}',
-                                        style: Theme.of(context)
-                                            .textTheme
-                                            .bodyMedium
-                                            ?.copyWith(
-                                              color: Colors.grey.shade700,
-                                            ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                                const SizedBox(width: 12),
-                                _AgileViewToggle(
+                            LayoutBuilder(
+                              builder: (context, headerConstraints) {
+                                final compactHeader =
+                                    headerConstraints.maxWidth < 760;
+
+                                final headerText = Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      'Agile Team Performance',
+                                      style:
+                                          Theme.of(context).textTheme.titleLarge,
+                                    ),
+                                    const SizedBox(height: 4),
+                                    Text(
+                                      '${data.team.length} team member${data.team.length == 1 ? '' : 's'} • Date: ${data.date}',
+                                      style: Theme.of(context)
+                                          .textTheme
+                                          .bodyMedium
+                                          ?.copyWith(
+                                            color: Colors.grey.shade700,
+                                          ),
+                                    ),
+                                  ],
+                                );
+
+                                final toggle = _AgileViewToggle(
                                   mode: _viewMode,
                                   onChanged: (mode) {
                                     setState(() {
                                       _viewMode = mode;
                                     });
                                   },
-                                ),
-                              ],
+                                );
+
+                                if (compactHeader) {
+                                  return Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      headerText,
+                                      const SizedBox(height: 10),
+                                      Align(
+                                        alignment: Alignment.centerRight,
+                                        child: toggle,
+                                      ),
+                                    ],
+                                  );
+                                }
+
+                                return Row(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Expanded(child: headerText),
+                                    const SizedBox(width: 12),
+                                    toggle,
+                                  ],
+                                );
+                              },
                             ),
                             const SizedBox(height: 12),
                             LayoutBuilder(
@@ -873,49 +937,85 @@ class _SupervisorSalesmanAgileCard extends StatelessWidget {
               Row(
                 children: [
                   Expanded(
-                    child: _MetricWithIndexBox(
-                      icon: Icons.storefront,
-                      iconColor: Colors.blue.shade700,
-                      label: 'Productive Calls Target / Actual',
-                      value: '$productiveTarget / $productiveActual',
-                      indexValue: productiveIndex,
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: _MetricWithIndexBox(
-                      icon: Icons.payments_outlined,
-                      iconColor: Colors.teal.shade700,
-                      label: 'STT Target / Actual',
-                      value:
-                          '${currency.format(sttTarget)} / ${currency.format(sttActual)}',
-                      indexValue: sttIndex,
+                    child: LayoutBuilder(
+                      builder: (context, constraints) {
+                        final stacked = constraints.maxWidth < 560;
+
+                        final productiveBox = _MetricWithIndexBox(
+                          icon: Icons.storefront,
+                          iconColor: Colors.blue.shade700,
+                          label: 'Productive Calls Target / Actual',
+                          value: '$productiveTarget / $productiveActual',
+                          indexValue: productiveIndex,
+                        );
+                        final sttBox = _MetricWithIndexBox(
+                          icon: Icons.payments_outlined,
+                          iconColor: Colors.teal.shade700,
+                          label: 'STT Target / Actual',
+                          value:
+                              '${currency.format(sttTarget)} / ${currency.format(sttActual)}',
+                          indexValue: sttIndex,
+                        );
+
+                        if (stacked) {
+                          return Column(
+                            children: [
+                              productiveBox,
+                              const SizedBox(height: 10),
+                              sttBox,
+                            ],
+                          );
+                        }
+
+                        return Row(
+                          children: [
+                            Expanded(child: productiveBox),
+                            const SizedBox(width: 10),
+                            Expanded(child: sttBox),
+                          ],
+                        );
+                      },
                     ),
                   ),
                 ],
               ),
             ],
             if (mode == _SupervisorAgileViewMode.compact) ...[
-              Row(
-                children: [
-                  Expanded(
-                    child: _CompactIndexIcon(
-                      icon: Icons.storefront,
-                      label: 'Productive',
-                      percent: productivePercent,
-                      color: Colors.blue.shade700,
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: _CompactIndexIcon(
-                      icon: Icons.payments_outlined,
-                      label: 'STT',
-                      percent: sttPercent,
-                      color: Colors.teal.shade700,
-                    ),
-                  ),
-                ],
+              LayoutBuilder(
+                builder: (context, constraints) {
+                  final stacked = constraints.maxWidth < 460;
+
+                  final productiveIcon = _CompactIndexIcon(
+                    icon: Icons.storefront,
+                    label: 'Productive',
+                    percent: productivePercent,
+                    color: Colors.blue.shade700,
+                  );
+                  final sttIcon = _CompactIndexIcon(
+                    icon: Icons.payments_outlined,
+                    label: 'STT',
+                    percent: sttPercent,
+                    color: Colors.teal.shade700,
+                  );
+
+                  if (stacked) {
+                    return Column(
+                      children: [
+                        productiveIcon,
+                        const SizedBox(height: 10),
+                        sttIcon,
+                      ],
+                    );
+                  }
+
+                  return Row(
+                    children: [
+                      Expanded(child: productiveIcon),
+                      const SizedBox(width: 10),
+                      Expanded(child: sttIcon),
+                    ],
+                  );
+                },
               ),
             ],
           ],

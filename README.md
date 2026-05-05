@@ -25,6 +25,9 @@ The app supports three roles:
   - productive calls
   - STT actual sale
 - Validation that prevents invalid Agile submissions and locks finalized entries.
+- **Feeds tab** — real-time timeline of active announcements from supervisors and superusers.
+  - Tap any card to open a focused dim-overlay view.
+  - Heart (like) button to react to announcements (one-way; cannot unlike).
 
 ### Supervisor
 
@@ -36,6 +39,10 @@ The app supports three roles:
   - productive calls target
   - STT target
 - Historical Agile review by date with compact and wide card layouts.
+- **Announcements tab** — create, edit, and delete announcements with optional image attachments.
+  - Images are compressed before upload (max 1280 px, JPEG quality 35).
+  - Audience targeting: own team only, or all staff.
+- **Feeds tab** — same timeline view as salesman, with two-way heart toggle.
 
 ### Superuser
 
@@ -50,6 +57,8 @@ The app supports three roles:
   - activating or deactivating accounts
   - deleting accounts
   - updating authentication credentials via Cloud Functions
+- **Announcements tab** — full announcement management across all teams.
+- **Feeds tab** — global timeline with two-way heart toggle.
 
 ## App Flowchart
 
@@ -72,7 +81,7 @@ flowchart TD
 
     subgraph SAL [Salesman]
         direction TB
-        SAL_TABS[Tabs: Calls · Agile]
+        SAL_TABS[Tabs: Calls · Agile · Feeds]
         SAL_TABS --> SAL_CALLS[Calls Tab]
         SAL_TABS --> SAL_AGILE[Agile Tab]
 
@@ -100,7 +109,7 @@ flowchart TD
 
     subgraph SUP [Supervisor]
         direction TB
-        SUP_TABS[Tabs: Home · Map · Agile]
+        SUP_TABS[Tabs: Home · Map · Agile · Feeds · Announcements]
         SUP_TABS --> SUP_HOME[Home Tab]
         SUP_TABS --> SUP_MAP[Map Tab]
         SUP_TABS --> SUP_AGILE[Agile Tab]
@@ -121,7 +130,7 @@ flowchart TD
 
     subgraph SU [Superuser]
         direction TB
-        SU_TABS[Tabs: Home · Map · Agile · Users]
+        SU_TABS[Tabs: Home · Map · Agile · Feeds · Users · Announcements]
         SU_TABS --> SU_HOME[Home Tab]
         SU_TABS --> SU_MAP[Map Tab]
         SU_TABS --> SU_AGILE[Agile Tab]
@@ -186,19 +195,24 @@ storage.rules
 
 - **Calls** — first/last call workflow, checkpoint capture, and route image upload.
 - **Agile** — daily form submission after call completion.
+- **Feeds** — announcement timeline with heart reactions (like only).
 
 ### Supervisor
 
 - **Home** — assigned salesmen summary cards.
 - **Map** — route visualization and call inspection.
 - **Agile** — target input and actual comparison by salesman and date.
+- **Feeds** — announcement timeline with heart reactions.
+- **Announcements** — create, edit, and delete announcements with image attachments.
 
 ### Superuser
 
 - **Home** — supervisor team overview.
 - **Map** — global route operations view and archive action.
 - **Agile** — supervisor-level performance overview.
+- **Feeds** — global announcement timeline with heart reactions.
 - **User Management** — account lifecycle and role assignment.
+- **Announcements** — full announcement management across all teams.
 
 ## Firestore Collections
 
@@ -208,6 +222,8 @@ storage.rules
 | `routes` | Daily route documents with call images and checkpoints |
 | `agile_targets` | Daily supervisor-entered targets per salesman |
 | `agile_submissions` | Daily salesman-entered actuals and submission status |
+| `announcements` | Active announcements with audience, schedule, and optional image URL |
+| `announcements/{id}/likes` | Per-user like records for announcement reactions |
 
 ## Security Model
 
@@ -282,6 +298,25 @@ flutter analyze
 flutter test
 flutter build apk
 ```
+
+## Changelog
+
+### v2.0.1 — May 5, 2026
+
+- **Feeds page** added for all three roles (salesman, supervisor, superuser).
+  - Real-time timeline of active and ongoing announcements.
+  - Facebook-style centered cards on web (32% width, clamped 420–620 px).
+  - Salesman: tap any card to open a focused dim-overlay view.
+  - Heart (like) button backed by Firestore; salesman can like but not unlike.
+- **Announcements page** added for supervisor and superuser.
+  - Create, edit, and delete announcements with title, message, occurrence, start/end time, and audience.
+  - Optional image attachment with aggressive JPEG compression before upload (max 1280 px, quality 35).
+  - Edit dialog includes inline image preview and remove-image option.
+- **Navigation reordered**: Feeds tab placed after Agile in all three role tab bars and navigation rails.
+- **Overflow fix**: Create Announcement form wrapped in `SingleChildScrollView` to prevent bottom overflow when an image preview is attached.
+- **Security**: Firestore rules updated for `announcements`, `likes`, and `notifications` sub-collections; deployed to production.
+
+---
 
 ## Branding
 
