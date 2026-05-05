@@ -208,7 +208,7 @@ class _FeedsViewState extends State<_FeedsView> {
               return ListView.separated(
                 padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 20),
                 itemCount: announcements.length,
-                separatorBuilder: (_, __) => const SizedBox(height: 16),
+                separatorBuilder: (_, _) => const SizedBox(height: 16),
                 itemBuilder: (context, index) {
                   final doc = announcements[index];
                   final enableFocusMode = true;
@@ -219,13 +219,11 @@ class _FeedsViewState extends State<_FeedsView> {
                     currentUserId: widget.user.uid,
                     enableFocusMode: enableFocusMode,
                     allowUnlike: allowUnlike,
-                    onOpenFocus: enableFocusMode
-                        ? () => _showFocusedAnnouncementCard(
-                              announcementId: doc.id,
-                              data: doc.data(),
-                              allowUnlike: allowUnlike,
-                            )
-                        : null,
+                    onOpenFocus: () => _showFocusedAnnouncementCard(
+                          announcementId: doc.id,
+                          data: doc.data(),
+                          allowUnlike: allowUnlike,
+                        ),
                   );
                   if (!isCenteredWeb) {
                     return card;
@@ -405,7 +403,7 @@ class _AnnouncementFeedCard extends StatelessWidget {
                           child: Image.network(
                             imageUrl,
                             fit: BoxFit.contain,
-                            errorBuilder: (_, __, ___) => Container(
+                            errorBuilder: (_, _, _) => Container(
                               alignment: Alignment.center,
                               color: Colors.grey.shade200,
                               child: const Text('Unable to load image'),
@@ -606,7 +604,7 @@ class _AnnouncementFeedCard extends StatelessWidget {
                         child: Image.network(
                           imageUrl,
                           fit: BoxFit.contain,
-                          errorBuilder: (_, __, ___) => Container(
+                          errorBuilder: (_, _, _) => Container(
                             height: 120,
                             alignment: Alignment.center,
                             color: Colors.grey.shade200,
