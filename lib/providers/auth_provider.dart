@@ -26,14 +26,26 @@ class AuthProvider extends ChangeNotifier {
   String? get error => _error;
   bool get isAuthenticated => _currentUser != null;
 
+  Map<String, dynamic> _toJsonSafeMap(Map<String, dynamic> source) {
+    final safe = <String, dynamic>{};
+    source.forEach((key, value) {
+      if (value is DateTime) {
+        safe[key] = value.millisecondsSinceEpoch;
+      } else {
+        safe[key] = value;
+      }
+    });
+    return safe;
+  }
+
   // Persist the user profile locally so it can be restored when offline.
   Future<void> _cacheUser(AppUser user) async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      final map = {
+      final map = _toJsonSafeMap({
         'uid': user.uid,
         ...user.toMap(),
-      };
+      });
       await prefs.setString(_cachedUserKey, jsonEncode(map));
     } catch (_) {}
   }
@@ -59,19 +71,53 @@ class AuthProvider extends ChangeNotifier {
     } catch (_) {}
   }
 
+  Future<void> _bootstrapPersistedSession() async {
+    final firebaseUser = _authService.currentFirebaseUser;
+
+    if (firebaseUser == null) {
+      _isInitializing = false;
+      notifyListeners();
+      return;
+    }
+
+    try {
+      final fetchedUser = await _authService.getCurrentUser();
+      _currentUser = fetchedUser;
+      if (_currentUser != null) {
+        await _cacheUser(_currentUser!);
+      }
+      await _pushNotificationService.bindUser(_currentUser);
+      _error = null;
+    } catch (e) {
+      final cached = await _loadCachedUser();
+      if (cached != null && cached.uid == firebaseUser.uid) {
+        _currentUser = cached;
+        _error = null;
+      } else {
+        _error = e.toString().replaceFirst('Exception: ', '');
+      }
+    } finally {
+      _isInitializing = false;
+      notifyListeners();
+    }
+  }
+
   AuthProvider() {
+    _bootstrapPersistedSession();
+
     _authSubscription = _authService.authStateChanges.listen((user) async {
       if (user == null) {
-        // Only sign out fully if we are past initialization (i.e. not the
-        // transient null that Firebase emits before it resolves the local
-        // persisted token on cold-start).
-        if (!_isInitializing) {
-          final previousUserId = _currentUser?.uid;
-          _currentUser = null;
-          await _clearCachedUser();
-          await _pushNotificationService.unbindCurrentUser(uid: previousUserId);
+        if (_isInitializing || _currentUser != null) {
+          // During startup or transient auth null blips, keep current session.
+          _isInitializing = false;
           notifyListeners();
+          return;
         }
+
+        final previousUserId = _currentUser?.uid;
+        _currentUser = null;
+        await _clearCachedUser();
+        await _pushNotificationService.unbindCurrentUser(uid: previousUserId);
         _isInitializing = false;
         notifyListeners();
         return;

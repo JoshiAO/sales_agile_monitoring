@@ -106,5 +106,7 @@ class AuthService {
     return appUser;
   }
 
+  User? get currentFirebaseUser => _firebaseService.auth.currentUser;
+
   Stream<User?> get authStateChanges => _firebaseService.auth.authStateChanges();
 }
