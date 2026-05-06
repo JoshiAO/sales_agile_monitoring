@@ -452,6 +452,21 @@ class _SupervisorDashboardState extends State<SupervisorDashboard> {
               ),
             ),
           ),
+          if (_focusedRouteId != null) ...[
+            const SizedBox(height: 6),
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                onPressed: () => setState(() => _focusedRouteId = null),
+                icon: const Icon(Icons.layers, size: 14),
+                label: const Text('Show All'),
+                style: OutlinedButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(vertical: 6),
+                  textStyle: const TextStyle(fontSize: 12),
+                ),
+              ),
+            ),
+          ],
         ],
       ),
     );
@@ -625,7 +640,10 @@ class _SupervisorDashboardState extends State<SupervisorDashboard> {
                         PolylineLayer(
                           polylines: routeProvider.routes
                               .where(
-                                (r) => !routeProvider.isApproximate(r.routeId),
+                                (r) =>
+                                  (_focusedRouteId == null ||
+                                    r.routeId == _focusedRouteId) &&
+                                  !routeProvider.isApproximate(r.routeId),
                               )
                               .map((route) {
                                 final polyline =
@@ -652,7 +670,10 @@ class _SupervisorDashboardState extends State<SupervisorDashboard> {
                         PolylineLayer(
                           polylines: routeProvider.routes
                               .where(
-                                (r) => routeProvider.isApproximate(r.routeId),
+                                (r) =>
+                                  (_focusedRouteId == null ||
+                                    r.routeId == _focusedRouteId) &&
+                                  routeProvider.isApproximate(r.routeId),
                               )
                               .map((route) {
                                 final polyline =
@@ -678,7 +699,12 @@ class _SupervisorDashboardState extends State<SupervisorDashboard> {
 
                         // Checkpoints under endpoint flags.
                         MarkerLayer(
-                          markers: routeProvider.routes
+                            markers: routeProvider.routes
+                              .where(
+                              (r) =>
+                                _focusedRouteId == null ||
+                                r.routeId == _focusedRouteId,
+                              )
                               .expand(
                                 (route) => [
                                   ...route.sortedCheckpoints
@@ -719,7 +745,12 @@ class _SupervisorDashboardState extends State<SupervisorDashboard> {
 
                         // First/last flags are rendered above checkpoints.
                         MarkerLayer(
-                          markers: routeProvider.routes
+                            markers: routeProvider.routes
+                              .where(
+                              (r) =>
+                                _focusedRouteId == null ||
+                                r.routeId == _focusedRouteId,
+                              )
                               .expand(
                                 (route) => [
                                   if (_shouldShowOngoingArrow(route))

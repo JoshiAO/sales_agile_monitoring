@@ -29,6 +29,10 @@ class _CameraScreenState extends State<CameraScreen> {
   bool _isFaceAligned = false;
   String _feedbackText = 'Center your face';
 
+  // Auto-capture countdown
+  int _countdown = 0;          // 3 → 2 → 1, then capture fires
+  Timer? _countdownTimer;
+
   @override
   void initState() {
     super.initState();
@@ -37,9 +41,37 @@ class _CameraScreenState extends State<CameraScreen> {
 
   @override
   void dispose() {
+    _countdownTimer?.cancel();
     _cameraController?.dispose();
     _faceDetectionService.dispose();
     super.dispose();
+  }
+
+  void _startCountdown() {
+    if (_countdownTimer != null) return; // already running
+    setState(() => _countdown = 3);
+    _countdownTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (!mounted) {
+        timer.cancel();
+        return;
+      }
+      if (!_isFaceAligned || _isCapturing) {
+        _cancelCountdown();
+        return;
+      }
+      setState(() => _countdown--);
+      if (_countdown <= 0) {
+        timer.cancel();
+        _countdownTimer = null;
+        _capture();
+      }
+    });
+  }
+
+  void _cancelCountdown() {
+    _countdownTimer?.cancel();
+    _countdownTimer = null;
+    if (mounted) setState(() => _countdown = 0);
   }
 
   Future<void> _initializeCamera() async {
@@ -111,11 +143,13 @@ class _CameraScreenState extends State<CameraScreen> {
       if (!mounted) return;
 
       if (faces.isEmpty) {
+        final wasAligned = _isFaceAligned;
         setState(() {
           _isFaceDetected = false;
           _isFaceAligned = false;
           _feedbackText = 'Center your face';
         });
+        if (wasAligned) _cancelCountdown();
         return;
       }
 
@@ -132,18 +166,26 @@ class _CameraScreenState extends State<CameraScreen> {
         isFrontCamera: isFrontCamera,
       );
 
+      final wasAligned = _isFaceAligned;
       setState(() {
         _isFaceDetected = true;
         _isFaceAligned = feedback.isAligned;
         _feedbackText = feedback.message;
       });
+      if (feedback.isAligned && !wasAligned) {
+        _startCountdown();
+      } else if (!feedback.isAligned && wasAligned) {
+        _cancelCountdown();
+      }
     } catch (_) {
       if (!mounted) return;
+      final wasAligned = _isFaceAligned;
       setState(() {
         _isFaceDetected = false;
         _isFaceAligned = false;
         _feedbackText = 'Center your face';
       });
+      if (wasAligned) _cancelCountdown();
     } finally {
       _isDetecting = false;
     }
@@ -355,7 +397,12 @@ class _CameraScreenState extends State<CameraScreen> {
                         borderRadius: BorderRadius.circular(999),
                       ),
                       child: Text(
-                        _feedbackText,
+                        _countdown > 0
+                            ? 'Hold still…  ● ● ●'.substring(
+                                0,
+                                14 - (_countdown - 1) * 3,
+                              )
+                            : _feedbackText,
                         style: const TextStyle(
                           color: Colors.white,
                           fontWeight: FontWeight.w700,
@@ -364,6 +411,49 @@ class _CameraScreenState extends State<CameraScreen> {
                     ),
                   ),
                 ),
+                // Countdown ring
+                if (_countdown > 0)
+                  Center(
+                    child: Padding(
+                      padding: EdgeInsets.only(
+                        bottom: MediaQuery.sizeOf(context).height * 0.08,
+                      ),
+                      child: SizedBox(
+                        width: 88,
+                        height: 88,
+                        child: Stack(
+                          alignment: Alignment.center,
+                          children: [
+                            TweenAnimationBuilder<double>(
+                              key: ValueKey<int>(_countdown),
+                              tween: Tween<double>(begin: 1.0, end: 0.0),
+                              duration: const Duration(seconds: 1),
+                              builder: (context, value, _) {
+                                return CircularProgressIndicator(
+                                  value: value,
+                                  strokeWidth: 5,
+                                  backgroundColor:
+                                      Colors.white.withValues(alpha: 0.25),
+                                  valueColor:
+                                      const AlwaysStoppedAnimation<Color>(
+                                        Colors.greenAccent,
+                                      ),
+                                );
+                              },
+                            ),
+                            Text(
+                              '$_countdown',
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 32,
+                                fontWeight: FontWeight.w800,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
                 Positioned(
                   left: 0,
                   right: 0,
@@ -372,15 +462,29 @@ class _CameraScreenState extends State<CameraScreen> {
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       Text(
-                        _isFaceAligned
-                            ? 'Face aligned. You can capture now.'
+                        _isCapturing
+                            ? 'Capturing…'
+                            : _countdown > 0
+                            ? 'Auto-capture in $_countdown s'
+                            : _isFaceAligned
+                            ? 'Hold still — auto-capture starting…'
                             : 'Align your face within the guide.',
-                        style: const TextStyle(color: Colors.white),
+                        style: TextStyle(
+                          color: _countdown > 0
+                              ? Colors.greenAccent
+                              : Colors.white,
+                          fontWeight: _countdown > 0
+                              ? FontWeight.w700
+                              : FontWeight.normal,
+                        ),
                       ),
                       const SizedBox(height: 12),
                       ElevatedButton.icon(
                         onPressed: _isFaceAligned && !_isCapturing
-                            ? _capture
+                            ? () {
+                                _cancelCountdown();
+                                _capture();
+                              }
                             : null,
                         icon: _isCapturing
                             ? const SizedBox(
@@ -391,7 +495,7 @@ class _CameraScreenState extends State<CameraScreen> {
                                 ),
                               )
                             : const Icon(Icons.camera_alt),
-                        label: const Text('Capture'),
+                        label: const Text('Capture Now'),
                       ),
                     ],
                   ),

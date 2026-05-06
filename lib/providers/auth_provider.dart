@@ -18,13 +18,28 @@ class AuthProvider extends ChangeNotifier {
   bool _isLoading = false;
   bool _loginInProgress = false;
   bool _isInitializing = true;
+  bool _requiresLaunchRetry = false;
+  String? _launchRetryMessage;
   String? _error;
 
   AppUser? get currentUser => _currentUser;
   bool get isLoading => _isLoading;
   bool get isInitializing => _isInitializing;
+  bool get requiresLaunchRetry => _requiresLaunchRetry;
+  String? get launchRetryMessage => _launchRetryMessage;
   String? get error => _error;
   bool get isAuthenticated => _currentUser != null;
+
+  bool _isLikelyOfflineError(Object error) {
+    final message = error.toString().toLowerCase();
+    return message.contains('unavailable') ||
+        message.contains('network') ||
+        message.contains('socketexception') ||
+        message.contains('failed host lookup') ||
+        message.contains('timed out') ||
+        message.contains('timeout') ||
+        message.contains('connection');
+  }
 
   Map<String, dynamic> _toJsonSafeMap(Map<String, dynamic> source) {
     final safe = <String, dynamic>{};
@@ -72,6 +87,9 @@ class AuthProvider extends ChangeNotifier {
   }
 
   Future<void> _bootstrapPersistedSession() async {
+    _requiresLaunchRetry = false;
+    _launchRetryMessage = null;
+
     final firebaseUser = _authService.currentFirebaseUser;
 
     if (firebaseUser == null) {
@@ -80,8 +98,27 @@ class AuthProvider extends ChangeNotifier {
       return;
     }
 
+    // First, try to restore from local cache immediately. If cached uid matches
+    // the persisted Firebase user we can show the app right away and refresh
+    // the profile in the background once online.
+    final cached = await _loadCachedUser();
+    if (cached != null && cached.uid == firebaseUser.uid) {
+      _currentUser = cached;
+      _error = null;
+      _isInitializing = false;
+      notifyListeners();
+      // Kick off a background refresh so the profile stays up to date.
+      _refreshProfileInBackground(firebaseUser.uid);
+      return;
+    }
+
+    // No cache — must fetch from Firestore. Apply a tight timeout so we never
+    // hang on the splash when the device is offline.
     try {
-      final fetchedUser = await _authService.getCurrentUser();
+      final fetchedUser = await _authService.getCurrentUser().timeout(
+        const Duration(seconds: 8),
+        onTimeout: () => throw Exception('network timeout'),
+      );
       _currentUser = fetchedUser;
       if (_currentUser != null) {
         await _cacheUser(_currentUser!);
@@ -89,16 +126,31 @@ class AuthProvider extends ChangeNotifier {
       await _pushNotificationService.bindUser(_currentUser);
       _error = null;
     } catch (e) {
-      final cached = await _loadCachedUser();
-      if (cached != null && cached.uid == firebaseUser.uid) {
-        _currentUser = cached;
-        _error = null;
-      } else {
-        _error = e.toString().replaceFirst('Exception: ', '');
-      }
+      // Timeout or network error — no cache available for this uid.
+      _requiresLaunchRetry = true;
+      _launchRetryMessage =
+          'No internet connection. Connect to the internet and tap Retry.';
+      _error = null;
     } finally {
       _isInitializing = false;
       notifyListeners();
+    }
+  }
+
+  Future<void> _refreshProfileInBackground(String uid) async {
+    try {
+      final fetchedUser = await _authService.getCurrentUser().timeout(
+        const Duration(seconds: 12),
+        onTimeout: () => null,
+      );
+      if (fetchedUser != null && fetchedUser.uid == uid) {
+        _currentUser = fetchedUser;
+        await _cacheUser(fetchedUser);
+        await _pushNotificationService.bindUser(_currentUser);
+        notifyListeners();
+      }
+    } catch (_) {
+      // Silently ignore — the cached profile is already displayed.
     }
   }
 
@@ -106,24 +158,21 @@ class AuthProvider extends ChangeNotifier {
     _bootstrapPersistedSession();
 
     _authSubscription = _authService.authStateChanges.listen((user) async {
-      if (user == null) {
-        if (_isInitializing || _currentUser != null) {
-          // During startup or transient auth null blips, keep current session.
-          _isInitializing = false;
-          notifyListeners();
-          return;
-        }
+      // Bootstrap is the sole authority during startup. The stream fires
+      // immediately (even before Firestore resolves), so we must ignore every
+      // event until bootstrap has set a definitive state.
+      if (_isInitializing) return;
 
+      if (user == null) {
+        // Genuine post-bootstrap sign-out (e.g. admin-forced, token revoked).
+        if (_currentUser == null) return;
         final previousUserId = _currentUser?.uid;
         _currentUser = null;
         await _clearCachedUser();
         await _pushNotificationService.unbindCurrentUser(uid: previousUserId);
-        _isInitializing = false;
         notifyListeners();
         return;
       }
-
-      _isInitializing = false;
 
       // Skip re-fetch if login() is already handling it to avoid race condition
       if (_loginInProgress) return;
@@ -137,20 +186,23 @@ class AuthProvider extends ChangeNotifier {
         _error = null;
         if (_currentUser != null) await _cacheUser(_currentUser!);
         await _pushNotificationService.bindUser(_currentUser);
-      } catch (e) {
-        // Firestore unreachable (offline). Restore from local cache so the
-        // user stays logged in with their last-known profile.
-        if (_currentUser == null) {
-          final cached = await _loadCachedUser();
-          if (cached != null && cached.uid == user.uid) {
-            _currentUser = cached;
-          } else {
-            _error = e.toString().replaceFirst('Exception: ', '');
-          }
-        }
+      } catch (_) {
+        // Ignore post-bootstrap stream refresh failures — the user is already
+        // loaded from bootstrap. This avoids disrupting an active session due
+        // to a transient network hiccup.
       }
       notifyListeners();
     });
+  }
+
+  Future<void> retryLaunchValidation() async {
+    if (_isInitializing) return;
+    _isInitializing = true;
+    _requiresLaunchRetry = false;
+    _launchRetryMessage = null;
+    _error = null;
+    notifyListeners();
+    await _bootstrapPersistedSession();
   }
 
   Future<void> login(String email, String password) async {

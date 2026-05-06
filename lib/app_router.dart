@@ -5,6 +5,8 @@ import 'package:compact_sales_monitoring/providers/activation_provider.dart';
 import 'package:compact_sales_monitoring/models/user_model.dart';
 import 'package:compact_sales_monitoring/screens/activation_screen.dart';
 import 'package:compact_sales_monitoring/screens/login_screen.dart';
+import 'package:compact_sales_monitoring/screens/launch_validation_loading_screen.dart';
+import 'package:compact_sales_monitoring/screens/launch_validation_offline_screen.dart';
 import 'package:compact_sales_monitoring/widgets/auth_wave_transition_overlay.dart';
 
 // Salesman screens
@@ -96,7 +98,15 @@ class _AppRouterState extends State<AppRouter> {
     ActivationProvider activationProvider,
   ) {
     if (activationProvider.isChecking || authProvider.isInitializing) {
-      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+      return const LaunchValidationLoadingScreen();
+    }
+
+    if (authProvider.requiresLaunchRetry) {
+      return LaunchValidationOfflineScreen(
+        onRetry: () => authProvider.retryLaunchValidation(),
+        isRetrying: authProvider.isInitializing,
+        message: authProvider.launchRetryMessage,
+      );
     }
 
     if (!activationProvider.isActivated) {
@@ -170,8 +180,18 @@ class _AppRouterState extends State<AppRouter> {
               child: KeyedSubtree(key: ValueKey<String>(baseKey), child: base),
             ),
             _buildLeaseStatusBanner(activationProvider),
-            if (activationProvider.isActivated)
-              AuthWaveRevealLayer(isAuthLoading: authProvider.isLoading),
+            // Show the wave curtain during:
+            //  - launch validation   (isInitializing)
+            //  - activation check    (isChecking)
+            //  - login / logout      (isLoading, only when already activated)
+            if (activationProvider.isActivated ||
+                activationProvider.isChecking ||
+                authProvider.isInitializing)
+              AuthWaveRevealLayer(
+                isAuthLoading: activationProvider.isChecking ||
+                    authProvider.isInitializing ||
+                    (authProvider.isLoading && activationProvider.isActivated),
+              ),
           ],
         );
       },

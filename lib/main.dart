@@ -112,7 +112,9 @@ class MainAppHome extends StatefulWidget {
 
 class _MainAppHomeState extends State<MainAppHome>
     with SingleTickerProviderStateMixin {
-  final bool _showSplash = true;
+  bool _showSplash = true;
+  bool _splashContentFinished = false;
+  bool _transitionStarted = false;
   late AnimationController _transitionController;
 
   @override
@@ -122,15 +124,38 @@ class _MainAppHomeState extends State<MainAppHome>
       duration: const Duration(milliseconds: 1400),
       vsync: this,
     );
-    // Check if user is already logged in
+
+    _transitionController.addStatusListener((status) {
+      if (status == AnimationStatus.completed && mounted) {
+        setState(() {
+          _showSplash = false;
+        });
+      }
+    });
+
     WidgetsBinding.instance.addPostFrameCallback((_) {
       context.read<ActivationProvider>().initialize();
-      context.read<AuthProvider>().checkCurrentUser();
     });
   }
 
   void _completeSplash() {
-    // Play transition animation (splash exits up, app enters from bottom)
+    _splashContentFinished = true;
+    _tryStartTransition();
+  }
+
+  void _tryStartTransition() {
+    if (_transitionStarted || !_splashContentFinished) return;
+
+    final activationProvider = context.read<ActivationProvider>();
+    final authProvider = context.read<AuthProvider>();
+
+    final canExitSplash =
+        !activationProvider.isChecking &&
+        (!authProvider.isInitializing || authProvider.requiresLaunchRetry);
+
+    if (!canExitSplash) return;
+
+    _transitionStarted = true;
     _transitionController.forward(from: 0);
   }
 
@@ -142,35 +167,44 @@ class _MainAppHomeState extends State<MainAppHome>
 
   @override
   Widget build(BuildContext context) {
-    return AnimatedBuilder(
-      animation: _transitionController,
-      builder: (context, _) {
-        // t: 0 → 1 over 1400ms
-        final t = _transitionController.value;
-        // Smooth ease-out curve
-        final easeT = Curves.easeOutQuart.transform(t);
-        
-        // Height to slide (approximately screen height)
-        final slideDistance = MediaQuery.sizeOf(context).height;
+    return Consumer2<ActivationProvider, AuthProvider>(
+      builder: (context, activationProvider, authProvider, _) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (!mounted) return;
+          _tryStartTransition();
+        });
 
-        return Stack(
-          fit: StackFit.expand,
-          children: [
-            // ── App Router (destination) slides UP from bottom ──
-            Transform.translate(
-              offset: Offset(0, slideDistance * (1 - easeT)),
-              child: const AppRouter(),
-            ),
+        return AnimatedBuilder(
+          animation: _transitionController,
+          builder: (context, _) {
+            // t: 0 → 1 over 1400ms
+            final t = _transitionController.value;
+            // Smooth ease-out curve
+            final easeT = Curves.easeOutQuart.transform(t);
 
-            // ── Splash slides UP and exits ──
-            if (_showSplash)
-              Transform.translate(
-                offset: Offset(0, -slideDistance * easeT),
-                child: SplashScreen(
-                  onComplete: _completeSplash,
+            // Height to slide (approximately screen height)
+            final slideDistance = MediaQuery.sizeOf(context).height;
+
+            return Stack(
+              fit: StackFit.expand,
+              children: [
+                // ── App Router (destination) slides UP from bottom ──
+                Transform.translate(
+                  offset: Offset(0, slideDistance * (1 - easeT)),
+                  child: const AppRouter(),
                 ),
-              ),
-          ],
+
+                // ── Splash slides UP and exits ──
+                if (_showSplash)
+                  Transform.translate(
+                    offset: Offset(0, -slideDistance * easeT),
+                    child: SplashScreen(
+                      onComplete: _completeSplash,
+                    ),
+                  ),
+              ],
+            );
+          },
         );
       },
     );
