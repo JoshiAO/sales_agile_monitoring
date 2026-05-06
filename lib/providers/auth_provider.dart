@@ -30,17 +30,6 @@ class AuthProvider extends ChangeNotifier {
   String? get error => _error;
   bool get isAuthenticated => _currentUser != null;
 
-  bool _isLikelyOfflineError(Object error) {
-    final message = error.toString().toLowerCase();
-    return message.contains('unavailable') ||
-        message.contains('network') ||
-        message.contains('socketexception') ||
-        message.contains('failed host lookup') ||
-        message.contains('timed out') ||
-        message.contains('timeout') ||
-        message.contains('connection');
-  }
-
   Map<String, dynamic> _toJsonSafeMap(Map<String, dynamic> source) {
     final safe = <String, dynamic>{};
     source.forEach((key, value) {
