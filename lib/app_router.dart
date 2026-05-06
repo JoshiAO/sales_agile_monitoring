@@ -95,7 +95,7 @@ class _AppRouterState extends State<AppRouter> {
     AuthProvider authProvider,
     ActivationProvider activationProvider,
   ) {
-    if (activationProvider.isChecking) {
+    if (activationProvider.isChecking || authProvider.isInitializing) {
       return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
 

@@ -27,7 +27,8 @@ class SalesmanHomeScreen extends StatefulWidget {
   State<SalesmanHomeScreen> createState() => _SalesmanHomeScreenState();
 }
 
-class _SalesmanHomeScreenState extends State<SalesmanHomeScreen> {
+class _SalesmanHomeScreenState extends State<SalesmanHomeScreen>
+    with WidgetsBindingObserver {
   static const Duration _checkpointMinInterval = Duration(minutes: 30);
   static const double _checkpointMinDistanceMeters = 500.0;
   static const int _maxUploadBytes = 300 * 1024;
@@ -46,6 +47,7 @@ class _SalesmanHomeScreenState extends State<SalesmanHomeScreen> {
   String? _firstLocalImagePath;
   String? _lastLocalImagePath;
   bool _isUploading = false;
+  String? _loadedForDate;
   StreamSubscription<geo.Position>? _locationSubscription;
   DateTime? _lastCheckpointTime;
   double? _lastCheckpointLat;
@@ -440,11 +442,22 @@ class _SalesmanHomeScreenState extends State<SalesmanHomeScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _loadTodayRoute();
   }
 
   @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed &&
+        _loadedForDate != null &&
+        _loadedForDate != _todayDate) {
+      _loadTodayRoute();
+    }
+  }
+
+  @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _locationSubscription?.cancel();
     super.dispose();
   }
@@ -592,6 +605,7 @@ class _SalesmanHomeScreenState extends State<SalesmanHomeScreen> {
         _syncCheckpointTracking();
       }
     }
+    _loadedForDate = _todayDate;
   }
 
   Future<void> _requestRetake(bool isFirst) async {

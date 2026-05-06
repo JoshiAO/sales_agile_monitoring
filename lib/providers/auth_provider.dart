@@ -1,10 +1,14 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'dart:async';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:compact_sales_monitoring/models/user_model.dart';
 import 'package:compact_sales_monitoring/services/auth_service.dart';
 import 'package:compact_sales_monitoring/services/push_notification_service.dart';
 
 class AuthProvider extends ChangeNotifier {
+  static const String _cachedUserKey = 'cached_app_user';
+
   final AuthService _authService = AuthService();
   final PushNotificationService _pushNotificationService =
       PushNotificationService();
@@ -13,22 +17,67 @@ class AuthProvider extends ChangeNotifier {
   AppUser? _currentUser;
   bool _isLoading = false;
   bool _loginInProgress = false;
+  bool _isInitializing = true;
   String? _error;
 
   AppUser? get currentUser => _currentUser;
   bool get isLoading => _isLoading;
+  bool get isInitializing => _isInitializing;
   String? get error => _error;
   bool get isAuthenticated => _currentUser != null;
+
+  // Persist the user profile locally so it can be restored when offline.
+  Future<void> _cacheUser(AppUser user) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final map = {
+        'uid': user.uid,
+        ...user.toMap(),
+      };
+      await prefs.setString(_cachedUserKey, jsonEncode(map));
+    } catch (_) {}
+  }
+
+  Future<AppUser?> _loadCachedUser() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final raw = prefs.getString(_cachedUserKey);
+      if (raw == null) return null;
+      final map = jsonDecode(raw) as Map<String, dynamic>;
+      final uid = map['uid'] as String? ?? '';
+      if (uid.isEmpty) return null;
+      return AppUser.fromMap(map, uid: uid);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<void> _clearCachedUser() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove(_cachedUserKey);
+    } catch (_) {}
+  }
 
   AuthProvider() {
     _authSubscription = _authService.authStateChanges.listen((user) async {
       if (user == null) {
-        final previousUserId = _currentUser?.uid;
-        _currentUser = null;
-        await _pushNotificationService.unbindCurrentUser(uid: previousUserId);
+        // Only sign out fully if we are past initialization (i.e. not the
+        // transient null that Firebase emits before it resolves the local
+        // persisted token on cold-start).
+        if (!_isInitializing) {
+          final previousUserId = _currentUser?.uid;
+          _currentUser = null;
+          await _clearCachedUser();
+          await _pushNotificationService.unbindCurrentUser(uid: previousUserId);
+          notifyListeners();
+        }
+        _isInitializing = false;
         notifyListeners();
         return;
       }
+
+      _isInitializing = false;
 
       // Skip re-fetch if login() is already handling it to avoid race condition
       if (_loginInProgress) return;
@@ -40,11 +89,18 @@ class AuthProvider extends ChangeNotifier {
         final fetchedUser = await _authService.getCurrentUser();
         _currentUser = fetchedUser;
         _error = null;
+        if (_currentUser != null) await _cacheUser(_currentUser!);
         await _pushNotificationService.bindUser(_currentUser);
       } catch (e) {
-        // Keep existing authenticated session on transient profile fetch errors.
+        // Firestore unreachable (offline). Restore from local cache so the
+        // user stays logged in with their last-known profile.
         if (_currentUser == null) {
-          _error = e.toString().replaceFirst('Exception: ', '');
+          final cached = await _loadCachedUser();
+          if (cached != null && cached.uid == user.uid) {
+            _currentUser = cached;
+          } else {
+            _error = e.toString().replaceFirst('Exception: ', '');
+          }
         }
       }
       notifyListeners();
@@ -66,6 +122,7 @@ class AuthProvider extends ChangeNotifier {
       } else {
         _currentUser = user;
         _error = null;
+        await _cacheUser(_currentUser!);
         await _pushNotificationService.bindUser(_currentUser);
       }
     } catch (e) {
@@ -92,6 +149,7 @@ class AuthProvider extends ChangeNotifier {
       await _authService.logout();
       _currentUser = null;
       _error = null;
+      await _clearCachedUser();
       await _pushNotificationService.unbindCurrentUser(uid: previousUserId);
     } catch (e) {
       _error = e.toString();
