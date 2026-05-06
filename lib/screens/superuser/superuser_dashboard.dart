@@ -353,8 +353,48 @@ class _SuperUserDashboardState extends State<SuperUserDashboard> {
     return '${route.routeId}_${checkpoint.timestamp.millisecondsSinceEpoch}_${checkpoint.lat}_${checkpoint.lon}';
   }
 
+  bool _shouldShowOngoingArrow(SalesRoute route) {
+    return _currentZoom >= _checkpointZoomThreshold &&
+        route.hasFirstCall &&
+        !route.hasLastCall;
+  }
+
+  RouteCheckpoint? _latestCheckpoint(SalesRoute route) {
+    final checkpoints = route.sortedCheckpoints;
+    if (checkpoints.isEmpty) {
+      return null;
+    }
+    return checkpoints.last;
+  }
+
+  LatLng _ongoingArrowPoint(SalesRoute route) {
+    final latestCheckpoint = _latestCheckpoint(route);
+    if (latestCheckpoint != null) {
+      return LatLng(latestCheckpoint.lat, latestCheckpoint.lon);
+    }
+
+    return LatLng(route.first.lat, route.first.lon);
+  }
+
+  bool _isArrowCheckpoint(SalesRoute route, RouteCheckpoint checkpoint) {
+    if (!_shouldShowOngoingArrow(route)) {
+      return false;
+    }
+
+    final latestCheckpoint = _latestCheckpoint(route);
+    if (latestCheckpoint == null) {
+      return false;
+    }
+
+    return identical(latestCheckpoint, checkpoint);
+  }
+
   bool _shouldShowCheckpoint(SalesRoute route, RouteCheckpoint checkpoint) {
     if (_currentZoom < _checkpointZoomThreshold) {
+      return false;
+    }
+
+    if (_isArrowCheckpoint(route, checkpoint)) {
       return false;
     }
 
@@ -449,6 +489,113 @@ class _SuperUserDashboardState extends State<SuperUserDashboard> {
 
   double _flagMarkerWidth() => _showRouteLabels ? 180 : 92;
   double _flagMarkerHeight() => _showRouteLabels ? 110 : 84;
+
+  Widget _buildOngoingArrowMarker(SalesRoute route) {
+    final routeColor = context.read<RouteProvider>().routeColorForSalesman(
+      route.salesmanId,
+    );
+
+    return Container(
+      width: 34,
+      height: 34,
+      decoration: BoxDecoration(
+        color: Colors.white,
+        shape: BoxShape.circle,
+        border: Border.all(color: routeColor, width: 2.5),
+        boxShadow: [
+          BoxShadow(
+            blurRadius: 8,
+            color: Colors.black.withValues(alpha: 0.24),
+          ),
+        ],
+      ),
+      child: Icon(Icons.navigation, color: routeColor, size: 20),
+    );
+  }
+
+  Widget _buildRouteStatusPanel(RouteProvider routeProvider) {
+    final panel = Container(
+      width: 260,
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.92),
+        borderRadius: const BorderRadius.only(
+          topRight: Radius.circular(10),
+          bottomRight: Radius.circular(10),
+        ),
+        boxShadow: [
+          BoxShadow(
+            blurRadius: 6,
+            color: Colors.black.withValues(alpha: 0.2),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'Route Status',
+            style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
+          ),
+          const SizedBox(height: 8),
+          Expanded(
+            child: SingleChildScrollView(
+              child: Column(
+                children: routeProvider.routes
+                    .map((route) => _buildRouteStatusChip(route, routeProvider))
+                    .toList(),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+
+    return Positioned(
+      top: 12,
+      left: 0,
+      bottom: 12,
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          if (_showRouteStatusPanel) panel,
+          Container(
+            width: 32,
+            height: 116,
+            decoration: BoxDecoration(
+              color: Colors.white.withValues(alpha: 0.96),
+              borderRadius: const BorderRadius.only(
+                topRight: Radius.circular(10),
+                bottomRight: Radius.circular(10),
+              ),
+              boxShadow: [
+                BoxShadow(
+                  blurRadius: 6,
+                  color: Colors.black.withValues(alpha: 0.2),
+                ),
+              ],
+            ),
+            child: IconButton(
+              tooltip: _showRouteStatusPanel
+                  ? 'Hide route status'
+                  : 'Show route status',
+              icon: Icon(
+                _showRouteStatusPanel
+                    ? Icons.keyboard_double_arrow_left
+                    : Icons.keyboard_double_arrow_right,
+                size: 18,
+              ),
+              onPressed: () {
+                setState(() {
+                  _showRouteStatusPanel = !_showRouteStatusPanel;
+                });
+              },
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 
   @override
   void dispose() {
@@ -675,6 +822,14 @@ class _SuperUserDashboardState extends State<SuperUserDashboard> {
                           markers: routeProvider.routes
                               .expand(
                                 (route) => [
+                                  if (_shouldShowOngoingArrow(route))
+                                    Marker(
+                                      point: _ongoingArrowPoint(route),
+                                      width: 40,
+                                      height: 40,
+                                      rotate: true,
+                                      child: _buildOngoingArrowMarker(route),
+                                    ),
                                   if (_showFirstCallMarkers &&
                                       route.hasFirstCall)
                                     Marker(
@@ -713,83 +868,7 @@ class _SuperUserDashboardState extends State<SuperUserDashboard> {
                         ),
                       ],
                     ),
-                    Positioned(
-                      top: 12,
-                      left: 12,
-                      bottom: _showRouteStatusPanel ? 12 : null,
-                      child: Container(
-                        width: 260,
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 10,
-                          vertical: 8,
-                        ),
-                        decoration: BoxDecoration(
-                          color: Colors.white.withValues(alpha: 0.92),
-                          borderRadius: BorderRadius.circular(10),
-                          boxShadow: [
-                            BoxShadow(
-                              blurRadius: 6,
-                              color: Colors.black.withValues(alpha: 0.2),
-                            ),
-                          ],
-                        ),
-                        child: Column(
-                          mainAxisSize: _showRouteStatusPanel
-                              ? MainAxisSize.max
-                              : MainAxisSize.min,
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Row(
-                              children: [
-                                const Expanded(
-                                  child: Text(
-                                    'Route Status',
-                                    style: TextStyle(
-                                      fontSize: 12,
-                                      fontWeight: FontWeight.w700,
-                                    ),
-                                  ),
-                                ),
-                                IconButton(
-                                  tooltip: _showRouteStatusPanel
-                                      ? 'Collapse'
-                                      : 'Expand',
-                                  visualDensity: VisualDensity.compact,
-                                  icon: Icon(
-                                    _showRouteStatusPanel
-                                        ? Icons.unfold_less
-                                        : Icons.unfold_more,
-                                    size: 18,
-                                  ),
-                                  onPressed: () {
-                                    setState(() {
-                                      _showRouteStatusPanel =
-                                          !_showRouteStatusPanel;
-                                    });
-                                  },
-                                ),
-                              ],
-                            ),
-                            if (_showRouteStatusPanel) const SizedBox(height: 6),
-                            if (_showRouteStatusPanel)
-                              Expanded(
-                                child: SingleChildScrollView(
-                                  child: Column(
-                                    children: routeProvider.routes
-                                        .map(
-                                          (route) => _buildRouteStatusChip(
-                                            route,
-                                            routeProvider,
-                                          ),
-                                        )
-                                        .toList(),
-                                  ),
-                                ),
-                              ),
-                          ],
-                        ),
-                      ),
-                    ),
+                    _buildRouteStatusPanel(routeProvider),
                     Positioned(
                       top: 12,
                       right: 12,
