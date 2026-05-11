@@ -424,6 +424,50 @@ class _SuperUserDashboardState extends State<SuperUserDashboard> {
     return lastDistanceMeters > _checkpointEndpointOverlapMeters;
   }
 
+  /// Returns checkpoints synthesised from [route.cachedPolyline] when the
+  /// salesman had data turned off.
+  /// Points from a road-aligned cache all share the same timestamp, so we
+  /// reject those — only distinct timestamps represent actual recorded stops.
+  /// Points too close to an already-visible checkpoint are skipped to avoid
+  /// duplicate markers.
+  List<RouteCheckpoint> _cachedPolylineAsCheckpoints(SalesRoute route) {
+    final withTs = route.cachedPolyline
+        .where((p) => p.timestamp != null)
+        .toList();
+    if (withTs.length < 2) return [];
+
+    // Road-aligned caches batch-write with the same timestamp — reject them.
+    final firstTs = withTs.first.timestamp!;
+    final allSame = withTs.every(
+      (p) => p.timestamp!.difference(firstTs).abs() < const Duration(seconds: 1),
+    );
+    if (allSame) return [];
+
+    final distance = const Distance();
+    const dedupeMeters = 30.0;
+
+    final realAnchors = <LatLng>[
+      if (route.hasFirstCall) LatLng(route.first.lat, route.first.lon),
+      ...route.sortedCheckpoints.map((c) => LatLng(c.lat, c.lon)),
+      if (route.hasLastCall) LatLng(route.last.lat, route.last.lon),
+    ];
+
+    final result = <RouteCheckpoint>[];
+    for (final p in withTs) {
+      final pt = LatLng(p.lat, p.lon);
+      final tooClose = realAnchors.any(
+        (anchor) => distance.as(LengthUnit.Meter, pt, anchor) <= dedupeMeters,
+      );
+      if (!tooClose) {
+        result.add(
+          RouteCheckpoint(lat: p.lat, lon: p.lon, timestamp: p.timestamp!),
+        );
+      }
+    }
+    result.sort((a, b) => a.timestamp.compareTo(b.timestamp));
+    return result;
+  }
+
   Widget _buildRouteStatusChip(SalesRoute route, RouteProvider routeProvider) {
     return FutureBuilder<AppUser?>(
       future: _getSalesmanDetails(route.salesmanId),
@@ -807,7 +851,10 @@ class _SuperUserDashboardState extends State<SuperUserDashboard> {
                               )
                               .expand(
                                 (route) => [
-                                  ...route.sortedCheckpoints
+                                  ...[
+                                    ...route.sortedCheckpoints,
+                                    ..._cachedPolylineAsCheckpoints(route),
+                                  ]
                                       .where(
                                         (checkpoint) => _shouldShowCheckpoint(
                                           route,

@@ -16,6 +16,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:compact_sales_monitoring/models/route_model.dart';
 import 'package:compact_sales_monitoring/providers/auth_provider.dart';
 import 'package:compact_sales_monitoring/screens/salesman/camera_screen.dart';
+import 'package:compact_sales_monitoring/services/checkpoint_queue_service.dart';
 import 'package:compact_sales_monitoring/services/location_service.dart';
 import 'package:compact_sales_monitoring/services/storage_service.dart';
 import 'package:compact_sales_monitoring/services/firestore_service.dart';
@@ -36,6 +37,7 @@ class _SalesmanHomeScreenState extends State<SalesmanHomeScreen>
   final LocationService _locationService = LocationService();
   final StorageService _storageService = StorageService();
   final FirestoreService _firestoreService = FirestoreService();
+  final CheckpointQueueService _checkpointQueue = CheckpointQueueService();
 
   RoutePoint? _firstPoint;
   RoutePoint? _lastPoint;
@@ -443,6 +445,9 @@ class _SalesmanHomeScreenState extends State<SalesmanHomeScreen>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    _checkpointQueue
+        .flush(_firestoreService.appendRouteCheckpoint)
+        .catchError((_) {});
     _loadTodayRoute();
   }
 
@@ -558,7 +563,14 @@ class _SalesmanHomeScreenState extends State<SalesmanHomeScreen>
 
     _firestoreService
         .appendRouteCheckpoint(routeId, checkpoint)
-        .catchError((_) {});
+        .then(
+          (_) => _checkpointQueue
+              .flush(_firestoreService.appendRouteCheckpoint)
+              .catchError((_) {}),
+        )
+        .catchError(
+          (_) => _checkpointQueue.enqueue(routeId, checkpoint).catchError((_) {}),
+        );
   }
 
   Future<void> _loadTodayRoute() async {

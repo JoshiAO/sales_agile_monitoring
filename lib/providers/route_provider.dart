@@ -122,7 +122,15 @@ class RouteProvider extends ChangeNotifier {
       ];
 
       if (anchors.length < 2) {
-        _routePolylines[route.routeId] = anchors;
+        final cachedFallback = route.cachedPolyline
+            .map((p) => LatLng(p.lat, p.lon))
+            .toList();
+        if (cachedFallback.length >= 2) {
+          _routePolylines[route.routeId] = cachedFallback;
+          _approximatePolylines.add(route.routeId);
+        } else {
+          _routePolylines[route.routeId] = anchors;
+        }
         continue;
       }
 
@@ -284,8 +292,10 @@ class RouteProvider extends ChangeNotifier {
           return current.isAfter(latest) ? current : latest;
         });
 
+    // If no timestamps are present (older cache format), treat as fresh rather
+    // than discarding a valid cached polyline and forcing unnecessary re-routing.
     if (cacheTime == null) {
-      return false;
+      return true;
     }
 
     final routeLatest = <DateTime>[
