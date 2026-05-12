@@ -465,7 +465,7 @@ class _SuperUserDashboardState extends State<SuperUserDashboard> {
       }
 
       if (lastAdded != null) {
-        final spacing = distance.as(LengthUnit.Meter, lastAdded!, pt);
+        final spacing = distance.as(LengthUnit.Meter, lastAdded, pt);
         if (spacing < minSpacingMeters) {
           continue;
         }
