@@ -424,27 +424,22 @@ class _SuperUserDashboardState extends State<SuperUserDashboard> {
     return lastDistanceMeters > _checkpointEndpointOverlapMeters;
   }
 
-  /// Returns checkpoints synthesised from [route.cachedPolyline] when the
-  /// salesman had data turned off.
-  /// Points from a road-aligned cache all share the same timestamp, so we
-  /// reject those — only distinct timestamps represent actual recorded stops.
-  /// Points too close to an already-visible checkpoint are skipped to avoid
-  /// duplicate markers.
-  List<RouteCheckpoint> _cachedPolylineAsCheckpoints(SalesRoute route) {
-    final withTs = route.cachedPolyline
-        .where((p) => p.timestamp != null)
-        .toList();
-    if (withTs.length < 2) return [];
-
-    // Road-aligned caches batch-write with the same timestamp — reject them.
-    final firstTs = withTs.first.timestamp!;
-    final allSame = withTs.every(
-      (p) => p.timestamp!.difference(firstTs).abs() < const Duration(seconds: 1),
-    );
-    if (allSame) return [];
+  /// Returns checkpoints synthesised from [route.cachedPolyline] for offline
+  /// routes where explicit checkpoints were not persisted.
+  /// Same-timestamp cache points are still accepted because legacy data often
+  /// stores all cached points with one timestamp.
+  List<RouteCheckpoint> _cachedPolylineAsCheckpoints(
+    SalesRoute route, {
+    List<LatLng>? renderedPolyline,
+  }) {
+    final fromCache = route.cachedPolyline;
+    final fromRendered = renderedPolyline ?? const <LatLng>[];
+    final useCache = fromCache.length >= 2;
+    if (!useCache && fromRendered.length < 2) return [];
 
     final distance = const Distance();
     const dedupeMeters = 30.0;
+    const minSpacingMeters = 120.0;
 
     final realAnchors = <LatLng>[
       if (route.hasFirstCall) LatLng(route.first.lat, route.first.lon),
@@ -453,17 +448,41 @@ class _SuperUserDashboardState extends State<SuperUserDashboard> {
     ];
 
     final result = <RouteCheckpoint>[];
-    for (final p in withTs) {
-      final pt = LatLng(p.lat, p.lon);
-      final tooClose = realAnchors.any(
+    LatLng? lastAdded;
+
+    final sourceLength = useCache ? fromCache.length : fromRendered.length;
+    for (var i = 0; i < sourceLength; i++) {
+      final pLat = useCache ? fromCache[i].lat : fromRendered[i].latitude;
+      final pLon = useCache ? fromCache[i].lon : fromRendered[i].longitude;
+      final pTimestamp = useCache ? fromCache[i].timestamp : null;
+      final pt = LatLng(pLat, pLon);
+
+      final tooCloseToReal = realAnchors.any(
         (anchor) => distance.as(LengthUnit.Meter, pt, anchor) <= dedupeMeters,
       );
-      if (!tooClose) {
-        result.add(
-          RouteCheckpoint(lat: p.lat, lon: p.lon, timestamp: p.timestamp!),
-        );
+      if (tooCloseToReal) {
+        continue;
       }
+
+      if (lastAdded != null) {
+        final spacing = distance.as(LengthUnit.Meter, lastAdded!, pt);
+        if (spacing < minSpacingMeters) {
+          continue;
+        }
+      }
+
+      result.add(
+        RouteCheckpoint(
+          lat: pLat,
+          lon: pLon,
+          timestamp:
+              pTimestamp ??
+              route.first.timestamp.add(Duration(seconds: i + 1)),
+        ),
+      );
+      lastAdded = pt;
     }
+
     result.sort((a, b) => a.timestamp.compareTo(b.timestamp));
     return result;
   }
@@ -853,7 +872,11 @@ class _SuperUserDashboardState extends State<SuperUserDashboard> {
                                 (route) => [
                                   ...[
                                     ...route.sortedCheckpoints,
-                                    ..._cachedPolylineAsCheckpoints(route),
+                                    ..._cachedPolylineAsCheckpoints(
+                                      route,
+                                      renderedPolyline: routeProvider
+                                          .routePolylines[route.routeId],
+                                    ),
                                   ]
                                       .where(
                                         (checkpoint) => _shouldShowCheckpoint(

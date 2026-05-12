@@ -226,16 +226,7 @@ class RouteProvider extends ChangeNotifier {
         }
       } else {
         // Persist only fully road-aware paths to avoid caching straight fallbacks.
-        final cacheTime = DateTime.now();
-        final cachePoints = polyline
-            .map(
-              (ll) => CachedPolylinePoint(
-                lat: ll.latitude,
-                lon: ll.longitude,
-                timestamp: cacheTime,
-              ),
-            )
-            .toList();
+        final cachePoints = _buildTimedCachePointsFromPolyline(polyline);
         _firestoreService
             .savePolylineCache(route.routeId, cachePoints, isApproximate: false)
             .catchError((_) {});
@@ -346,13 +337,16 @@ class RouteProvider extends ChangeNotifier {
   List<CachedPolylinePoint> _buildTimedCachePointsFromPolyline(
     List<LatLng> polyline,
   ) {
-    final cacheTime = DateTime.now();
+    final generatedAt = DateTime.now();
     return polyline
+        .asMap()
+        .entries
         .map(
-          (point) => CachedPolylinePoint(
-            lat: point.latitude,
-            lon: point.longitude,
-            timestamp: cacheTime,
+          (entry) => CachedPolylinePoint(
+            lat: entry.value.latitude,
+            lon: entry.value.longitude,
+            // Keep points tied to one generation event, but unique per point.
+            timestamp: generatedAt.add(Duration(milliseconds: entry.key)),
           ),
         )
         .toList();
