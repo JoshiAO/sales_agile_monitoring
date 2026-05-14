@@ -37,7 +37,6 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
           context.read<AuthProvider>().currentUser?.companyId;
 
       final List<AppUser> superusers;
-      final List<AppUser> supervisors;
       final List<AppUser> salesmen;
 
       if (companyId != null && companyId.isNotEmpty) {
