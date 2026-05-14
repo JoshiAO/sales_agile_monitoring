@@ -338,6 +338,7 @@ class RouteProvider extends ChangeNotifier {
     List<LatLng> polyline,
   ) {
     final generatedAt = DateTime.now();
+    const timestampStepSeconds = 1;
     return polyline
         .asMap()
         .entries
@@ -345,8 +346,11 @@ class RouteProvider extends ChangeNotifier {
           (entry) => CachedPolylinePoint(
             lat: entry.value.latitude,
             lon: entry.value.longitude,
-            // Keep points tied to one generation event, but unique per point.
-            timestamp: generatedAt.add(Duration(milliseconds: entry.key)),
+            // Keep points tied to one generation event and visibly distinct in
+            // Firestore console, which often masks sub-second precision.
+            timestamp: generatedAt.add(
+              Duration(seconds: entry.key * timestampStepSeconds),
+            ),
           ),
         )
         .toList();
