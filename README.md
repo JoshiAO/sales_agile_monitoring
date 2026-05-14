@@ -10,6 +10,13 @@ The app supports three roles:
 - **Supervisor** — monitor assigned salesmen, review routes on the map, set daily Agile targets, and compare targets vs actuals.
 - **Superuser** — view all teams, manage users, review global route activity, inspect Agile summaries, and archive route data.
 
+Company-aware behavior is enforced across startup branding and user management:
+
+- Each user profile carries `company_ID`.
+- Splash screen and launch loading curtain use the `logo` and `tagline` from the matching `company_ID` document.
+- Supervisor and superuser views are scoped to salesmen in the same `company_ID`.
+- New users created by superusers inherit the creator's `company_ID`.
+
 ## Main Features
 
 ### Salesman
@@ -57,6 +64,7 @@ The app supports three roles:
   - activating or deactivating accounts
   - deleting accounts
   - updating authentication credentials via Cloud Functions
+  - automatic `company_ID` inheritance for newly created users
 - **Announcements tab** — full announcement management across all teams.
 - **Feeds tab** — global timeline with two-way heart toggle.
 
@@ -224,6 +232,7 @@ storage.rules
 | `agile_submissions` | Daily salesman-entered actuals and submission status |
 | `announcements` | Active announcements with audience, schedule, and optional image URL |
 | `announcements/{id}/likes` | Per-user like records for announcement reactions |
+| `company_ID` | Company metadata used for branding (`logo`, `tagline`) and company grouping |
 
 ## Security Model
 
@@ -231,8 +240,33 @@ storage.rules
 - Supervisors can manage targets for their own team.
 - Salesmen can submit only their own Agile actuals.
 - Superusers have full access for administration and archive workflows.
+- Company branding documents are readable by signed-in users.
+- Company-based user queries are restricted by matching `company_ID` in app logic.
 
 See `firestore.rules` and `storage.rules` for the current rule set.
+
+## Firebase Rules Deployment
+
+When updating Firestore access behavior (for example, adding read access for `company_ID`), deploy rules after editing:
+
+```
+firebase deploy --only firestore:rules
+```
+
+If rules are not deployed, startup branding may stay on fallback values even when Firestore data exists.
+
+## Troubleshooting
+
+- Branding still shows default logo/tagline:
+  - Confirm user document contains `company_ID`.
+  - Confirm `company_ID/{id}` document has `logo` and `tagline`.
+  - Confirm Firestore rules for `company_ID` are deployed.
+- Firestore connectivity warnings on Android:
+  - Ensure device has stable internet.
+  - If logs show "Could not reach Cloud Firestore backend", app may run in offline mode and defer remote branding refresh.
+- Permission-denied warnings:
+  - Re-check `users` and `company_ID` rules in Firestore.
+  - Verify signed-in account role and ownership constraints.
 
 ## Getting Started
 
@@ -300,6 +334,16 @@ flutter build apk
 ```
 
 ## Changelog
+
+### v2.1.0 — May 14, 2026
+
+- Added company-aware branding on startup:
+  - splash logo and title now sourced from `company_ID` (`logo`, `tagline`)
+  - auth loading curtain logo now follows company branding
+- Added company-based grouping behavior:
+  - superuser/supervisor sales visibility scoped by `company_ID`
+  - superuser-created users inherit creator `company_ID`
+- Added `company_ID` Firestore rules and deployment guidance in docs.
 
 ### v2.0.1 — May 5, 2026
 
