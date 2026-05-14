@@ -364,5 +364,5 @@ flutter build apk
 
 ## Branding
 
-- App name: Compact Sales Monitoring
+- App name: Sales Agile Monitoring
 - Launcher icon source: `assets/images/JoshiAO.jpg`
