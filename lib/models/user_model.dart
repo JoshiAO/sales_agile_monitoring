@@ -30,6 +30,7 @@ class AppUser {
   final DateTime? logoutResolvedAt;
   final String? logoutResolvedBy;
   final String? logoutResolvedByName;
+  final String? companyId;
 
   AppUser({
     required this.uid,
@@ -47,6 +48,7 @@ class AppUser {
     this.logoutResolvedAt,
     this.logoutResolvedBy,
     this.logoutResolvedByName,
+    this.companyId,
   });
 
   factory AppUser.fromMap(Map<String, dynamic> data, {required String uid}) {
@@ -66,6 +68,11 @@ class AppUser {
       logoutResolvedAt: _dateTimeFromDynamic(data['logoutResolvedAt']),
       logoutResolvedBy: data['logoutResolvedBy'] as String?,
       logoutResolvedByName: data['logoutResolvedByName'] as String?,
+      companyId: ((data['company_ID'] ??
+                  data['companyId'] ??
+                  data['company_id'] ??
+                  data['companyID']) as String?)
+              ?.trim(),
     );
   }
 
@@ -85,6 +92,7 @@ class AppUser {
       'logoutResolvedAt': logoutResolvedAt,
       'logoutResolvedBy': logoutResolvedBy,
       'logoutResolvedByName': logoutResolvedByName,
+      'company_ID': companyId,
     };
   }
 
@@ -104,6 +112,7 @@ class AppUser {
     DateTime? logoutResolvedAt,
     String? logoutResolvedBy,
     String? logoutResolvedByName,
+    String? companyId,
   }) {
     return AppUser(
       uid: uid ?? this.uid,
@@ -122,6 +131,7 @@ class AppUser {
       logoutResolvedAt: logoutResolvedAt ?? this.logoutResolvedAt,
       logoutResolvedBy: logoutResolvedBy ?? this.logoutResolvedBy,
       logoutResolvedByName: logoutResolvedByName ?? this.logoutResolvedByName,
+      companyId: companyId ?? this.companyId,
     );
   }
 }

@@ -1,5 +1,8 @@
+import 'dart:math';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:compact_sales_monitoring/models/agile_model.dart';
+import 'package:compact_sales_monitoring/models/company_branding_model.dart';
 import 'package:compact_sales_monitoring/models/user_model.dart';
 import 'package:compact_sales_monitoring/models/route_model.dart';
 import 'package:uuid/uuid.dart';
@@ -35,6 +38,7 @@ class FirestoreService {
     String? name,
     String? fsName,
     bool active = false,
+    String? companyId,
   }) async {
     await _firebaseService.firestore.collection('users').doc(uid).set({
       'email': email,
@@ -53,8 +57,127 @@ class FirestoreService {
       'logoutResolvedByName': null,
       'fcmToken': null,
       'fcmTokenUpdatedAt': null,
+      'company_ID': companyId,
       'createdAt': FieldValue.serverTimestamp(),
     });
+  }
+
+  // Company Branding
+  Future<CompanyBranding?> getCompanyBranding(String companyId) async {
+    final collection = _firebaseService.firestore.collection('company_ID');
+
+    // First try direct doc-id access for schemas where document id == company_ID.
+    final doc = await collection.doc(companyId).get();
+    if (doc.exists) {
+      return CompanyBranding.fromMap(doc.data() ?? {}, companyId);
+    }
+
+    // Fallback for schemas where company_ID is a field, not the document id.
+    final query = await collection
+        .where('company_ID', isEqualTo: companyId)
+        .limit(1)
+        .get();
+
+    if (query.docs.isEmpty) return null;
+    final matched = query.docs.first;
+    return CompanyBranding.fromMap(matched.data(), companyId);
+  }
+
+  // Company-scoped user queries
+  Future<List<AppUser>> getUsersByRoleAndCompany(
+    UserRole role,
+    String companyId,
+  ) async {
+    final querySnapshot = await _firebaseService.firestore
+        .collection('users')
+        .where('role', isEqualTo: _roleToString(role))
+        .where('company_ID', isEqualTo: companyId)
+        .get();
+    return querySnapshot.docs
+        .map((doc) => AppUser.fromMap(doc.data(), uid: doc.id))
+        .toList();
+  }
+
+  Future<List<AppUser>> getAllUsersByCompany(String companyId) async {
+    final querySnapshot = await _firebaseService.firestore
+        .collection('users')
+        .where('company_ID', isEqualTo: companyId)
+        .get();
+    return querySnapshot.docs
+        .map((doc) => AppUser.fromMap(doc.data(), uid: doc.id))
+        .toList();
+  }
+
+  // Company-scoped route queries
+  Future<List<SalesRoute>> getAllRoutesByDateAndCompany(
+    String companyId,
+    String date,
+  ) async {
+    final supervisorsSnapshot = await _firebaseService.firestore
+        .collection('users')
+        .where('company_ID', isEqualTo: companyId)
+        .where('role', isEqualTo: 'supervisor')
+        .get();
+
+    final supervisorIds =
+        supervisorsSnapshot.docs.map((d) => d.id).toList();
+    if (supervisorIds.isEmpty) return [];
+
+    // Firestore `whereIn` supports up to 30 items per query.
+    final allRoutes = <SalesRoute>[];
+    for (var i = 0; i < supervisorIds.length; i += 30) {
+      final batch = supervisorIds.sublist(
+        i,
+        min(i + 30, supervisorIds.length),
+      );
+      final routeSnapshot = await _firebaseService.firestore
+          .collection('routes')
+          .where('supervisorId', whereIn: batch)
+          .where('date', isEqualTo: date)
+          .get();
+      allRoutes.addAll(
+        routeSnapshot.docs.map(
+          (doc) => SalesRoute.fromMap(doc.data(), routeId: doc.id),
+        ),
+      );
+    }
+    return allRoutes;
+  }
+
+  Future<List<SalesRoute>> getAllRoutesByDateRangeAndCompany({
+    required String companyId,
+    required String startDate,
+    required String endDate,
+  }) async {
+    final supervisorsSnapshot = await _firebaseService.firestore
+        .collection('users')
+        .where('company_ID', isEqualTo: companyId)
+        .where('role', isEqualTo: 'supervisor')
+        .get();
+
+    final supervisorIds =
+        supervisorsSnapshot.docs.map((d) => d.id).toList();
+    if (supervisorIds.isEmpty) return [];
+
+    final allRoutes = <SalesRoute>[];
+    for (var i = 0; i < supervisorIds.length; i += 30) {
+      final batch = supervisorIds.sublist(
+        i,
+        min(i + 30, supervisorIds.length),
+      );
+      final routeSnapshot = await _firebaseService.firestore
+          .collection('routes')
+          .where('supervisorId', whereIn: batch)
+          .where('date', isGreaterThanOrEqualTo: startDate)
+          .where('date', isLessThanOrEqualTo: endDate)
+          .get();
+      allRoutes.addAll(
+        routeSnapshot.docs.map(
+          (doc) => SalesRoute.fromMap(doc.data(), routeId: doc.id),
+        ),
+      );
+    }
+    return allRoutes;
   }
 
   Future<AppUser?> getUser(String uid) async {

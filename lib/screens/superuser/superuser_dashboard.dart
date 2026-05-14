@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:intl/intl.dart';
 import 'package:compact_sales_monitoring/models/user_model.dart';
+import 'package:compact_sales_monitoring/providers/auth_provider.dart';
 import 'package:compact_sales_monitoring/providers/route_provider.dart';
 import 'package:compact_sales_monitoring/services/archive_service.dart';
 import 'package:compact_sales_monitoring/services/firestore_service.dart';
@@ -50,8 +51,17 @@ class _SuperUserDashboardState extends State<SuperUserDashboard> {
   }
 
   Future<void> _loadRoutes() async {
+    final companyId =
+        context.read<AuthProvider>().currentUser?.companyId;
     final dateStr = DateFormat('yyyy-MM-dd').format(_selectedDate);
-    context.read<RouteProvider>().fetchAllRoutesByDate(dateStr);
+    if (companyId != null && companyId.isNotEmpty) {
+      context.read<RouteProvider>().fetchAllRoutesByDateAndCompany(
+            companyId,
+            dateStr,
+          );
+    } else {
+      context.read<RouteProvider>().fetchAllRoutesByDate(dateStr);
+    }
   }
 
   Future<AppUser?> _getSalesmanDetails(String salesmanId) async {

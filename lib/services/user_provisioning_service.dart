@@ -16,6 +16,7 @@ class UserProvisioningService {
     String? supervisorId,
     String? name,
     bool active = true,
+    String? companyId,
   }) async {
     FirebaseApp? secondaryApp;
     FirebaseAuth? secondaryAuth;
@@ -47,6 +48,7 @@ class UserProvisioningService {
         supervisorId: role == UserRole.salesman ? supervisorId : null,
         name: trimmedName == null || trimmedName.isEmpty ? null : trimmedName,
         active: active,
+        companyId: companyId,
       );
     } on FirebaseAuthException catch (e) {
       throw Exception(e.message ?? 'Failed to create the authentication account.');

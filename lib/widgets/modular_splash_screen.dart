@@ -6,6 +6,7 @@ class ModularSplashConfig {
   const ModularSplashConfig({
     required this.title,
     required this.logoAssetPath,
+    this.logoUrl,
     this.backgroundTop = const Color(0xFF1A1533),
     this.backgroundMid = const Color(0xFF26204A),
     this.backgroundBottom = const Color(0xFF32295A),
@@ -17,6 +18,8 @@ class ModularSplashConfig {
 
   final String title;
   final String logoAssetPath;
+  /// When provided, the network image at this URL is used instead of [logoAssetPath].
+  final String? logoUrl;
   final Color backgroundTop;
   final Color backgroundMid;
   final Color backgroundBottom;
@@ -51,6 +54,12 @@ class _ModularSplashScreenState extends State<ModularSplashScreen>
   late final Animation<double> _logoFade;
   late final Animation<double> _logoReveal;
   late final Animation<double> _silhouetteFade;
+
+  ImageProvider _resolveLogoImage() {
+    final url = widget.config.logoUrl;
+    if (url != null && url.isNotEmpty) return NetworkImage(url);
+    return AssetImage(widget.config.logoAssetPath);
+  }
 
   @override
   void initState() {
@@ -201,8 +210,8 @@ class _ModularSplashScreenState extends State<ModularSplashScreen>
                       children: [
                         FadeTransition(
                           opacity: _logoReveal,
-                          child: Image.asset(
-                            widget.config.logoAssetPath,
+                          child: Image(
+                            image: _resolveLogoImage(),
                             fit: BoxFit.cover,
                           ),
                         ),
@@ -213,8 +222,8 @@ class _ModularSplashScreenState extends State<ModularSplashScreen>
                               Color(0xE6000000),
                               BlendMode.srcATop,
                             ),
-                            child: Image.asset(
-                              widget.config.logoAssetPath,
+                            child: Image(
+                              image: _resolveLogoImage(),
                               fit: BoxFit.cover,
                             ),
                           ),

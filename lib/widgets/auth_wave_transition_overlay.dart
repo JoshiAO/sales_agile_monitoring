@@ -8,7 +8,12 @@ import 'package:flutter/material.dart';
 /// elegantly uncovering the page that was already rendered beneath it.
 class AuthWaveRevealLayer extends StatefulWidget {
   final bool isAuthLoading;
-  const AuthWaveRevealLayer({super.key, required this.isAuthLoading});
+  final String? logoUrl;
+  const AuthWaveRevealLayer({
+    super.key,
+    required this.isAuthLoading,
+    this.logoUrl,
+  });
 
   @override
   State<AuthWaveRevealLayer> createState() => _AuthWaveRevealLayerState();
@@ -25,12 +30,18 @@ class _AuthWaveRevealLayerState extends State<AuthWaveRevealLayer>
 
   bool _visible = false;
   bool _exiting = false;
-  late final AssetImage _logoImage;
+  late ImageProvider _logoImage;
+
+  ImageProvider _resolveLogoImage() {
+    final url = widget.logoUrl;
+    if (url != null && url.isNotEmpty) return NetworkImage(url);
+    return const AssetImage('assets/images/JoshiAO.jpg');
+  }
 
   @override
   void initState() {
     super.initState();
-    _logoImage = const AssetImage('assets/images/JoshiAO.jpg');
+    _logoImage = _resolveLogoImage();
 
     _waveLoop = AnimationController(
       duration: const Duration(milliseconds: 1800),
@@ -58,6 +69,10 @@ class _AuthWaveRevealLayerState extends State<AuthWaveRevealLayer>
   @override
   void didUpdateWidget(AuthWaveRevealLayer old) {
     super.didUpdateWidget(old);
+    if (old.logoUrl != widget.logoUrl) {
+      _logoImage = _resolveLogoImage();
+      precacheImage(_logoImage, context);
+    }
     if (!old.isAuthLoading && widget.isAuthLoading) {
       _show();
     } else if (old.isAuthLoading && !widget.isAuthLoading && _visible) {

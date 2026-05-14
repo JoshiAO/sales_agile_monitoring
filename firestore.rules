@@ -90,6 +90,11 @@ service cloud.firestore {
       }
     }
 
+    match /company_ID/{companyDocId} {
+      allow read: if signedIn();
+      allow create, update, delete: if isSuperuser();
+    }
+
     match /routes/{routeId} {
       allow create: if signedIn();
       allow read: if signedIn() && (

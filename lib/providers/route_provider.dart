@@ -86,6 +86,30 @@ class RouteProvider extends ChangeNotifier {
     }
   }
 
+  Future<void> fetchAllRoutesByDateAndCompany(
+    String companyId,
+    String date,
+  ) async {
+    _isLoading = true;
+    _error = null;
+    notifyListeners();
+
+    try {
+      _routes = await _firestoreService.getAllRoutesByDateAndCompany(
+        companyId,
+        date,
+      );
+      _assignDistinctSalesmanColors();
+      await _migrateLegacyCachedPolylineFlags();
+      await _generatePolylines();
+    } catch (e) {
+      _error = e.toString();
+    } finally {
+      _isLoading = false;
+      notifyListeners();
+    }
+  }
+
   Future<RouteRealignResult> realignRoutesToRoads() async {
     _isLoading = true;
     _error = null;

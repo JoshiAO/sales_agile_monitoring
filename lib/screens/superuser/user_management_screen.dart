@@ -33,15 +33,37 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
   Future<void> _loadUsers() async {
     setState(() => _isLoading = true);
     try {
-      final superusers = await _firestoreService.getUsersByRole(
-        UserRole.superuser,
-      );
-      _supervisors = await _firestoreService.getUsersByRole(
-        UserRole.supervisor,
-      );
-      final salesmen = await _firestoreService.getUsersByRole(
-        UserRole.salesman,
-      );
+      final companyId =
+          context.read<AuthProvider>().currentUser?.companyId;
+
+      final List<AppUser> superusers;
+      final List<AppUser> supervisors;
+      final List<AppUser> salesmen;
+
+      if (companyId != null && companyId.isNotEmpty) {
+        superusers = await _firestoreService.getUsersByRoleAndCompany(
+          UserRole.superuser,
+          companyId,
+        );
+        _supervisors = await _firestoreService.getUsersByRoleAndCompany(
+          UserRole.supervisor,
+          companyId,
+        );
+        salesmen = await _firestoreService.getUsersByRoleAndCompany(
+          UserRole.salesman,
+          companyId,
+        );
+      } else {
+        superusers = await _firestoreService.getUsersByRole(
+          UserRole.superuser,
+        );
+        _supervisors = await _firestoreService.getUsersByRole(
+          UserRole.supervisor,
+        );
+        salesmen = await _firestoreService.getUsersByRole(
+          UserRole.salesman,
+        );
+      }
 
       _allUsers = [...superusers, ..._supervisors, ...salesmen];
     } catch (e) {
@@ -584,6 +606,10 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
 
                   try {
                     await _runWithBlockingLoader(rootContext, () async {
+                      final companyId = rootContext
+                          .read<AuthProvider>()
+                          .currentUser
+                          ?.companyId;
                       await _userProvisioningService.createManagedUser(
                         email: emailController.text,
                         password: passwordController.text,
@@ -595,6 +621,7 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
                         supervisorId: selectedRole == UserRole.salesman
                             ? selectedSupervisorId
                             : null,
+                        companyId: companyId,
                       );
                     });
 

@@ -3,18 +3,26 @@ import 'package:provider/provider.dart';
 import 'package:compact_sales_monitoring/services/firebase_service.dart';
 import 'package:compact_sales_monitoring/providers/auth_provider.dart';
 import 'package:compact_sales_monitoring/providers/activation_provider.dart';
+import 'package:compact_sales_monitoring/providers/company_branding_provider.dart';
 import 'package:compact_sales_monitoring/providers/route_provider.dart';
+import 'package:compact_sales_monitoring/models/company_branding_model.dart';
 import 'package:compact_sales_monitoring/app_router.dart';
 import 'package:compact_sales_monitoring/screens/splash_screen.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await FirebaseService.initializeApp();
-  runApp(const MainApp());
+  final initialBranding = await CompanyBrandingProvider.loadLastCachedBranding();
+  runApp(MainApp(initialBranding: initialBranding));
 }
 
 class MainApp extends StatelessWidget {
-  const MainApp({super.key});
+  final CompanyBranding? initialBranding;
+
+  const MainApp({
+    super.key,
+    this.initialBranding,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -23,6 +31,16 @@ class MainApp extends StatelessWidget {
         ChangeNotifierProvider(create: (_) => ActivationProvider()),
         ChangeNotifierProvider(create: (_) => AuthProvider()),
         ChangeNotifierProvider(create: (_) => RouteProvider()),
+        ChangeNotifierProxyProvider<AuthProvider, CompanyBrandingProvider>(
+          create: (_) => CompanyBrandingProvider(
+            initialBranding: initialBranding,
+          ),
+          update: (_, authProvider, brandingProvider) {
+            final provider = brandingProvider ?? CompanyBrandingProvider();
+            provider.updateFromUser(authProvider.currentUser);
+            return provider;
+          },
+        ),
       ],
       child: MaterialApp(
         title: 'Sales Agile Monitoring',

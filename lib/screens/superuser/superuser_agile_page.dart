@@ -3,8 +3,10 @@ import 'package:flutter/services.dart';
 import 'package:flutter/foundation.dart';
 import 'package:android_intent_plus/android_intent.dart';
 import 'package:intl/intl.dart';
+import 'package:provider/provider.dart';
 import 'package:compact_sales_monitoring/models/agile_model.dart';
 import 'package:compact_sales_monitoring/models/user_model.dart';
+import 'package:compact_sales_monitoring/providers/auth_provider.dart';
 import 'package:compact_sales_monitoring/services/agile_export_service.dart';
 import 'package:compact_sales_monitoring/services/firestore_service.dart';
 import 'package:compact_sales_monitoring/widgets/date_selector_widget.dart';
@@ -39,21 +41,40 @@ class _SuperuserAgilePageState extends State<SuperuserAgilePage> {
 
   Future<_SuperuserAgileData> _loadPageData() async {
     final date = DateFormat('yyyy-MM-dd').format(_selectedDate);
+    final companyId =
+        context.read<AuthProvider>().currentUser?.companyId;
+
+    final List<AppUser> rawSupervisors;
+    final List<AppUser> rawSalesmen;
+
+    if (companyId != null && companyId.isNotEmpty) {
+      rawSupervisors = await _firestoreService.getUsersByRoleAndCompany(
+        UserRole.supervisor,
+        companyId,
+      );
+      rawSalesmen = await _firestoreService.getUsersByRoleAndCompany(
+        UserRole.salesman,
+        companyId,
+      );
+    } else {
+      rawSupervisors =
+          await _firestoreService.getUsersByRole(UserRole.supervisor);
+      rawSalesmen =
+          await _firestoreService.getUsersByRole(UserRole.salesman);
+    }
 
     final results = await Future.wait([
-      _firestoreService.getUsersByRole(UserRole.supervisor),
-      _firestoreService.getUsersByRole(UserRole.salesman),
       _firestoreService.getAgileTargetsByDate(date: date),
       _firestoreService.getAllAgileSubmissionsByDate(date: date),
     ]);
 
-    final supervisors = (results[0] as List<AppUser>).toList()
+    final supervisors = rawSupervisors.toList()
       ..sort(
         (left, right) => _displayName(left).compareTo(_displayName(right)),
       );
-    final salesmen = results[1] as List<AppUser>;
-    final targetsBySalesman = results[2] as Map<String, AgileTarget>;
-    final submissionsBySalesman = results[3] as Map<String, AgileSubmission>;
+    final salesmen = rawSalesmen;
+    final targetsBySalesman = results[0] as Map<String, AgileTarget>;
+    final submissionsBySalesman = results[1] as Map<String, AgileSubmission>;
 
     final salesmenBySupervisor = <String, List<AppUser>>{};
     for (final salesman in salesmen) {

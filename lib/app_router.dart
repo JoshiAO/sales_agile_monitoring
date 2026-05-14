@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:compact_sales_monitoring/providers/auth_provider.dart';
 import 'package:compact_sales_monitoring/providers/activation_provider.dart';
+import 'package:compact_sales_monitoring/providers/company_branding_provider.dart';
 import 'package:compact_sales_monitoring/models/user_model.dart';
 import 'package:compact_sales_monitoring/screens/activation_screen.dart';
 import 'package:compact_sales_monitoring/screens/login_screen.dart';
@@ -145,6 +146,7 @@ class _AppRouterState extends State<AppRouter> {
         }
 
         final baseKey = _baseKeyFor(base);
+        final logoUrl = context.watch<CompanyBrandingProvider>().branding?.logoUrl;
 
         // The wave layer sits on top and manages its own enter/exit lifecycle.
         // When auth loading ends it plays the curtain-reveal, then disappears.
@@ -191,6 +193,7 @@ class _AppRouterState extends State<AppRouter> {
                 isAuthLoading: activationProvider.isChecking ||
                     authProvider.isInitializing ||
                     (authProvider.isLoading && activationProvider.isActivated),
+                logoUrl: logoUrl,
               ),
           ],
         );
