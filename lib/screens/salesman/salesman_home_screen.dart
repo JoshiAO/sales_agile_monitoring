@@ -52,11 +52,32 @@ class _SalesmanHomeScreenState extends State<SalesmanHomeScreen>
   bool _isUploading = false;
   String? _loadedForDate;
   StreamSubscription<geo.Position>? _locationSubscription;
+  Timer? _midnightRolloverTimer;
   DateTime? _lastCheckpointTime;
   double? _lastCheckpointLat;
   double? _lastCheckpointLon;
 
   String get _todayDate => DateFormat('yyyy-MM-dd').format(DateTime.now());
+
+  void _scheduleMidnightRollover() {
+    _midnightRolloverTimer?.cancel();
+
+    final now = DateTime.now();
+    final nextMidnight = DateTime(now.year, now.month, now.day + 1);
+    final delay = nextMidnight.difference(now);
+
+    _midnightRolloverTimer = Timer(delay, () {
+      if (!mounted) return;
+
+      // Ensure pending offline checkpoints are attempted at day rollover,
+      // then load fresh route state for the new date.
+      _checkpointQueue
+          .flush(_firestoreService.appendRouteCheckpoint)
+          .catchError((_) {});
+      _loadTodayRoute();
+      _scheduleMidnightRollover();
+    });
+  }
 
   String _googleMapsLink(double lat, double lon) {
     return 'https://www.google.com/maps/search/?api=1&query=$lat,$lon';
@@ -446,6 +467,7 @@ class _SalesmanHomeScreenState extends State<SalesmanHomeScreen>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    _scheduleMidnightRollover();
     _checkpointQueue
         .flush(_firestoreService.appendRouteCheckpoint)
         .catchError((_) {});
@@ -454,16 +476,24 @@ class _SalesmanHomeScreenState extends State<SalesmanHomeScreen>
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed &&
-        _loadedForDate != null &&
-        _loadedForDate != _todayDate) {
-      _loadTodayRoute();
+    if (state == AppLifecycleState.resumed) {
+      // Flush any offline-queued checkpoints each time the app comes to the
+      // foreground — covers the case where data returned while the app was
+      // backgrounded or while the salesman was stationary (no GPS events).
+      _checkpointQueue
+          .flush(_firestoreService.appendRouteCheckpoint)
+          .catchError((_) {});
+
+      if (_loadedForDate != null && _loadedForDate != _todayDate) {
+        _loadTodayRoute();
+      }
     }
   }
 
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _midnightRolloverTimer?.cancel();
     _locationSubscription?.cancel();
     super.dispose();
   }
@@ -867,6 +897,12 @@ class _SalesmanHomeScreenState extends State<SalesmanHomeScreen>
             _lastPoint = routePoint;
             _lastLocalImagePath = stampedResult.localFile.path;
           });
+          // Flush any checkpoints queued while data was off before we stop
+          // tracking (syncCheckpointTracking cancels the stream once lastPoint
+          // is set, so this is the last reliable upload window).
+          _checkpointQueue
+              .flush(_firestoreService.appendRouteCheckpoint)
+              .catchError((_) {});
           _syncCheckpointTracking();
 
           if (!mounted) return;
@@ -918,6 +954,10 @@ class _SalesmanHomeScreenState extends State<SalesmanHomeScreen>
             _lastCheckpointLat = null;
             _lastCheckpointLon = null;
           });
+          // Flush queued offline checkpoints before stream is cancelled.
+          _checkpointQueue
+              .flush(_firestoreService.appendRouteCheckpoint)
+              .catchError((_) {});
           _syncCheckpointTracking();
         }
 
