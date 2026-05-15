@@ -32,6 +32,7 @@ class _SalesmanHomeScreenState extends State<SalesmanHomeScreen>
     with WidgetsBindingObserver {
   static const Duration _checkpointMinInterval = Duration(minutes: 30);
   static const double _checkpointMinDistanceMeters = 500.0;
+  static const double _maxCheckpointAccuracyMeters = 80.0;
   static const int _maxUploadBytes = 300 * 1024;
 
   final LocationService _locationService = LocationService();
@@ -523,7 +524,12 @@ class _SalesmanHomeScreenState extends State<SalesmanHomeScreen>
       return;
     }
 
-    final now = DateTime.now();
+    // Ignore low-confidence fixes to reduce false checkpoint jumps.
+    if (position.accuracy > _maxCheckpointAccuracyMeters) {
+      return;
+    }
+
+    final now = position.timestamp;
     final prevLat = _lastCheckpointLat;
     final prevLon = _lastCheckpointLon;
 
@@ -737,6 +743,18 @@ class _SalesmanHomeScreenState extends State<SalesmanHomeScreen>
         return;
       }
 
+      if (position.accuracy > _maxCheckpointAccuracyMeters) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'Location accuracy is low (${position.accuracy.toStringAsFixed(0)}m). Move to an open area and try again.',
+            ),
+          ),
+        );
+        return;
+      }
+
       if (!mounted) return;
       _uploadImage(File(capturedImagePath), position, isFirst);
     } catch (e) {
@@ -761,6 +779,7 @@ class _SalesmanHomeScreenState extends State<SalesmanHomeScreen>
       if (user == null) return;
 
       final capturedAt = DateTime.now();
+      final locationTime = position.timestamp;
       final timestamp = capturedAt.toIso8601String();
       final salesmanName = user.email.split('@').first;
 
@@ -789,7 +808,7 @@ class _SalesmanHomeScreenState extends State<SalesmanHomeScreen>
         lat: position.latitude,
         lon: position.longitude,
         imageUrl: imageUrl,
-        timestamp: capturedAt,
+        timestamp: locationTime,
       );
 
       // Get existing route for today or create new one

@@ -28,8 +28,14 @@ class LocationService {
         throw Exception('Location permission denied');
       }
 
+      final serviceEnabled = await Geolocator.isLocationServiceEnabled();
+      if (!serviceEnabled) {
+        throw Exception('Location services are disabled');
+      }
+
       return await Geolocator.getCurrentPosition(
-        desiredAccuracy: LocationAccuracy.best,
+        desiredAccuracy: LocationAccuracy.bestForNavigation,
+        timeLimit: const Duration(seconds: 20),
       );
     } catch (e) {
       developer.log('Location error: $e', name: 'LocationService');

@@ -243,14 +243,14 @@ class RouteProvider extends ChangeNotifier {
           _firestoreService
               .savePolylineCache(
                 route.routeId,
-                _buildTimedCachePointsFromPolyline(polyline),
+                _buildTimedCachePointsFromPolyline(route, polyline),
                 isApproximate: true,
               )
               .catchError((_) {});
         }
       } else {
         // Persist only fully road-aware paths to avoid caching straight fallbacks.
-        final cachePoints = _buildTimedCachePointsFromPolyline(polyline);
+        final cachePoints = _buildTimedCachePointsFromPolyline(route, polyline);
         _firestoreService
             .savePolylineCache(route.routeId, cachePoints, isApproximate: false)
             .catchError((_) {});
@@ -359,10 +359,34 @@ class RouteProvider extends ChangeNotifier {
   }
 
   List<CachedPolylinePoint> _buildTimedCachePointsFromPolyline(
+    SalesRoute route,
     List<LatLng> polyline,
   ) {
-    final generatedAt = DateTime.now();
-    const timestampStepSeconds = 1;
+    if (polyline.isEmpty) return const [];
+
+    final startTime = route.first.timestamp;
+    final endTime = route.hasLastCall
+        ? route.last.timestamp
+        : (route.sortedCheckpoints.isNotEmpty
+              ? route.sortedCheckpoints.last.timestamp
+              : DateTime.now());
+
+    var totalMs = endTime.difference(startTime).inMilliseconds;
+    final minimumSpanMs = polyline.length - 1;
+    if (totalMs < minimumSpanMs) {
+      totalMs = minimumSpanMs;
+    }
+
+    if (polyline.length == 1) {
+      return [
+        CachedPolylinePoint(
+          lat: polyline.first.latitude,
+          lon: polyline.first.longitude,
+          timestamp: startTime,
+        ),
+      ];
+    }
+
     return polyline
         .asMap()
         .entries
@@ -370,10 +394,13 @@ class RouteProvider extends ChangeNotifier {
           (entry) => CachedPolylinePoint(
             lat: entry.value.latitude,
             lon: entry.value.longitude,
-            // Keep points tied to one generation event and visibly distinct in
-            // Firestore console, which often masks sub-second precision.
-            timestamp: generatedAt.add(
-              Duration(seconds: entry.key * timestampStepSeconds),
+            // Interpolate timestamps across the actual route window so fallback
+            // checkpoints remain monotonic and closer to real chronology.
+            timestamp: startTime.add(
+              Duration(
+                milliseconds: ((totalMs * entry.key) / (polyline.length - 1))
+                    .round(),
+              ),
             ),
           ),
         )

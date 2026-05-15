@@ -770,14 +770,16 @@ class _SupervisorDashboardState extends State<SupervisorDashboard> {
                               )
                               .expand(
                                 (route) => [
-                                  ...[
+                                  ...([
                                     ...route.sortedCheckpoints,
                                     ..._cachedPolylineAsCheckpoints(
                                       route,
                                       renderedPolyline: routeProvider
                                           .routePolylines[route.routeId],
                                     ),
-                                  ]
+                                  ]..sort(
+                                    (a, b) => a.timestamp.compareTo(b.timestamp),
+                                  ))
                                       .where(
                                         (checkpoint) => _shouldShowCheckpoint(
                                           route,
