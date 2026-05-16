@@ -40,6 +40,7 @@ class _SuperUserDashboardState extends State<SuperUserDashboard> {
   double _flagPinScale = 1.0;
   double _currentZoom = 12;
   String? _selectedCheckpointId;
+  String? _selectedCurrentLocationRouteId;
   String? _focusedRouteId;
 
   @override
@@ -359,6 +360,18 @@ class _SuperUserDashboardState extends State<SuperUserDashboard> {
     );
   }
 
+  Widget _buildCachedPolylineMarker(BuildContext context, SalesRoute route) {
+    final routeColor = context.read<RouteProvider>().routeColorForSalesman(
+      route.salesmanId,
+    );
+
+    return Container(
+      width: 10,
+      height: 10,
+      decoration: BoxDecoration(color: routeColor, shape: BoxShape.circle),
+    );
+  }
+
   String _checkpointId(SalesRoute route, RouteCheckpoint checkpoint) {
     return '${route.routeId}_${checkpoint.timestamp.millisecondsSinceEpoch}_${checkpoint.lat}_${checkpoint.lon}';
   }
@@ -397,6 +410,14 @@ class _SuperUserDashboardState extends State<SuperUserDashboard> {
     }
 
     return identical(latestCheckpoint, checkpoint);
+  }
+
+  DateTime _currentLocationTimestamp(SalesRoute route) {
+    final latestCheckpoint = _latestCheckpoint(route);
+    if (latestCheckpoint != null) {
+      return latestCheckpoint.timestamp;
+    }
+    return route.first.timestamp;
   }
 
   bool _shouldShowCheckpoint(SalesRoute route, RouteCheckpoint checkpoint) {
@@ -563,26 +584,59 @@ class _SuperUserDashboardState extends State<SuperUserDashboard> {
   double _flagMarkerWidth() => _showRouteLabels ? 180 : 92;
   double _flagMarkerHeight() => _showRouteLabels ? 110 : 84;
 
-  Widget _buildOngoingArrowMarker(SalesRoute route) {
+  Widget _buildOngoingArrowMarker(SalesRoute route, bool isSelected) {
+    final timestamp = DateFormat('hh:mm a').format(
+      _currentLocationTimestamp(route),
+    );
     final routeColor = context.read<RouteProvider>().routeColorForSalesman(
       route.salesmanId,
     );
 
-    return Container(
-      width: 34,
-      height: 34,
-      decoration: BoxDecoration(
-        color: Colors.white,
-        shape: BoxShape.circle,
-        border: Border.all(color: routeColor, width: 2.5),
-        boxShadow: [
-          BoxShadow(
-            blurRadius: 8,
-            color: Colors.black.withValues(alpha: 0.24),
+    return GestureDetector(
+      onTap: () {
+        setState(() {
+          _selectedCurrentLocationRouteId = route.routeId;
+          _selectedCheckpointId = null;
+        });
+      },
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (isSelected)
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+              decoration: BoxDecoration(
+                color: Colors.black.withValues(alpha: 0.78),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Text(
+                timestamp,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 10,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+          if (isSelected) const SizedBox(height: 4),
+          Container(
+            width: 34,
+            height: 34,
+            decoration: BoxDecoration(
+              color: Colors.white,
+              shape: BoxShape.circle,
+              border: Border.all(color: routeColor, width: 2.5),
+              boxShadow: [
+                BoxShadow(
+                  blurRadius: 8,
+                  color: Colors.black.withValues(alpha: 0.24),
+                ),
+              ],
+            ),
+            child: Icon(Icons.navigation, color: routeColor, size: 20),
           ),
         ],
       ),
-      child: Icon(Icons.navigation, color: routeColor, size: 20),
     );
   }
 
@@ -771,8 +825,12 @@ class _SuperUserDashboardState extends State<SuperUserDashboard> {
                         ),
                         initialZoom: 12,
                         onTap: (tapPosition, point) {
-                          if (_selectedCheckpointId != null) {
-                            setState(() => _selectedCheckpointId = null);
+                          if (_selectedCheckpointId != null ||
+                              _selectedCurrentLocationRouteId != null) {
+                            setState(() {
+                              _selectedCheckpointId = null;
+                              _selectedCurrentLocationRouteId = null;
+                            });
                           }
                         },
                         onPositionChanged: (position, hasGesture) {
@@ -782,6 +840,7 @@ class _SuperUserDashboardState extends State<SuperUserDashboard> {
                               _currentZoom = zoom;
                               if (_currentZoom < _checkpointZoomThreshold) {
                                 _selectedCheckpointId = null;
+                                _selectedCurrentLocationRouteId = null;
                               }
                             });
                           }
@@ -870,7 +929,7 @@ class _SuperUserDashboardState extends State<SuperUserDashboard> {
                               .toList(),
                         ),
 
-                        // Checkpoints under endpoint flags.
+                        // Cached polyline fallback points are visual-only.
                         MarkerLayer(
                             markers: routeProvider.routes
                               .where(
@@ -879,48 +938,75 @@ class _SuperUserDashboardState extends State<SuperUserDashboard> {
                                 r.routeId == _focusedRouteId,
                               )
                               .expand(
-                                (route) => [
-                                  ...([
-                                    ...route.sortedCheckpoints,
-                                    ..._cachedPolylineAsCheckpoints(
+                                (route) => _cachedPolylineAsCheckpoints(
                                       route,
                                       renderedPolyline: routeProvider
                                           .routePolylines[route.routeId],
-                                    ),
-                                  ]..sort(
-                                    (a, b) => a.timestamp.compareTo(b.timestamp),
-                                  ))
-                                      .where(
-                                        (checkpoint) => _shouldShowCheckpoint(
-                                          route,
-                                          checkpoint,
+                                    )
+                                    .where(
+                                      (checkpoint) => _shouldShowCheckpoint(
+                                        route,
+                                        checkpoint,
+                                      ),
+                                    )
+                                    .map(
+                                      (checkpoint) => Marker(
+                                        point: LatLng(
+                                          checkpoint.lat,
+                                          checkpoint.lon,
                                         ),
-                                      )
-                                      .map((checkpoint) {
-                                        final checkpointId = _checkpointId(
+                                        width: 12,
+                                        height: 12,
+                                        rotate: true,
+                                        child: _buildCachedPolylineMarker(
+                                          context,
+                                          route,
+                                        ),
+                                      ),
+                                    ),
+                              )
+                              .toList(),
+                        ),
+
+                        // Real checkpoints are interactive.
+                        MarkerLayer(
+                            markers: routeProvider.routes
+                              .where(
+                              (r) =>
+                                _focusedRouteId == null ||
+                                r.routeId == _focusedRouteId,
+                              )
+                              .expand(
+                                (route) => route.sortedCheckpoints
+                                    .where(
+                                      (checkpoint) => _shouldShowCheckpoint(
+                                        route,
+                                        checkpoint,
+                                      ),
+                                    )
+                                    .map((checkpoint) {
+                                      final checkpointId = _checkpointId(
+                                        route,
+                                        checkpoint,
+                                      );
+                                      final isSelected =
+                                          checkpointId == _selectedCheckpointId;
+                                      return Marker(
+                                        point: LatLng(
+                                          checkpoint.lat,
+                                          checkpoint.lon,
+                                        ),
+                                        width: isSelected ? 90 : 24,
+                                        height: isSelected ? 48 : 24,
+                                        rotate: true,
+                                        child: _buildCheckpointMarker(
+                                          context,
                                           route,
                                           checkpoint,
-                                        );
-                                        final isSelected =
-                                            checkpointId ==
-                                            _selectedCheckpointId;
-                                        return Marker(
-                                          point: LatLng(
-                                            checkpoint.lat,
-                                            checkpoint.lon,
-                                          ),
-                                          width: isSelected ? 90 : 24,
-                                          height: isSelected ? 48 : 24,
-                                          rotate: true,
-                                          child: _buildCheckpointMarker(
-                                            context,
-                                            route,
-                                            checkpoint,
-                                            isSelected,
-                                          ),
-                                        );
-                                      }),
-                                ],
+                                          isSelected,
+                                        ),
+                                      );
+                                    }),
                               )
                               .toList(),
                         ),
@@ -938,10 +1024,14 @@ class _SuperUserDashboardState extends State<SuperUserDashboard> {
                                   if (_shouldShowOngoingArrow(route))
                                     Marker(
                                       point: _ongoingArrowPoint(route),
-                                      width: 40,
-                                      height: 40,
+                                      width: 94,
+                                      height: 60,
                                       rotate: true,
-                                      child: _buildOngoingArrowMarker(route),
+                                      child: _buildOngoingArrowMarker(
+                                        route,
+                                        _selectedCurrentLocationRouteId ==
+                                            route.routeId,
+                                      ),
                                     ),
                                   if (_showFirstCallMarkers &&
                                       route.hasFirstCall)
@@ -1010,19 +1100,30 @@ class _SuperUserDashboardState extends State<SuperUserDashboard> {
                                   _LegendItem(
                                     color: Colors.green,
                                     label: 'First Call',
-                                    icon: Icons.flag,
                                   ),
                                   SizedBox(height: 6),
                                   _LegendItem(
                                     color: Colors.red,
                                     label: 'Last Call',
-                                    icon: Icons.flag,
                                   ),
                                   SizedBox(height: 6),
                                   _LegendItem(
                                     color: Colors.orange,
                                     label: 'Checkpoint',
-                                    icon: Icons.circle,
+                                    style: _LegendItemStyle.checkpoint,
+                                  ),
+                                  SizedBox(height: 6),
+                                  _LegendItem(
+                                    color: Colors.pink,
+                                    label: 'Current Location',
+                                    style: _LegendItemStyle.currentLocation,
+                                  ),
+                                  SizedBox(height: 6),
+                                  _LegendItem(
+                                    color: Colors.orange,
+                                    label:
+                                        'Offline Location Capture (cachedPolyline)',
+                                    style: _LegendItemStyle.cachedPolyline,
                                   ),
                                 ],
                               ),
@@ -1203,22 +1304,71 @@ class _SuperUserDashboardState extends State<SuperUserDashboard> {
 }
 
 class _LegendItem extends StatelessWidget {
-  final IconData icon;
   final Color color;
   final String label;
+  final _LegendItemStyle style;
 
   const _LegendItem({
-    required this.icon,
     required this.color,
     required this.label,
+    this.style = _LegendItemStyle.flag,
   });
+
+  Widget _buildIcon() {
+    switch (style) {
+      case _LegendItemStyle.flag:
+        return Container(
+          width: 22,
+          height: 22,
+          decoration: BoxDecoration(
+            color: Colors.white,
+            shape: BoxShape.circle,
+            boxShadow: [
+              BoxShadow(
+                blurRadius: 3,
+                color: Colors.black.withValues(alpha: 0.22),
+              ),
+            ],
+          ),
+          child: Icon(Icons.flag, size: 12, color: color),
+        );
+      case _LegendItemStyle.checkpoint:
+        return Container(
+          width: 18,
+          height: 18,
+          decoration: BoxDecoration(
+            color: Colors.white,
+            shape: BoxShape.circle,
+            border: Border.all(color: color, width: 2),
+          ),
+          child: Icon(Icons.place, size: 10, color: color),
+        );
+      case _LegendItemStyle.cachedPolyline:
+        return Container(
+          width: 10,
+          height: 10,
+          decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+        );
+      case _LegendItemStyle.currentLocation:
+        return Container(
+          width: 22,
+          height: 22,
+          decoration: BoxDecoration(
+            color: Colors.white,
+            shape: BoxShape.circle,
+            border: Border.all(color: color, width: 2),
+          ),
+          child: Icon(Icons.navigation, size: 12, color: color),
+        );
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        Icon(icon, size: 16, color: color),
+        _buildIcon(),
         const SizedBox(width: 8),
         Text(
           label,
@@ -1228,6 +1378,8 @@ class _LegendItem extends StatelessWidget {
     );
   }
 }
+
+enum _LegendItemStyle { flag, checkpoint, cachedPolyline, currentLocation }
 
 class _RouteStatusChip extends StatelessWidget {
   final String salesmanLabel;

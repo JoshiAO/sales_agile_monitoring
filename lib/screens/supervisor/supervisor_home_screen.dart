@@ -101,6 +101,181 @@ class _SupervisorHomeScreenState extends State<SupervisorHomeScreen> {
     await nextFuture;
   }
 
+  List<_SuccessfulCallEntry> _successfulCalls(
+    _SupervisorHomeData data, {
+    required bool isFirst,
+  }) {
+    final entries = <_SuccessfulCallEntry>[];
+
+    for (final salesman in data.team) {
+      final route = data.routesBySalesman[salesman.uid];
+      if (route == null) continue;
+
+      final hasCall = isFirst ? route.hasFirstCall : route.hasLastCall;
+      if (!hasCall) continue;
+
+      final point = isFirst ? route.first : route.last;
+      entries.add(
+        _SuccessfulCallEntry(
+          salesmanName: _displayName(salesman),
+          timestamp: point.timestamp,
+          imageUrl: point.imageUrl,
+        ),
+      );
+    }
+
+    entries.sort(
+      (a, b) => isFirst
+          ? a.timestamp.compareTo(b.timestamp)
+          : b.timestamp.compareTo(a.timestamp),
+    );
+    return entries;
+  }
+
+  Future<void> _showCallImagePreview(
+    BuildContext context, {
+    required String imageUrl,
+    required String title,
+  }) async {
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text(title),
+        content: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 700, maxHeight: 520),
+          child: InteractiveViewer(
+            child: Image.network(
+              imageUrl,
+              fit: BoxFit.contain,
+              errorBuilder: (context, error, stackTrace) => const Padding(
+                padding: EdgeInsets.all(16),
+                child: Text('Unable to load image preview.'),
+              ),
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: const Text('Close'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _showSuccessfulCallsDialog(
+    _SupervisorHomeData data, {
+    required bool isFirst,
+  }) async {
+    final entries = _successfulCalls(data, isFirst: isFirst);
+    final title =
+        isFirst ? 'Successfull First Calls' : 'Successfull Last Calls';
+    final timeFormat = DateFormat('MMM d, yyyy h:mm a');
+
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) {
+        final screenSize = MediaQuery.of(dialogContext).size;
+        final desiredWidth = screenSize.width * 0.4;
+        final dialogWidth = desiredWidth.clamp(340.0, 860.0).toDouble();
+
+        return Dialog(
+          child: ConstrainedBox(
+            constraints: BoxConstraints(
+              maxWidth: dialogWidth,
+              maxHeight: screenSize.height * 0.75,
+            ),
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    style: Theme.of(dialogContext).textTheme.titleMedium
+                        ?.copyWith(fontWeight: FontWeight.w700),
+                  ),
+                  const SizedBox(height: 12),
+                  Expanded(
+                    child: entries.isEmpty
+                        ? const Center(child: Text('No successful calls yet.'))
+                        : ListView.separated(
+                            itemCount: entries.length,
+                          separatorBuilder: (context, index) =>
+                                const SizedBox(height: 8),
+                            itemBuilder: (context, index) {
+                              final entry = entries[index];
+                              final label =
+                                  isFirst ? 'First Call' : 'Last Call';
+
+                              return Card(
+                                margin: EdgeInsets.zero,
+                                child: Padding(
+                                  padding: const EdgeInsets.all(12),
+                                  child: Row(
+                                    children: [
+                                      Expanded(
+                                        child: Column(
+                                          crossAxisAlignment:
+                                              CrossAxisAlignment.start,
+                                          children: [
+                                            Text(
+                                              entry.salesmanName,
+                                              style: const TextStyle(
+                                                fontWeight: FontWeight.w700,
+                                              ),
+                                            ),
+                                            const SizedBox(height: 4),
+                                            Text(
+                                              '$label: ${timeFormat.format(entry.timestamp)}',
+                                              style: TextStyle(
+                                                color: Colors.grey.shade800,
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                      const SizedBox(width: 8),
+                                      OutlinedButton(
+                                        onPressed: entry.imageUrl.isEmpty
+                                            ? null
+                                            : () => _showCallImagePreview(
+                                                dialogContext,
+                                                imageUrl: entry.imageUrl,
+                                                title:
+                                                    '${entry.salesmanName} - $label',
+                                              ),
+                                        child: Text(
+                                          entry.imageUrl.isEmpty
+                                              ? 'No Image'
+                                              : 'Preview',
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              );
+                            },
+                          ),
+                  ),
+                  const SizedBox(height: 10),
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: TextButton(
+                      onPressed: () => Navigator.of(dialogContext).pop(),
+                      child: const Text('Close'),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
   String _formatNotificationTime(dynamic value) {
     if (value is Timestamp) {
       return DateFormat('MMM d, yyyy h:mm a').format(value.toDate().toLocal());
@@ -222,7 +397,8 @@ class _SupervisorHomeScreenState extends State<SupervisorHomeScreen> {
                     return ListView.separated(
                       padding: const EdgeInsets.all(10),
                       itemCount: docs.length,
-                      separatorBuilder: (_, __) => const SizedBox(height: 8),
+                      separatorBuilder: (context, index) =>
+                          const SizedBox(height: 8),
                       itemBuilder: (context, index) {
                         final data = docs[index].data();
                         final title =
@@ -503,6 +679,31 @@ class _SupervisorHomeScreenState extends State<SupervisorHomeScreen> {
                                   '${data.team.length} team member${data.team.length == 1 ? '' : 's'}',
                                   style: Theme.of(context).textTheme.bodyMedium
                                       ?.copyWith(color: Colors.grey.shade700),
+                                ),
+                                const SizedBox(height: 8),
+                                Wrap(
+                                  spacing: 8,
+                                  runSpacing: 8,
+                                  children: [
+                                    _HeaderMetricChip(
+                                      label: 'Successfull First Calls',
+                                      value:
+                                          '${_successfulCalls(data, isFirst: true).length}',
+                                      onTap: () => _showSuccessfulCallsDialog(
+                                        data,
+                                        isFirst: true,
+                                      ),
+                                    ),
+                                    _HeaderMetricChip(
+                                      label: 'Successfull Last Calls',
+                                      value:
+                                          '${_successfulCalls(data, isFirst: false).length}',
+                                      onTap: () => _showSuccessfulCallsDialog(
+                                        data,
+                                        isFirst: false,
+                                      ),
+                                    ),
+                                  ],
                                 ),
                               ],
                             ),
@@ -962,6 +1163,52 @@ class _MetricCell extends StatelessWidget {
   }
 }
 
+class _HeaderMetricChip extends StatelessWidget {
+  final String label;
+  final String value;
+  final VoidCallback onTap;
+
+  const _HeaderMetricChip({
+    required this.label,
+    required this.value,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      borderRadius: BorderRadius.circular(10),
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+        decoration: BoxDecoration(
+          border: Border.all(color: Colors.grey.shade300),
+          borderRadius: BorderRadius.circular(10),
+          color: Colors.grey.shade50,
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              label,
+              style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            const SizedBox(width: 8),
+            Text(
+              value,
+              style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class _SupervisorHomeData {
   final List<AppUser> team;
   final Map<String, SalesRoute> routesBySalesman;
@@ -975,3 +1222,15 @@ class _SupervisorHomeData {
 }
 
 enum _SupervisorCardMode { wide, compact }
+
+class _SuccessfulCallEntry {
+  final String salesmanName;
+  final DateTime timestamp;
+  final String imageUrl;
+
+  const _SuccessfulCallEntry({
+    required this.salesmanName,
+    required this.timestamp,
+    required this.imageUrl,
+  });
+}

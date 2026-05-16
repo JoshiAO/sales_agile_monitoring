@@ -378,6 +378,181 @@ class _SupervisorSummaryCard extends StatelessWidget {
     }
   }
 
+  List<_SuccessfulCallEntry> _successfulCalls({required bool isFirst}) {
+    final entries = <_SuccessfulCallEntry>[];
+
+    for (final salesman in summary.assignedSalesmen) {
+      final route = routesBySalesman[salesman.uid];
+      if (route == null) continue;
+
+      final hasCall = isFirst ? route.hasFirstCall : route.hasLastCall;
+      if (!hasCall) continue;
+
+      final trimmedName = salesman.name?.trim() ?? '';
+      final displayName = trimmedName.isNotEmpty ? trimmedName : salesman.email;
+      final point = isFirst ? route.first : route.last;
+
+      entries.add(
+        _SuccessfulCallEntry(
+          salesmanName: displayName,
+          timestamp: point.timestamp,
+          imageUrl: point.imageUrl,
+        ),
+      );
+    }
+
+    entries.sort(
+      (a, b) => isFirst
+          ? a.timestamp.compareTo(b.timestamp)
+          : b.timestamp.compareTo(a.timestamp),
+    );
+    return entries;
+  }
+
+  Future<void> _showCallImagePreview(
+    BuildContext context, {
+    required String imageUrl,
+    required String title,
+  }) async {
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text(title),
+        content: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 700, maxHeight: 520),
+          child: InteractiveViewer(
+            child: Image.network(
+              imageUrl,
+              fit: BoxFit.contain,
+              errorBuilder: (context, error, stackTrace) => const Padding(
+                padding: EdgeInsets.all(16),
+                child: Text('Unable to load image preview.'),
+              ),
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: const Text('Close'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _showSuccessfulCallsDialog(
+    BuildContext context, {
+    required bool isFirst,
+  }) async {
+    final entries = _successfulCalls(isFirst: isFirst);
+    final title =
+        isFirst ? 'Successfull First Calls' : 'Successfull Last Calls';
+    final timeFormat = DateFormat('MMM d, yyyy h:mm a');
+
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) {
+        final screenSize = MediaQuery.of(dialogContext).size;
+        final desiredWidth = screenSize.width * 0.4;
+        final dialogWidth = desiredWidth.clamp(340.0, 860.0).toDouble();
+
+        return Dialog(
+          child: ConstrainedBox(
+            constraints: BoxConstraints(
+              maxWidth: dialogWidth,
+              maxHeight: screenSize.height * 0.75,
+            ),
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    style: Theme.of(dialogContext).textTheme.titleMedium
+                        ?.copyWith(fontWeight: FontWeight.w700),
+                  ),
+                  const SizedBox(height: 12),
+                  Expanded(
+                    child: entries.isEmpty
+                        ? const Center(child: Text('No successful calls yet.'))
+                        : ListView.separated(
+                            itemCount: entries.length,
+                          separatorBuilder: (context, index) =>
+                                const SizedBox(height: 8),
+                            itemBuilder: (context, index) {
+                              final entry = entries[index];
+                              final label =
+                                  isFirst ? 'First Call' : 'Last Call';
+
+                              return Card(
+                                margin: EdgeInsets.zero,
+                                child: Padding(
+                                  padding: const EdgeInsets.all(12),
+                                  child: Row(
+                                    children: [
+                                      Expanded(
+                                        child: Column(
+                                          crossAxisAlignment:
+                                              CrossAxisAlignment.start,
+                                          children: [
+                                            Text(
+                                              entry.salesmanName,
+                                              style: const TextStyle(
+                                                fontWeight: FontWeight.w700,
+                                              ),
+                                            ),
+                                            const SizedBox(height: 4),
+                                            Text(
+                                              '$label: ${timeFormat.format(entry.timestamp)}',
+                                              style: TextStyle(
+                                                color: Colors.grey.shade800,
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                      const SizedBox(width: 8),
+                                      OutlinedButton(
+                                        onPressed: entry.imageUrl.isEmpty
+                                            ? null
+                                            : () => _showCallImagePreview(
+                                                dialogContext,
+                                                imageUrl: entry.imageUrl,
+                                                title:
+                                                    '${entry.salesmanName} - $label',
+                                              ),
+                                        child: Text(
+                                          entry.imageUrl.isEmpty
+                                              ? 'No Image'
+                                              : 'Preview',
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              );
+                            },
+                          ),
+                  ),
+                  const SizedBox(height: 10),
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: TextButton(
+                      onPressed: () => Navigator.of(dialogContext).pop(),
+                      child: const Text('Close'),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
   Widget _buildWideCard(BuildContext context) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -492,10 +667,18 @@ class _SupervisorSummaryCard extends StatelessWidget {
                 _MetricCell(
                   label: 'Successful First Calls',
                   value: '$_firstCallSuccessCount',
+                  onTap: () => _showSuccessfulCallsDialog(
+                    context,
+                    isFirst: true,
+                  ),
                 ),
                 _MetricCell(
                   label: 'Successful Last Calls',
                   value: '$_lastCallSuccessCount',
+                  onTap: () => _showSuccessfulCallsDialog(
+                    context,
+                    isFirst: false,
+                  ),
                 ),
               ],
             );
@@ -674,12 +857,13 @@ class _CardModeToggle extends StatelessWidget {
 class _MetricCell extends StatelessWidget {
   final String label;
   final String value;
+  final VoidCallback? onTap;
 
-  const _MetricCell({required this.label, required this.value});
+  const _MetricCell({required this.label, required this.value, this.onTap});
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
+    final content = Padding(
       padding: const EdgeInsets.symmetric(horizontal: 8),
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
@@ -701,6 +885,16 @@ class _MetricCell extends StatelessWidget {
           ),
         ],
       ),
+    );
+
+    if (onTap == null) {
+      return content;
+    }
+
+    return InkWell(
+      borderRadius: BorderRadius.circular(10),
+      onTap: onTap,
+      child: content,
     );
   }
 }
@@ -789,5 +983,17 @@ class _SupervisorSummary {
   const _SupervisorSummary({
     required this.supervisor,
     required this.assignedSalesmen,
+  });
+}
+
+class _SuccessfulCallEntry {
+  final String salesmanName;
+  final DateTime timestamp;
+  final String imageUrl;
+
+  const _SuccessfulCallEntry({
+    required this.salesmanName,
+    required this.timestamp,
+    required this.imageUrl,
   });
 }
