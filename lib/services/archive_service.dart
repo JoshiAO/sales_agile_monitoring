@@ -1,5 +1,7 @@
 import 'dart:io';
 import 'dart:typed_data';
+import 'package:flutter/foundation.dart';
+import 'package:compact_sales_monitoring/services/web_downloader.dart';
 
 import 'package:archive/archive.dart';
 import 'package:excel/excel.dart';
@@ -117,18 +119,42 @@ class ArchiveService {
       ),
     );
 
+    final encodedZip = ZipEncoder().encode(archive);
+    if (encodedZip == null) {
+      throw StateError('Unable to generate archive zip file.');
+    }
+
+    final zipName = 'archive_$start${start == end ? '' : '_to_$end'}.zip';
+
+    if (kIsWeb) {
+      // Trigger browser download for web builds.
+      downloadFile(zipName, encodedZip);
+      // No filesystem path available on web; return a friendly placeholder.
+      final dateFolders = routes
+          .map((route) => route.date)
+          .toSet()
+          .toList()
+        ..sort();
+
+      return ArchiveResult(
+        zipPath: 'Downloaded to browser',
+        zipFileName: zipName,
+        workbookFileName: workbookName,
+        startDate: start,
+        endDate: end,
+        routeCount: routes.length,
+        imageCount: imageCount,
+        dateFolders: dateFolders,
+      );
+    }
+
     final outputDir = await _resolveArchiveDirectory();
     if (!await outputDir.exists()) {
       await outputDir.create(recursive: true);
     }
 
-    final zipName = 'archive_$start${start == end ? '' : '_to_$end'}.zip';
     final zipPath = '${outputDir.path}/$zipName';
     final zipFile = File(zipPath);
-    final encodedZip = ZipEncoder().encode(archive);
-    if (encodedZip == null) {
-      throw StateError('Unable to generate archive zip file.');
-    }
     await zipFile.writeAsBytes(encodedZip, flush: true);
 
     for (final imageUrl in exportedImageUrls) {
