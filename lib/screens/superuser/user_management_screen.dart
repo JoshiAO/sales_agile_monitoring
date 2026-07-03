@@ -932,6 +932,10 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
           ? const Center(child: CircularProgressIndicator())
           : Builder(
               builder: (context) {
+                final managersOnly = _allUsers
+                    .where((u) => u.role == UserRole.manager)
+                    .toList()
+                  ..sort(_compareByEmailCode);
                 final supervisorsOnly = _allUsers
                     .where((u) => u.role == UserRole.supervisor)
                     .toList()
@@ -974,6 +978,8 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
                     return ListView(
                       padding: const EdgeInsets.fromLTRB(16, 8, 16, 80),
                       children: [
+                        _buildSectionHeader('Managers'),
+                        buildSectionGrid(managersOnly),
                         _buildSectionHeader('Supervisors'),
                         buildSectionGrid(supervisorsOnly),
                         _buildSectionHeader(
