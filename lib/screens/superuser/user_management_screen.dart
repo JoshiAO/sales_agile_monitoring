@@ -37,11 +37,16 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
           context.read<AuthProvider>().currentUser?.companyId;
 
       final List<AppUser> superusers;
+      final List<AppUser> managers;
       final List<AppUser> salesmen;
 
       if (companyId != null && companyId.isNotEmpty) {
         superusers = await _firestoreService.getUsersByRoleAndCompany(
           UserRole.superuser,
+          companyId,
+        );
+        managers = await _firestoreService.getUsersByRoleAndCompany(
+          UserRole.manager,
           companyId,
         );
         _supervisors = await _firestoreService.getUsersByRoleAndCompany(
@@ -56,6 +61,9 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
         superusers = await _firestoreService.getUsersByRole(
           UserRole.superuser,
         );
+        managers = await _firestoreService.getUsersByRole(
+          UserRole.manager,
+        );
         _supervisors = await _firestoreService.getUsersByRole(
           UserRole.supervisor,
         );
@@ -64,7 +72,7 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
         );
       }
 
-      _allUsers = [...superusers, ..._supervisors, ...salesmen];
+      _allUsers = [...superusers, ...managers, ..._supervisors, ...salesmen];
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(
@@ -83,6 +91,8 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
         return 'Salesman';
       case UserRole.supervisor:
         return 'Supervisor';
+      case UserRole.manager:
+        return 'Manager';
       case UserRole.superuser:
         return 'Superuser';
     }
@@ -181,11 +191,13 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
 
     final roleBg = switch (user.role) {
       UserRole.superuser => Colors.purple.shade50,
+      UserRole.manager => Colors.teal.shade50,
       UserRole.supervisor => Colors.blue.shade50,
       UserRole.salesman => Colors.grey.shade100,
     };
     final roleFg = switch (user.role) {
       UserRole.superuser => Colors.purple.shade700,
+      UserRole.manager => Colors.teal.shade700,
       UserRole.supervisor => Colors.blue.shade700,
       UserRole.salesman => Colors.grey.shade700,
     };
@@ -532,7 +544,7 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
                   DropdownButton<UserRole>(
                     value: selectedRole,
                     isExpanded: true,
-                    items: [UserRole.salesman, UserRole.supervisor].map((role) {
+                    items: [UserRole.salesman, UserRole.supervisor, UserRole.manager].map((role) {
                       return DropdownMenuItem(
                         value: role,
                         child: Text(_roleLabel(role)),
@@ -704,7 +716,7 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
                   DropdownButton<UserRole>(
                     value: selectedRole,
                     isExpanded: true,
-                    items: [UserRole.salesman, UserRole.supervisor].map((role) {
+                    items: [UserRole.salesman, UserRole.supervisor, UserRole.manager].map((role) {
                       return DropdownMenuItem(
                         value: role,
                         child: Text(_roleLabel(role)),

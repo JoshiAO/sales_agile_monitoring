@@ -1,4 +1,4 @@
-enum UserRole { salesman, supervisor, superuser }
+enum UserRole { salesman, supervisor, superuser, manager }
 
 DateTime? _dateTimeFromDynamic(dynamic value) {
   if (value == null) return null;
@@ -144,6 +144,8 @@ UserRole _roleFromString(String role) {
       return UserRole.supervisor;
     case 'superuser':
       return UserRole.superuser;
+    case 'manager':
+      return UserRole.manager;
     default:
       return UserRole.salesman;
   }
@@ -157,5 +159,7 @@ String _roleToString(UserRole role) {
       return 'supervisor';
     case UserRole.superuser:
       return 'superuser';
+    case UserRole.manager:
+      return 'manager';
   }
 }

@@ -19,6 +19,14 @@ service cloud.firestore {
       return signedIn() && myRole() == 'superuser';
     }
 
+    function isManager() {
+      return signedIn() && myRole() == 'manager';
+    }
+
+    function isSuperuserOrManager() {
+      return isSuperuser() || isManager();
+    }
+
     function isSupervisor() {
       return signedIn() && myRole() == 'supervisor';
     }
@@ -44,7 +52,7 @@ service cloud.firestore {
     match /users/{userId} {
       allow read: if signedIn() && (
         isOwner(userId) ||
-        isSuperuser() ||
+        isSuperuserOrManager() ||
         (isSupervisor() && resource.data.supervisorId == request.auth.uid)
       );
       allow update: if signedIn() && (isOwner(userId) || isSuperuser());
@@ -53,12 +61,12 @@ service cloud.firestore {
       match /notifications/{notificationId} {
         allow read: if signedIn() && (
           isOwner(userId) ||
-          isSuperuser() ||
+          isSuperuserOrManager() ||
           isSupervisorOf(userId)
         );
-        allow create: if signedIn() && (isSuperuser() || isSupervisorOf(userId));
-        allow update: if signedIn() && (isOwner(userId) || isSuperuser() || isSupervisorOf(userId));
-        allow delete: if signedIn() && (isSuperuser() || isSupervisorOf(userId));
+        allow create: if signedIn() && (isSuperuserOrManager() || isSupervisorOf(userId));
+        allow update: if signedIn() && (isOwner(userId) || isSuperuserOrManager() || isSupervisorOf(userId));
+        allow delete: if signedIn() && (isSuperuserOrManager() || isSupervisorOf(userId));
       }
     }
 
@@ -66,9 +74,9 @@ service cloud.firestore {
       allow read: if signedIn();
 
       allow create: if signedIn() && (
-        (isSuperuser() &&
+        (isSuperuserOrManager() &&
           request.resource.data.createdBy == request.auth.uid &&
-          request.resource.data.creatorRole == 'superuser' &&
+          (request.resource.data.creatorRole == 'superuser' || request.resource.data.creatorRole == 'manager') &&
           isValidAnnouncementWindow(request.resource.data)) ||
         (isSupervisor() &&
           request.resource.data.createdBy == request.auth.uid &&
@@ -77,11 +85,11 @@ service cloud.firestore {
       );
 
       allow delete: if signedIn() && (
-        isSuperuser() || resource.data.createdBy == request.auth.uid
+        isSuperuserOrManager() || resource.data.createdBy == request.auth.uid
       );
 
       allow update: if signedIn() &&
-        (isSuperuser() || resource.data.createdBy == request.auth.uid) &&
+        (isSuperuserOrManager() || resource.data.createdBy == request.auth.uid) &&
         isValidAnnouncementWindow(request.resource.data);
 
       match /likes/{userId} {
@@ -98,12 +106,12 @@ service cloud.firestore {
     match /routes/{routeId} {
       allow create: if signedIn();
       allow read: if signedIn() && (
-        isSuperuser() ||
+        isSuperuserOrManager() ||
         resource.data.salesmanId == request.auth.uid ||
         resource.data.supervisorId == request.auth.uid
       );
       allow update: if signedIn() && (
-        isSuperuser() ||
+        isSuperuserOrManager() ||
         resource.data.salesmanId == request.auth.uid ||
         resource.data.supervisorId == request.auth.uid
       );
@@ -112,13 +120,13 @@ service cloud.firestore {
 
     match /agile_targets/{targetId} {
       allow read: if signedIn() && (
-        isSuperuser() ||
+        isSuperuserOrManager() ||
         isOwnedAgileDoc(targetId) ||
         (resource != null && resource.data.supervisorId == request.auth.uid)
       );
 
       allow create, update: if signedIn() && (
-        isSuperuser() ||
+        isSuperuserOrManager() ||
         (isSupervisor() && request.resource.data.supervisorId == request.auth.uid)
       );
 
@@ -127,13 +135,13 @@ service cloud.firestore {
 
     match /agile_submissions/{submissionId} {
       allow read: if signedIn() && (
-        isSuperuser() ||
+        isSuperuserOrManager() ||
         isOwnedAgileDoc(submissionId) ||
         (resource != null && resource.data.supervisorId == request.auth.uid)
       );
 
       allow create, update: if signedIn() && (
-        isSuperuser() ||
+        isSuperuserOrManager() ||
         request.resource.data.salesmanId == request.auth.uid
       );
 

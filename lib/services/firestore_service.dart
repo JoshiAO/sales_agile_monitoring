@@ -1091,5 +1091,7 @@ String _roleToString(UserRole role) {
       return 'supervisor';
     case UserRole.superuser:
       return 'superuser';
+    case UserRole.manager:
+      return 'manager';
   }
 }
