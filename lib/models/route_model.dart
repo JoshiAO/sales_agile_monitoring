@@ -186,10 +186,36 @@ class SalesRoute {
     return ordered;
   }
 
-  // Great-circle estimate between first and last call points.
-  double get estimatedDistanceKm => hasFirstCall && hasLastCall
-      ? _haversineKm(first.lat, first.lon, last.lat, last.lon)
-      : 0.0;
+  // Point-to-point great-circle distance sum including first call, checkpoints, and last call (if any).
+  double get estimatedDistanceKm {
+    if (!hasFirstCall) return 0.0;
+
+    double totalDistance = 0.0;
+    
+    // Build a sequential list of coordinates
+    final List<Map<String, double>> pathPoints = [];
+    pathPoints.add({'lat': first.lat, 'lon': first.lon});
+    
+    for (final cp in sortedCheckpoints) {
+      pathPoints.add({'lat': cp.lat, 'lon': cp.lon});
+    }
+    
+    if (hasLastCall) {
+      pathPoints.add({'lat': last.lat, 'lon': last.lon});
+    }
+    
+    // Sum the distance between consecutive points
+    for (int i = 0; i < pathPoints.length - 1; i++) {
+      totalDistance += _haversineKm(
+        pathPoints[i]['lat']!,
+        pathPoints[i]['lon']!,
+        pathPoints[i + 1]['lat']!,
+        pathPoints[i + 1]['lon']!,
+      );
+    }
+    
+    return totalDistance;
+  }
 
   // Prefer stored distance when available, otherwise use computed estimate.
   double get distanceKm => distance ?? estimatedDistanceKm;
