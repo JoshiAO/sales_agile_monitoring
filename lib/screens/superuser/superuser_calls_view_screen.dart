@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:url_launcher/url_launcher_string.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:compact_sales_monitoring/models/route_model.dart';
 import 'package:compact_sales_monitoring/models/user_model.dart';
 import 'package:compact_sales_monitoring/services/firestore_service.dart';
@@ -305,6 +306,13 @@ class _SalesmanCallCard extends StatelessWidget {
               overflow: TextOverflow.ellipsis,
               style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16),
             ),
+            if (name.toLowerCase() != salesman.email.toLowerCase())
+              Text(
+                salesman.email,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(color: Colors.grey.shade600, fontSize: 12),
+              ),
             const SizedBox(height: 4),
             Text(
               'Distance Traveled: $distanceText',
@@ -320,6 +328,7 @@ class _SalesmanCallCard extends StatelessWidget {
                       timeText: (route != null && route!.hasFirstCall) ? timeFormat.format(route!.first.timestamp) : '--',
                       hasCall: route != null && route!.hasFirstCall,
                       onMapTap: (route != null && route!.hasFirstCall) ? () => _launchMap(route!.first.lat, route!.first.lon) : null,
+                      imageUrl: (route != null && route!.hasFirstCall) ? route!.first.imageUrl : null,
                     ),
                   ),
                   const VerticalDivider(width: 16),
@@ -329,6 +338,7 @@ class _SalesmanCallCard extends StatelessWidget {
                       timeText: (route != null && route!.hasLastCall) ? timeFormat.format(route!.last.timestamp) : '--',
                       hasCall: route != null && route!.hasLastCall,
                       onMapTap: (route != null && route!.hasLastCall) ? () => _launchMap(route!.last.lat, route!.last.lon) : null,
+                      imageUrl: (route != null && route!.hasLastCall) ? route!.last.imageUrl : null,
                     ),
                   ),
                 ],
@@ -346,13 +356,54 @@ class _CallInfoBlock extends StatelessWidget {
   final String timeText;
   final bool hasCall;
   final VoidCallback? onMapTap;
+  final String? imageUrl;
 
   const _CallInfoBlock({
     required this.title,
     required this.timeText,
     required this.hasCall,
     this.onMapTap,
+    this.imageUrl,
   });
+
+  void _showImageDialog(BuildContext context, String url) {
+    if (url.isEmpty) return;
+    showDialog(
+      context: context,
+      builder: (context) => Dialog(
+        clipBehavior: Clip.antiAlias,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        child: Stack(
+          children: [
+            CachedNetworkImage(
+              imageUrl: url,
+              fit: BoxFit.contain,
+              placeholder: (context, url) => const Padding(
+                padding: EdgeInsets.all(48.0),
+                child: CircularProgressIndicator(),
+              ),
+              errorWidget: (context, url, error) => const Padding(
+                padding: EdgeInsets.all(48.0),
+                child: Icon(Icons.broken_image_outlined, color: Colors.red, size: 48),
+              ),
+            ),
+            Positioned(
+              right: 8,
+              top: 8,
+              child: IconButton(
+                icon: const Icon(
+                  Icons.close,
+                  color: Colors.white,
+                  shadows: [Shadow(color: Colors.black54, blurRadius: 4)],
+                ),
+                onPressed: () => Navigator.of(context).pop(),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -368,7 +419,16 @@ class _CallInfoBlock extends StatelessWidget {
                 style: TextStyle(fontSize: 12, color: Colors.grey.shade700, fontWeight: FontWeight.w600),
               ),
             ),
-            if (hasCall)
+            if (hasCall) ...[
+              if (imageUrl != null && imageUrl!.isNotEmpty)
+                InkWell(
+                  onTap: () => _showImageDialog(context, imageUrl!),
+                  borderRadius: BorderRadius.circular(50),
+                  child: Padding(
+                    padding: const EdgeInsets.all(4.0),
+                    child: Icon(Icons.image_outlined, size: 16, color: Theme.of(context).colorScheme.primary),
+                  ),
+                ),
               InkWell(
                 onTap: onMapTap,
                 borderRadius: BorderRadius.circular(50),
@@ -377,6 +437,7 @@ class _CallInfoBlock extends StatelessWidget {
                   child: Icon(Icons.map, size: 16, color: Theme.of(context).colorScheme.primary),
                 ),
               ),
+            ],
           ],
         ),
         const SizedBox(height: 4),
