@@ -6,10 +6,11 @@ import 'package:compact_sales_monitoring/models/agile_model.dart';
 import 'package:compact_sales_monitoring/models/route_model.dart';
 import 'package:compact_sales_monitoring/models/user_model.dart';
 import 'package:compact_sales_monitoring/providers/auth_provider.dart';
+import 'package:compact_sales_monitoring/screens/superuser/superuser_team_preview_screen.dart';
+import 'package:compact_sales_monitoring/screens/superuser/superuser_calls_view_screen.dart';
 import 'package:compact_sales_monitoring/services/firestore_service.dart';
 import 'package:compact_sales_monitoring/widgets/date_selector_widget.dart';
 import 'package:compact_sales_monitoring/widgets/loading_skeletons.dart';
-import 'package:compact_sales_monitoring/screens/superuser/superuser_team_preview_screen.dart';
 
 enum _SuperuserCardMode { wide, compact }
 
@@ -148,6 +149,21 @@ class _SuperuserHomeScreenState extends State<SuperuserHomeScreen> {
       context,
       MaterialPageRoute(
         builder: (_) => SuperuserTeamPreviewScreen(
+          supervisor: supervisor,
+          selectedDate: selectedDate,
+        ),
+      ),
+    );
+  }
+
+  void _openCallsPreview({
+    required AppUser supervisor,
+    required DateTime selectedDate,
+  }) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => SuperuserCallsViewScreen(
           supervisor: supervisor,
           selectedDate: selectedDate,
         ),
@@ -303,6 +319,12 @@ class _SuperuserHomeScreenState extends State<SuperuserHomeScreen> {
                                 selectedDate: data.selectedDate,
                               );
                             },
+                            onPreviewCalls: () {
+                              _openCallsPreview(
+                                supervisor: summary.supervisor,
+                                selectedDate: data.selectedDate,
+                              );
+                            },
                           ),
                         );
                       }).toList(),
@@ -324,6 +346,7 @@ class _SupervisorSummaryCard extends StatelessWidget {
   final Map<String, SalesRoute> routesBySalesman;
   final Map<String, AgileSubmission> submissionsBySalesman;
   final VoidCallback onPreviewTeam;
+  final VoidCallback onPreviewCalls;
 
   const _SupervisorSummaryCard({
     required this.summary,
@@ -331,6 +354,7 @@ class _SupervisorSummaryCard extends StatelessWidget {
     required this.routesBySalesman,
     required this.submissionsBySalesman,
     required this.onPreviewTeam,
+    required this.onPreviewCalls,
   });
 
   String get _displayName {
@@ -707,9 +731,19 @@ class _SupervisorSummaryCard extends StatelessWidget {
         const SizedBox(height: 12),
         Align(
           alignment: Alignment.centerLeft,
-          child: OutlinedButton(
-            onPressed: onPreviewTeam,
-            child: const Text('Team Preview'),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              OutlinedButton(
+                onPressed: onPreviewTeam,
+                child: const Text('Team Preview'),
+              ),
+              const SizedBox(width: 10),
+              OutlinedButton(
+                onPressed: onPreviewCalls,
+                child: const Text('Calls Preview'),
+              ),
+            ],
           ),
         ),
       ],
@@ -717,68 +751,82 @@ class _SupervisorSummaryCard extends StatelessWidget {
   }
 
   Widget _buildCompactCard(BuildContext context) {
-    return InkWell(
-      borderRadius: BorderRadius.circular(12),
-      onTap: onPreviewTeam,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            _displayName,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: Theme.of(
-              context,
-            ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700),
-          ),
-          const SizedBox(height: 10),
-          Row(
-            children: [
-              Expanded(
-                flex: 2,
-                child: _CompactMetric(
-                  icon: Icons.groups_outlined,
-                  value: '$_teamSize',
-                ),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          _displayName,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: Theme.of(
+            context,
+          ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700),
+        ),
+        const SizedBox(height: 10),
+        Row(
+          children: [
+            Expanded(
+              flex: 2,
+              child: _CompactMetric(
+                icon: Icons.groups_outlined,
+                value: '$_teamSize',
               ),
-              const SizedBox(width: 8),
-              Expanded(
-                flex: 2,
-                child: _CompactMetric(
-                  icon: Icons.outlined_flag,
-                  iconColor: Colors.green.shade700,
-                  value: '$_firstCallSuccessCount',
-                ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              flex: 2,
+              child: _CompactMetric(
+                icon: Icons.outlined_flag,
+                iconColor: Colors.green.shade700,
+                value: '$_firstCallSuccessCount',
               ),
-              const SizedBox(width: 8),
-              Expanded(
-                flex: 2,
-                child: _CompactMetric(
-                  icon: Icons.flag,
-                  iconColor: Colors.red.shade700,
-                  value: '$_lastCallSuccessCount',
-                ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              flex: 2,
+              child: _CompactMetric(
+                icon: Icons.flag,
+                iconColor: Colors.red.shade700,
+                value: '$_lastCallSuccessCount',
               ),
-              const SizedBox(width: 8),
-              Expanded(
-                flex: 3,
-                child: _CompactMetric(
-                  icon: Icons.trending_up_outlined,
-                  value: 'PC $_actualProductiveCallsTotal',
-                ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              flex: 3,
+              child: _CompactMetric(
+                icon: Icons.trending_up_outlined,
+                value: 'PC $_actualProductiveCallsTotal',
               ),
-              const SizedBox(width: 8),
-              Expanded(
-                flex: 3,
-                child: _CompactMetric(
-                  icon: Icons.payments_outlined,
-                  value: 'STT $_actualSttCompactText',
-                ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              flex: 3,
+              child: _CompactMetric(
+                icon: Icons.payments_outlined,
+                value: 'STT $_actualSttCompactText',
               ),
-            ],
-          ),
-        ],
-      ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
+        Row(
+          children: [
+            Expanded(
+              child: OutlinedButton(
+                onPressed: onPreviewTeam,
+                child: const Text('Team Preview'),
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: OutlinedButton(
+                onPressed: onPreviewCalls,
+                child: const Text('Calls Preview'),
+              ),
+            ),
+          ],
+        ),
+      ],
     );
   }
 
