@@ -7,10 +7,14 @@ class VersionProvider with ChangeNotifier {
   bool _isChecking = true;
   bool _isOutdated = false;
   String? _downloadUrl;
+  String? _currentVersion;
+  String? _latestVersion;
 
   bool get isChecking => _isChecking;
   bool get isOutdated => _isOutdated;
   String? get downloadUrl => _downloadUrl;
+  String? get currentVersion => _currentVersion;
+  String? get latestVersion => _latestVersion;
 
   Future<void> checkVersion() async {
     if (kIsWeb) {
@@ -21,14 +25,14 @@ class VersionProvider with ChangeNotifier {
 
     try {
       final packageInfo = await PackageInfo.fromPlatform();
-      final currentVersion = packageInfo.version;
+      _currentVersion = packageInfo.version;
 
       final config = await _firestoreService.getAppConfig();
       if (config != null) {
-        final latestVersion = config['latest_version'] as String?;
+        _latestVersion = config['latest_version'] as String?;
         final url = config['download_url'] as String?;
 
-        if (latestVersion != null && _isVersionOutdated(currentVersion, latestVersion)) {
+        if (_latestVersion != null && _isVersionOutdated(_currentVersion!, _latestVersion!)) {
           _isOutdated = true;
           _downloadUrl = url;
         }
@@ -44,8 +48,10 @@ class VersionProvider with ChangeNotifier {
   bool _isVersionOutdated(String current, String latest) {
     // Simple semantic versioning check (e.g. 1.0.0 vs 1.1.0)
     try {
-      final currentParts = current.split('.').map(int.parse).toList();
-      final latestParts = latest.split('.').map(int.parse).toList();
+      final currentClean = current.split('+')[0].trim();
+      final latestClean = latest.split('+')[0].trim();
+      final currentParts = currentClean.split('.').map(int.parse).toList();
+      final latestParts = latestClean.split('.').map(int.parse).toList();
 
       for (var i = 0; i < 3; i++) {
         final c = i < currentParts.length ? currentParts[i] : 0;
@@ -55,7 +61,7 @@ class VersionProvider with ChangeNotifier {
       }
     } catch (e) {
       // If parsing fails, do a basic string compare
-      return current != latest;
+      return current.trim() != latest.trim();
     }
     return false;
   }

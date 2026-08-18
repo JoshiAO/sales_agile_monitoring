@@ -1,28 +1,77 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
-import 'package:url_launcher/url_launcher_string.dart';
+import 'package:dio/dio.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:open_filex/open_filex.dart';
 
-class ForceUpdateScreen extends StatelessWidget {
+import 'package:provider/provider.dart';
+import 'package:compact_sales_monitoring/providers/version_provider.dart';
+
+class ForceUpdateScreen extends StatefulWidget {
   final String? downloadUrl;
 
   const ForceUpdateScreen({super.key, this.downloadUrl});
 
-  Future<void> _launchUrl(BuildContext context) async {
-    if (downloadUrl == null || downloadUrl!.isEmpty) return;
-    
+  @override
+  State<ForceUpdateScreen> createState() => _ForceUpdateScreenState();
+}
+
+class _ForceUpdateScreenState extends State<ForceUpdateScreen> {
+  bool _isDownloading = false;
+  double _downloadProgress = 0.0;
+  String _statusText = 'A new version of the Agile App is available. You must update to continue using the application.';
+
+  Future<void> _downloadAndInstall() async {
+    if (widget.downloadUrl == null || widget.downloadUrl!.isEmpty) return;
+
+    setState(() {
+      _isDownloading = true;
+      _downloadProgress = 0.0;
+      _statusText = 'Downloading update...';
+    });
+
     try {
-      if (await canLaunchUrlString(downloadUrl!)) {
-        await launchUrlString(downloadUrl!, mode: LaunchMode.externalApplication);
-      } else {
-        if (context.mounted) {
+      final dio = Dio();
+      final dir = await getTemporaryDirectory();
+      final savePath = '${dir.path}/app_update.apk';
+
+      await dio.download(
+        widget.downloadUrl!,
+        savePath,
+        onReceiveProgress: (received, total) {
+          if (total != -1) {
+            setState(() {
+              _downloadProgress = received / total;
+            });
+          }
+        },
+      );
+
+      setState(() {
+        _statusText = 'Download complete! Launching installer...';
+      });
+
+      final result = await OpenFilex.open(savePath);
+      
+      if (result.type != ResultType.done) {
+        if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Could not open the download link.')),
+            SnackBar(content: Text('Failed to open installer: ${result.message}')),
           );
+          setState(() {
+            _isDownloading = false;
+            _statusText = 'Failed to install. Please try again.';
+          });
         }
       }
     } catch (e) {
-      if (context.mounted) {
+      if (mounted) {
+        setState(() {
+          _isDownloading = false;
+          _statusText = 'Download failed. Please check your connection and try again.';
+        });
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error opening link: $e')),
+          SnackBar(content: Text('Error: $e')),
         );
       }
     }
@@ -44,21 +93,47 @@ class ForceUpdateScreen extends StatelessWidget {
                 style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
               ),
               const SizedBox(height: 16),
-              const Text(
-                'A new version of the Agile App is available. You must update to continue using the application.',
-                textAlign: TextAlign.center,
-                style: TextStyle(fontSize: 16, color: Colors.grey),
-              ),
-              const SizedBox(height: 32),
-              SizedBox(
-                width: 200,
-                height: 50,
-                child: FilledButton.icon(
-                  onPressed: () => _launchUrl(context),
-                  icon: const Icon(Icons.download),
-                  label: const Text('Download Update'),
+              Consumer<VersionProvider>(
+                builder: (context, versionProvider, _) => Text(
+                  'Current Version: ${versionProvider.currentVersion ?? "Unknown"} \nLatest Version: ${versionProvider.latestVersion ?? "Unknown"}',
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(fontSize: 14, color: Colors.blue, fontWeight: FontWeight.bold),
                 ),
               ),
+              const SizedBox(height: 16),
+              Text(
+                _statusText,
+                textAlign: TextAlign.center,
+                style: const TextStyle(fontSize: 16, color: Colors.grey),
+              ),
+              const SizedBox(height: 32),
+              if (_isDownloading)
+                Column(
+                  children: [
+                    LinearProgressIndicator(
+                      value: _downloadProgress,
+                      minHeight: 12,
+                      borderRadius: BorderRadius.circular(6),
+                      backgroundColor: Colors.grey[200],
+                      valueColor: const AlwaysStoppedAnimation<Color>(Color(0xFF8F83F0)),
+                    ),
+                    const SizedBox(height: 12),
+                    Text(
+                      '${(_downloadProgress * 100).toStringAsFixed(1)}%',
+                      style: const TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                  ],
+                )
+              else
+                SizedBox(
+                  width: 200,
+                  height: 50,
+                  child: FilledButton.icon(
+                    onPressed: _downloadAndInstall,
+                    icon: const Icon(Icons.download),
+                    label: const Text('Download Update'),
+                  ),
+                ),
             ],
           ),
         ),
