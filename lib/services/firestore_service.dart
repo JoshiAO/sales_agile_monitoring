@@ -1081,6 +1081,23 @@ class FirestoreService {
   Future<void> markAllSalesmanNotificationsRead({required String uid}) async {
     await markAllUserNotificationsRead(uid: uid);
   }
+  Future<Map<String, dynamic>?> getAppConfig() async {
+    final doc = await _firebaseService.firestore
+        .collection('settings')
+        .doc('app_config')
+        .get();
+    return doc.data();
+  }
+
+  Future<void> updateAppConfig(String latestVersion, String downloadUrl) async {
+    await _firebaseService.firestore
+        .collection('settings')
+        .doc('app_config')
+        .set({
+      'latest_version': latestVersion,
+      'download_url': downloadUrl,
+    });
+  }
 }
 
 String _roleToString(UserRole role) {

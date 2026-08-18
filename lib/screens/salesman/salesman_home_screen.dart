@@ -20,6 +20,8 @@ import 'package:compact_sales_monitoring/services/checkpoint_queue_service.dart'
 import 'package:compact_sales_monitoring/services/location_service.dart';
 import 'package:compact_sales_monitoring/services/storage_service.dart';
 import 'package:compact_sales_monitoring/services/firestore_service.dart';
+import 'package:compact_sales_monitoring/services/telemetry_service.dart';
+import 'package:compact_sales_monitoring/services/background_location_service.dart';
 
 class SalesmanHomeScreen extends StatefulWidget {
   const SalesmanHomeScreen({super.key});
@@ -503,8 +505,7 @@ class _SalesmanHomeScreenState extends State<SalesmanHomeScreen>
         _todayRouteId != null && _firstPoint != null && _lastPoint == null;
 
     if (!shouldTrack) {
-      await _locationSubscription?.cancel();
-      _locationSubscription = null;
+      await BackgroundLocationService.stopTracking();
       _lastCheckpointTime = null;
       _lastCheckpointLat = null;
       _lastCheckpointLon = null;
@@ -518,95 +519,13 @@ class _SalesmanHomeScreenState extends State<SalesmanHomeScreen>
       _lastCheckpointLon = _firstPoint!.lon;
     }
 
-    if (_locationSubscription != null) {
-      return;
-    }
-
-    // Request background location permission so the foreground service
-    // can continue reporting position when the screen is off.
     final bgStatus = await Permission.locationAlways.request();
-    if (!bgStatus.isGranted) {
-      // Fall back to foreground-only stream; checkpoints will still work
-      // while the screen is on.
-    }
-
-    const notificationConfig = geo.ForegroundNotificationConfig(
-      notificationText: 'Tracking your sales route in the background.',
-      notificationTitle: 'Route Tracker Active',
-      enableWakeLock: true,
-    );
-
-    final stream = geo.Geolocator.getPositionStream(
-      locationSettings: geo.AndroidSettings(
-        accuracy: geo.LocationAccuracy.high,
-        distanceFilter: 50,
-        forceLocationManager: false,
-        foregroundNotificationConfig: notificationConfig,
-      ),
-    );
-
-    _locationSubscription = stream.listen(_onLocationUpdate, onError: (_) {});
+    // Start tracking in background service
+    await BackgroundLocationService.startTracking(_todayRouteId!, _firstPoint!);
   }
 
   void _onLocationUpdate(geo.Position position) {
-    final routeId = _todayRouteId;
-    if (routeId == null || _firstPoint == null || _lastPoint != null) {
-      return;
-    }
-
-    // Ignore low-confidence fixes to reduce false checkpoint jumps.
-    if (position.accuracy > _maxCheckpointAccuracyMeters) {
-      return;
-    }
-
-    final now = position.timestamp;
-    final prevLat = _lastCheckpointLat;
-    final prevLon = _lastCheckpointLon;
-
-    final timeSinceLast = _lastCheckpointTime == null
-        ? _checkpointMinInterval
-        : now.difference(_lastCheckpointTime!);
-
-    double distanceSinceLast = 0.0;
-    if (prevLat != null && prevLon != null) {
-      distanceSinceLast = geo.Geolocator.distanceBetween(
-        prevLat,
-        prevLon,
-        position.latitude,
-        position.longitude,
-      );
-    }
-
-    final timeThresholdMet = timeSinceLast >= _checkpointMinInterval;
-    final distanceThresholdMet =
-        prevLat != null &&
-        prevLon != null &&
-        distanceSinceLast >= _checkpointMinDistanceMeters;
-
-    if (!timeThresholdMet && !distanceThresholdMet) {
-      return;
-    }
-
-    _lastCheckpointTime = now;
-    _lastCheckpointLat = position.latitude;
-    _lastCheckpointLon = position.longitude;
-
-    final checkpoint = RouteCheckpoint(
-      lat: position.latitude,
-      lon: position.longitude,
-      timestamp: now,
-    );
-
-    _firestoreService
-        .appendRouteCheckpoint(routeId, checkpoint)
-        .then(
-          (_) => _checkpointQueue
-              .flush(_firestoreService.appendRouteCheckpoint)
-              .catchError((_) {}),
-        )
-        .catchError(
-          (_) => _checkpointQueue.enqueue(routeId, checkpoint).catchError((_) {}),
-        );
+    // Deprecated. Logic moved to BackgroundLocationService headless task.
   }
 
   Future<void> _loadTodayRoute() async {
@@ -833,12 +752,23 @@ class _SalesmanHomeScreenState extends State<SalesmanHomeScreen>
         timestamp,
       );
 
+      // Fetch Device Telemetry and Data Usage
+      final telemetry = await TelemetryService.getDeviceTelemetry();
+      final dataUsage = await TelemetryService.getDataUsage();
+
       // Create RoutePoint
       final routePoint = RoutePoint(
         lat: position.latitude,
         lon: position.longitude,
         imageUrl: imageUrl,
         timestamp: locationTime,
+        productName: telemetry['productName'] as String?,
+        modelName: telemetry['modelName'] as String?,
+        serialNumber: telemetry['serialNumber'] as String?,
+        uuid: telemetry['uuid'] as String?,
+        batteryLevel: telemetry['batteryLevel'] as int?,
+        mobileDataUsage: dataUsage['mobile'],
+        wifiDataUsage: dataUsage['wifi'],
       );
 
       // Get existing route for today or create new one

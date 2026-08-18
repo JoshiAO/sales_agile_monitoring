@@ -9,6 +9,7 @@ import 'package:compact_sales_monitoring/screens/superuser/superuser_dashboard.d
 import 'package:compact_sales_monitoring/screens/superuser/superuser_home_screen.dart';
 import 'package:compact_sales_monitoring/screens/superuser/superuser_agile_page.dart';
 import 'package:compact_sales_monitoring/screens/superuser/user_management_screen.dart';
+import 'package:compact_sales_monitoring/screens/superuser/app_version_settings_screen.dart';
 
 class SuperuserTabsScreen extends StatefulWidget {
   const SuperuserTabsScreen({super.key});
@@ -74,6 +75,7 @@ class _SuperuserTabsScreenState extends State<SuperuserTabsScreen> {
       const FeedsPage(),
       AnnouncementPage(key: ValueKey('su-announcement-$_refreshTick')),
       UserManagementScreen(key: ValueKey('su-users-$_refreshTick')),
+      const AppVersionSettingsScreen(key: ValueKey('su-appversion')),
     ];
   }
 
@@ -311,6 +313,11 @@ class _SuperuserTabsScreenState extends State<SuperuserTabsScreen> {
                                     pendingCount,
                                   ),
                                   label: const Text('Users'),
+                                ),
+                                const NavigationRailDestination(
+                                  icon: Icon(Icons.system_update_outlined),
+                                  selectedIcon: Icon(Icons.system_update),
+                                  label: Text('App Version'),
                                 ),
                               ],
                             ),

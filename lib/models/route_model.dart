@@ -6,12 +6,28 @@ class RoutePoint {
   final double lon;
   final String imageUrl;
   final DateTime timestamp;
+  
+  // Telemetry & Data Usage
+  final String? productName;
+  final String? modelName;
+  final String? serialNumber;
+  final String? uuid;
+  final int? batteryLevel;
+  final List<dynamic>? mobileDataUsage;
+  final List<dynamic>? wifiDataUsage;
 
   RoutePoint({
     required this.lat,
     required this.lon,
     required this.imageUrl,
     required this.timestamp,
+    this.productName,
+    this.modelName,
+    this.serialNumber,
+    this.uuid,
+    this.batteryLevel,
+    this.mobileDataUsage,
+    this.wifiDataUsage,
   });
 
   factory RoutePoint.fromMap(Map<String, dynamic> data) {
@@ -20,6 +36,13 @@ class RoutePoint {
       lon: (data['lon'] as num?)?.toDouble() ?? 0.0,
       imageUrl: data['imageUrl'] as String? ?? '',
       timestamp: (data['timestamp'] as Timestamp?)?.toDate() ?? DateTime.now(),
+      productName: data['productName'] as String?,
+      modelName: data['modelName'] as String?,
+      serialNumber: data['serialNumber'] as String?,
+      uuid: data['uuid'] as String?,
+      batteryLevel: data['batteryLevel'] as int?,
+      mobileDataUsage: data['mobileDataUsage'] as List<dynamic>?,
+      wifiDataUsage: data['wifiDataUsage'] as List<dynamic>?,
     );
   }
 
@@ -29,6 +52,13 @@ class RoutePoint {
       'lon': lon,
       'imageUrl': imageUrl,
       'timestamp': timestamp,
+      if (productName != null) 'productName': productName,
+      if (modelName != null) 'modelName': modelName,
+      if (serialNumber != null) 'serialNumber': serialNumber,
+      if (uuid != null) 'uuid': uuid,
+      if (batteryLevel != null) 'batteryLevel': batteryLevel,
+      if (mobileDataUsage != null) 'mobileDataUsage': mobileDataUsage,
+      if (wifiDataUsage != null) 'wifiDataUsage': wifiDataUsage,
     };
   }
 }

@@ -7,6 +7,7 @@ import 'package:compact_sales_monitoring/models/user_model.dart';
 import 'package:compact_sales_monitoring/providers/auth_provider.dart';
 import 'package:compact_sales_monitoring/services/firestore_service.dart';
 import 'package:compact_sales_monitoring/widgets/web_storage_image.dart';
+import 'package:compact_sales_monitoring/widgets/data_usage_modal.dart';
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -453,8 +454,29 @@ class RouteDetailModal extends StatelessWidget {
                       icon: const Icon(Icons.location_on),
                       label: const Text('Maps'),
                     ),
+                    const SizedBox(width: 8),
+                    ElevatedButton.icon(
+                      onPressed: () {
+                        Navigator.pushReplacement(
+                          context,
+                          MaterialPageRoute(builder: (context) => DataUsageModal(point: route.first)),
+                        );
+                      },
+                      icon: const Icon(Icons.data_usage),
+                      label: const Text('Data'),
+                    ),
                   ],
                 ),
+                if (route.first.batteryLevel != null) ...[
+                  const SizedBox(height: 8),
+                  Text('Device Telemetry', style: Theme.of(context).textTheme.bodySmall),
+                  Text(
+                    'Battery: ${route.first.batteryLevel}% • UUID: ${route.first.uuid ?? 'N/A'}\n'
+                    '${route.first.productName ?? 'Unknown'} ${route.first.modelName ?? 'Device'}'
+                    '${route.first.serialNumber != null ? ' • SN: ${route.first.serialNumber}' : ''}',
+                    style: const TextStyle(fontSize: 12, color: Colors.grey),
+                  ),
+                ],
                 if (canApprove &&
                     route.firstRetakeRequested &&
                     !route.firstRetakeApproved)
@@ -543,8 +565,29 @@ class RouteDetailModal extends StatelessWidget {
                         icon: const Icon(Icons.location_on),
                         label: const Text('Maps'),
                       ),
+                      const SizedBox(width: 8),
+                      ElevatedButton.icon(
+                        onPressed: () {
+                          Navigator.pushReplacement(
+                            context,
+                            MaterialPageRoute(builder: (context) => DataUsageModal(point: route.last)),
+                          );
+                        },
+                        icon: const Icon(Icons.data_usage),
+                        label: const Text('Data'),
+                      ),
                     ],
                   ),
+                  if (route.last.batteryLevel != null) ...[
+                    const SizedBox(height: 8),
+                    Text('Device Telemetry', style: Theme.of(context).textTheme.bodySmall),
+                    Text(
+                      'Battery: ${route.last.batteryLevel}% • UUID: ${route.last.uuid ?? 'N/A'}\n'
+                      '${route.last.productName ?? 'Unknown'} ${route.last.modelName ?? 'Device'}'
+                      '${route.last.serialNumber != null ? ' • SN: ${route.last.serialNumber}' : ''}',
+                      style: const TextStyle(fontSize: 12, color: Colors.grey),
+                    ),
+                  ],
                   const SizedBox(height: 12),
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,

@@ -8,6 +8,8 @@ import 'package:compact_sales_monitoring/screens/activation_screen.dart';
 import 'package:compact_sales_monitoring/screens/login_screen.dart';
 import 'package:compact_sales_monitoring/screens/launch_validation_loading_screen.dart';
 import 'package:compact_sales_monitoring/screens/launch_validation_offline_screen.dart';
+import 'package:compact_sales_monitoring/screens/force_update_screen.dart';
+import 'package:compact_sales_monitoring/providers/version_provider.dart';
 import 'package:compact_sales_monitoring/widgets/auth_wave_transition_overlay.dart';
 
 // Salesman screens
@@ -101,9 +103,14 @@ class _AppRouterState extends State<AppRouter> {
   Widget _resolveBase(
     AuthProvider authProvider,
     ActivationProvider activationProvider,
+    VersionProvider versionProvider,
   ) {
-    if (activationProvider.isChecking || authProvider.isInitializing) {
+    if (versionProvider.isChecking || activationProvider.isChecking || authProvider.isInitializing) {
       return const LaunchValidationLoadingScreen();
+    }
+
+    if (versionProvider.isOutdated) {
+      return ForceUpdateScreen(downloadUrl: versionProvider.downloadUrl);
     }
 
     if (authProvider.requiresLaunchRetry) {
@@ -136,9 +143,9 @@ class _AppRouterState extends State<AppRouter> {
 
   @override
   Widget build(BuildContext context) {
-    return Consumer2<AuthProvider, ActivationProvider>(
-      builder: (context, authProvider, activationProvider, _) {
-        final resolvedBase = _resolveBase(authProvider, activationProvider);
+    return Consumer3<AuthProvider, ActivationProvider, VersionProvider>(
+      builder: (context, authProvider, activationProvider, versionProvider, _) {
+        final resolvedBase = _resolveBase(authProvider, activationProvider, versionProvider);
         final Widget base;
 
         if (authProvider.isLoading && activationProvider.isActivated) {

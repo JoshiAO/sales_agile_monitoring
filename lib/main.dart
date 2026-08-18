@@ -5,13 +5,16 @@ import 'package:compact_sales_monitoring/providers/auth_provider.dart';
 import 'package:compact_sales_monitoring/providers/activation_provider.dart';
 import 'package:compact_sales_monitoring/providers/company_branding_provider.dart';
 import 'package:compact_sales_monitoring/providers/route_provider.dart';
+import 'package:compact_sales_monitoring/providers/version_provider.dart';
 import 'package:compact_sales_monitoring/models/company_branding_model.dart';
 import 'package:compact_sales_monitoring/app_router.dart';
 import 'package:compact_sales_monitoring/screens/splash_screen.dart';
+import 'package:compact_sales_monitoring/services/background_location_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await FirebaseService.initializeApp();
+  await BackgroundLocationService.initializeService();
   final initialBranding = await CompanyBrandingProvider.loadLastCachedBranding();
   runApp(MainApp(initialBranding: initialBranding));
 }
@@ -31,6 +34,7 @@ class MainApp extends StatelessWidget {
         ChangeNotifierProvider(create: (_) => ActivationProvider()),
         ChangeNotifierProvider(create: (_) => AuthProvider()),
         ChangeNotifierProvider(create: (_) => RouteProvider()),
+        ChangeNotifierProvider(create: (_) => VersionProvider()),
         ChangeNotifierProxyProvider<AuthProvider, CompanyBrandingProvider>(
           create: (_) => CompanyBrandingProvider(
             initialBranding: initialBranding,
@@ -153,6 +157,7 @@ class _MainAppHomeState extends State<MainAppHome>
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       context.read<ActivationProvider>().initialize();
+      context.read<VersionProvider>().checkVersion();
     });
   }
 

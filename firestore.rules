@@ -103,6 +103,11 @@ service cloud.firestore {
       allow create, update, delete: if isSuperuser();
     }
 
+    match /app_config/{document=**} {
+      allow read: if true;
+      allow write: if isSuperuser();
+    }
+
     match /routes/{routeId} {
       allow create: if signedIn();
       allow read: if signedIn() && (

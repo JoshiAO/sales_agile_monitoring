@@ -8,6 +8,7 @@ import 'package:compact_sales_monitoring/screens/salesman/salesman_home_screen.d
 import 'package:compact_sales_monitoring/screens/shared/feeds_page.dart';
 import 'package:compact_sales_monitoring/services/firestore_service.dart';
 import 'package:compact_sales_monitoring/widgets/agile_call_form_card.dart';
+import 'package:compact_sales_monitoring/services/telemetry_service.dart';
 
 class SalesmanTabsScreen extends StatefulWidget {
   const SalesmanTabsScreen({super.key});
@@ -71,6 +72,7 @@ class _SalesmanTabsScreenState extends State<SalesmanTabsScreen> {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _bindLogoutRequestListener();
+      TelemetryService.requestUsagePermission();
     });
   }
 
