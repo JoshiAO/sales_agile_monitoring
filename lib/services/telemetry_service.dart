@@ -63,6 +63,11 @@ class TelemetryService {
   static Future<bool> requestUsagePermission() async {
     if (kIsWeb || !Platform.isAndroid) return true;
     
+    // Also request phone state permission which is needed for mobile network stats
+    if (!await Permission.phone.isGranted) {
+      await Permission.phone.request();
+    }
+
     // Check if permission is already granted
     final isGranted = await UsageStats.checkUsagePermission();
     if (isGranted ?? false) return true;
@@ -85,19 +90,32 @@ class TelemetryService {
       final now = DateTime.now();
       final startOfDay = DateTime(now.year, now.month, now.day);
 
-      // UsageStats plugin provides NetworkUsageStats.
-      // 0 = Mobile, 1 = WiFi in NetworkStatsManager
-      final mobileStats = await UsageStats.queryNetworkUsageStats(
-        startOfDay,
-        now,
-        networkType: NetworkType.mobile,
-      );
+      // WiFi stats: only requires PACKAGE_USAGE_STATS permission.
+      List<NetworkInfo> wifiStats = [];
+      try {
+        wifiStats = await UsageStats.queryNetworkUsageStats(
+          startOfDay,
+          now,
+          networkType: NetworkType.wifi,
+        );
+      } catch (e) {
+        debugPrint('Failed to get WiFi usage stats: $e');
+      }
 
-      final wifiStats = await UsageStats.queryNetworkUsageStats(
-        startOfDay,
-        now,
-        networkType: NetworkType.wifi,
-      );
+      // Mobile stats: additionally requires READ_PHONE_STATE for subscriberId.
+      List<NetworkInfo> mobileStats = [];
+      final hasPhoneState = await Permission.phone.isGranted;
+      if (hasPhoneState) {
+        try {
+          mobileStats = await UsageStats.queryNetworkUsageStats(
+            startOfDay,
+            now,
+            networkType: NetworkType.mobile,
+          );
+        } catch (e) {
+          debugPrint('Failed to get mobile usage stats: $e');
+        }
+      }
 
       List<Map<String, dynamic>> parseStats(List<NetworkInfo> statsList) {
         final List<Map<String, dynamic>> result = [];

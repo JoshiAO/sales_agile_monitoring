@@ -1,4 +1,5 @@
 import 'dart:math';
+import 'dart:developer' as developer;
 
 import 'package:flutter/material.dart';
 import 'package:compact_sales_monitoring/models/route_model.dart';
@@ -223,7 +224,9 @@ class RouteProvider extends ChangeNotifier {
                 _buildFallbackCachePoints(route),
                 isApproximate: true,
               )
-              .catchError((_) {});
+              .catchError((e) {
+                developer.log('[RouteProvider] Failed to cache fallback polyline for ${route.routeId}: $e', name: 'RouteProvider');
+              });
         }
         continue;
       }
@@ -246,14 +249,18 @@ class RouteProvider extends ChangeNotifier {
                 _buildTimedCachePointsFromPolyline(route, polyline),
                 isApproximate: true,
               )
-              .catchError((_) {});
+              .catchError((e) {
+                developer.log('[RouteProvider] Failed to cache approximate polyline for ${route.routeId}: $e', name: 'RouteProvider');
+              });
         }
       } else {
         // Persist only fully road-aware paths to avoid caching straight fallbacks.
         final cachePoints = _buildTimedCachePointsFromPolyline(route, polyline);
         _firestoreService
             .savePolylineCache(route.routeId, cachePoints, isApproximate: false)
-            .catchError((_) {});
+            .catchError((e) {
+              developer.log('[RouteProvider] Failed to cache road-aware polyline for ${route.routeId}: $e', name: 'RouteProvider');
+            });
       }
     }
   }
@@ -288,7 +295,9 @@ class RouteProvider extends ChangeNotifier {
               route.cachedPolyline,
               isApproximate: isApproximate,
             )
-            .catchError((_) {}),
+            .catchError((e) {
+              developer.log('[RouteProvider] Failed to migrate legacy polyline flag for ${route.routeId}: $e', name: 'RouteProvider');
+            }),
       );
     }
 

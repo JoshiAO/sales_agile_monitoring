@@ -1,8 +1,25 @@
 rules_version = '2';
 service firebase.storage {
   match /b/{bucket}/o {
-    match /{allPaths=**} {
-      allow read, write: if request.auth != null;
+
+    // Profile pictures: each user may only write their own file.
+    match /profile_pictures/{userId}/{file} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null && request.auth.uid == userId;
+    }
+
+    // Route images: each salesman may only write to their own folder.
+    match /route_images/{salesmanId}/{file} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null && request.auth.uid == salesmanId;
+    }
+
+    // Announcement images: any authenticated user can read; only supervisors/managers can write.
+    // Because we can't do role checks in Storage rules without Firestore reads (expensive),
+    // we restrict to authenticated writes and rely on app-level gating.
+    match /announcements/{allPaths=**} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null;
     }
   }
 }

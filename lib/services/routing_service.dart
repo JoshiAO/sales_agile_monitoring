@@ -13,6 +13,16 @@ class RoutingService {
 
   RoutingService._internal();
 
+  // In-memory segment cache: keyed on rounded lat/lon pairs.
+  // Caps at 200 entries to bound memory usage in long sessions.
+  final _segmentCache = <String, List<LatLng>>{};
+  static const _segmentCacheMaxSize = 200;
+
+  String _cacheKey(LatLng start, LatLng end) {
+    String fmt(double v) => v.toStringAsFixed(5);
+    return '${fmt(start.latitude)},${fmt(start.longitude)}-${fmt(end.latitude)},${fmt(end.longitude)}';
+  }
+
   final Dio _dio = Dio(
     BaseOptions(
       connectTimeout: const Duration(seconds: 15),
@@ -28,7 +38,18 @@ class RoutingService {
   // Uses OpenRouteService when an API key is configured.
   // Falls back to OSRM for resilience.
   Future<List<LatLng>> getRoute(LatLng start, LatLng end) async {
+    final key = _cacheKey(start, end);
+    if (_segmentCache.containsKey(key)) {
+      return _segmentCache[key]!;
+    }
     final route = await getRouteForWaypoints([start, end]);
+    if (route.isNotEmpty) {
+      // Evict oldest entry if cache is full.
+      if (_segmentCache.length >= _segmentCacheMaxSize) {
+        _segmentCache.remove(_segmentCache.keys.first);
+      }
+      _segmentCache[key] = route;
+    }
     return route;
   }
 

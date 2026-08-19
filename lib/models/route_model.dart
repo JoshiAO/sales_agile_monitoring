@@ -1,6 +1,34 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'dart:math' as math;
 
+class DataUsageEntry {
+  final String appName;
+  final double usageMB;
+  final double percentage;
+
+  DataUsageEntry({
+    required this.appName,
+    required this.usageMB,
+    required this.percentage,
+  });
+
+  factory DataUsageEntry.fromMap(Map<String, dynamic> data) {
+    return DataUsageEntry(
+      appName: data['appName'] as String? ?? 'Unknown',
+      usageMB: (data['usageMB'] as num?)?.toDouble() ?? 0.0,
+      percentage: (data['index'] as num?)?.toDouble() ?? 0.0,
+    );
+  }
+
+  Map<String, dynamic> toMap() {
+    return {
+      'appName': appName,
+      'usageMB': usageMB,
+      'index': percentage,
+    };
+  }
+}
+
 class RoutePoint {
   final double lat;
   final double lon;
@@ -13,8 +41,8 @@ class RoutePoint {
   final String? serialNumber;
   final String? uuid;
   final int? batteryLevel;
-  final List<dynamic>? mobileDataUsage;
-  final List<dynamic>? wifiDataUsage;
+  final List<DataUsageEntry>? mobileDataUsage;
+  final List<DataUsageEntry>? wifiDataUsage;
 
   RoutePoint({
     required this.lat,
@@ -41,8 +69,12 @@ class RoutePoint {
       serialNumber: data['serialNumber'] as String?,
       uuid: data['uuid'] as String?,
       batteryLevel: data['batteryLevel'] as int?,
-      mobileDataUsage: data['mobileDataUsage'] as List<dynamic>?,
-      wifiDataUsage: data['wifiDataUsage'] as List<dynamic>?,
+      mobileDataUsage: (data['mobileDataUsage'] as List<dynamic>?)
+          ?.map((e) => DataUsageEntry.fromMap(e as Map<String, dynamic>))
+          .toList(),
+      wifiDataUsage: (data['wifiDataUsage'] as List<dynamic>?)
+          ?.map((e) => DataUsageEntry.fromMap(e as Map<String, dynamic>))
+          .toList(),
     );
   }
 
@@ -57,8 +89,10 @@ class RoutePoint {
       if (serialNumber != null) 'serialNumber': serialNumber,
       if (uuid != null) 'uuid': uuid,
       if (batteryLevel != null) 'batteryLevel': batteryLevel,
-      if (mobileDataUsage != null) 'mobileDataUsage': mobileDataUsage,
-      if (wifiDataUsage != null) 'wifiDataUsage': wifiDataUsage,
+      if (mobileDataUsage != null)
+        'mobileDataUsage': mobileDataUsage!.map((e) => e.toMap()).toList(),
+      if (wifiDataUsage != null)
+        'wifiDataUsage': wifiDataUsage!.map((e) => e.toMap()).toList(),
     };
   }
 }

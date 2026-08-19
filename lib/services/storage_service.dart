@@ -5,7 +5,7 @@ import 'package:uuid/uuid.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_storage/firebase_storage.dart'
   show Reference, SettableMetadata;
-import 'firebase_service.dart';
+import 'package:compact_sales_monitoring/services/firebase_service.dart' as app_firebase;
 
 class StorageService {
   static final StorageService _instance = StorageService._internal();
@@ -16,7 +16,7 @@ class StorageService {
 
   StorageService._internal();
 
-  final FirebaseService _firebaseService = FirebaseService();
+  final app_firebase.FirebaseService _firebaseService = app_firebase.FirebaseService();
   static const uuid = Uuid();
 
   Future<String> uploadImage({

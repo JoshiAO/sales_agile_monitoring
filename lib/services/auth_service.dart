@@ -128,9 +128,8 @@ class AuthService {
       // If profile fetch fails after auth succeeds, sign out to avoid a partial session.
       await _firebaseService.auth.signOut();
       throw Exception(_friendlyFirestoreMessage(e));
-    } catch (e) {
-      throw Exception('Login failed. Please try again.');
     }
+    // Any other unexpected error bubbles up naturally.
   }
 
   Future<void> logout() async {

@@ -1,17 +1,18 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
+
 enum UserRole { salesman, supervisor, superuser, manager }
 
 DateTime? _dateTimeFromDynamic(dynamic value) {
   if (value == null) return null;
   if (value is DateTime) return value;
+  if (value is Timestamp) return value.toDate();
   if (value is int) {
     return DateTime.fromMillisecondsSinceEpoch(value);
   }
-
-  try {
-    return (value as dynamic).toDate() as DateTime;
-  } catch (_) {
-    return null;
+  if (value is String) {
+    return DateTime.tryParse(value);
   }
+  return null;
 }
 
 class AppUser {
@@ -57,7 +58,7 @@ class AppUser {
       email: data['email'] as String? ?? '',
       name: data['name'] as String?,
       fsName: data['fsName'] as String?,
-      role: _roleFromString(data['role'] as String? ?? 'salesman'),
+      role: roleFromString(data['role'] as String? ?? 'salesman'),
       active: data['active'] as bool? ?? false,
       supervisorId: data['supervisorId'] as String?,
       profilePic: data['profilePic'] as String?,
@@ -81,7 +82,7 @@ class AppUser {
       'email': email,
       'name': name,
       'fsName': fsName,
-      'role': _roleToString(role),
+      'role': roleToString(role),
       'active': active,
       'supervisorId': supervisorId,
       'profilePic': profilePic,
@@ -136,7 +137,7 @@ class AppUser {
   }
 }
 
-UserRole _roleFromString(String role) {
+UserRole roleFromString(String role) {
   switch (role) {
     case 'salesman':
       return UserRole.salesman;
@@ -151,7 +152,7 @@ UserRole _roleFromString(String role) {
   }
 }
 
-String _roleToString(UserRole role) {
+String roleToString(UserRole role) {
   switch (role) {
     case UserRole.salesman:
       return 'salesman';

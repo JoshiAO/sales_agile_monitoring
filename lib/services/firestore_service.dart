@@ -44,7 +44,7 @@ class FirestoreService {
       'email': email,
       'name': name,
       'fsName': fsName,
-      'role': _roleToString(role),
+      'role': roleToString(role),
       'active': active,
       'supervisorId': supervisorId,
       'profilePic': null,
@@ -90,7 +90,7 @@ class FirestoreService {
   ) async {
     final querySnapshot = await _firebaseService.firestore
         .collection('users')
-        .where('role', isEqualTo: _roleToString(role))
+        .where('role', isEqualTo: roleToString(role))
         .where('company_ID', isEqualTo: companyId)
         .get();
     return querySnapshot.docs
@@ -113,6 +113,21 @@ class FirestoreService {
     String companyId,
     String date,
   ) async {
+    // Direct query using the company_ID field stored on each route document.
+    // New routes include company_ID; legacy routes fall back to the supervisor-lookup path.
+    final directSnapshot = await _firebaseService.firestore
+        .collection('routes')
+        .where('company_ID', isEqualTo: companyId)
+        .where('date', isEqualTo: date)
+        .get();
+
+    if (directSnapshot.docs.isNotEmpty) {
+      return directSnapshot.docs
+          .map((doc) => SalesRoute.fromMap(doc.data(), routeId: doc.id))
+          .toList();
+    }
+
+    // Legacy fallback: fetch via supervisor IDs for routes that predate company_ID.
     final supervisorsSnapshot = await _firebaseService.firestore
         .collection('users')
         .where('company_ID', isEqualTo: companyId)
@@ -202,7 +217,7 @@ class FirestoreService {
   Future<List<AppUser>> getUsersByRole(UserRole role) async {
     final querySnapshot = await _firebaseService.firestore
         .collection('users')
-        .where('role', isEqualTo: _roleToString(role))
+        .where('role', isEqualTo: roleToString(role))
         .get();
 
     return querySnapshot.docs
@@ -242,6 +257,7 @@ class FirestoreService {
     bool hasLastCall = true,
     List<RouteCheckpoint> checkpoints = const [],
     double? distance,
+    String? companyId,
   }) async {
     final routeId = uuid.v4();
 
@@ -257,6 +273,7 @@ class FirestoreService {
           .map((checkpoint) => checkpoint.toMap())
           .toList(),
       'distance': distance,
+      if (companyId != null) 'company_ID': companyId,
       'firstRetakeRequested': false,
       'firstRetakeApproved': false,
       'lastRetakeRequested': false,
@@ -746,7 +763,7 @@ class FirestoreService {
     final announcementData = <String, dynamic>{
       'id': announcementId,
       'createdBy': createdBy,
-      'creatorRole': _roleToString(creatorRole),
+      'creatorRole': roleToString(creatorRole),
       'title': trimmedTitle,
       'message': trimmedMessage,
       'startAt': Timestamp.fromDate(startAt),
@@ -867,15 +884,25 @@ class FirestoreService {
     });
 
     try {
+      // Fetch notification docs for all recipients in parallel (max 10 concurrent).
       final notificationDocs = <QueryDocumentSnapshot<Map<String, dynamic>>>[];
-      for (final recipientId in recipientIds) {
-        final snapshot = await firestore
-            .collection('users')
-            .doc(recipientId)
-            .collection('notifications')
-            .where('announcementId', isEqualTo: announcementId)
-            .get();
-        notificationDocs.addAll(snapshot.docs);
+      final recipientList = recipientIds.toList();
+      for (var i = 0; i < recipientList.length; i += 10) {
+        final chunk = recipientList.sublist(
+          i,
+          (i + 10 > recipientList.length) ? recipientList.length : i + 10,
+        );
+        final snapshots = await Future.wait(
+          chunk.map((recipientId) => firestore
+              .collection('users')
+              .doc(recipientId)
+              .collection('notifications')
+              .where('announcementId', isEqualTo: announcementId)
+              .get()),
+        );
+        for (final snapshot in snapshots) {
+          notificationDocs.addAll(snapshot.docs);
+        }
       }
 
       for (var i = 0; i < notificationDocs.length; i += 400) {
@@ -1061,11 +1088,15 @@ class FirestoreService {
 
     if (unread.docs.isEmpty) return;
 
-    final batch = _firebaseService.firestore.batch();
-    for (final doc in unread.docs) {
-      batch.update(doc.reference, {'readAt': FieldValue.serverTimestamp()});
+    // Chunk into batches of 400 to stay safely under the Firestore 500-write limit.
+    for (var i = 0; i < unread.docs.length; i += 400) {
+      final upper = (i + 400 > unread.docs.length) ? unread.docs.length : i + 400;
+      final batch = _firebaseService.firestore.batch();
+      for (final doc in unread.docs.sublist(i, upper)) {
+        batch.update(doc.reference, {'readAt': FieldValue.serverTimestamp()});
+      }
+      await batch.commit();
     }
-    await batch.commit();
   }
 
   Stream<QuerySnapshot<Map<String, dynamic>>> watchSalesmanNotifications({
@@ -1099,16 +1130,4 @@ class FirestoreService {
     });
   }
 }
-
-String _roleToString(UserRole role) {
-  switch (role) {
-    case UserRole.salesman:
-      return 'salesman';
-    case UserRole.supervisor:
-      return 'supervisor';
-    case UserRole.superuser:
-      return 'superuser';
-    case UserRole.manager:
-      return 'manager';
-  }
-}
+// roleToString is defined in user_model.dart and imported above.

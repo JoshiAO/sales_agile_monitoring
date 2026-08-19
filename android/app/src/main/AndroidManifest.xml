@@ -46,6 +46,11 @@
             android:name="com.baseflow.geolocator.GeolocatorService"
             android:exported="false"
             android:foregroundServiceType="location" />
+        <service
+            android:name="id.flutter.flutter_background_service.BackgroundService"
+            android:exported="false"
+            tools:replace="android:exported"
+            android:foregroundServiceType="location" />
 
         <!-- Don't delete the meta-data below.
              This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->

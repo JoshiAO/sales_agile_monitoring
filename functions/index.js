@@ -1,8 +1,16 @@
-const functions = require('firebase-functions/v1');
+const { onCall, HttpsError } = require('firebase-functions/v2/https');
+const { onDocumentUpdated } = require('firebase-functions/v2/firestore');
+const { setGlobalOptions } = require('firebase-functions/v2');
 const admin = require('firebase-admin');
 const crypto = require('crypto');
 
 admin.initializeApp();
+
+// Set global defaults for all v2 functions
+setGlobalOptions({
+  region: 'us-central1',
+  maxInstances: 10,
+});
 
 const ACTIVATION_PROJECT_ID = 'joshiao-active-projects';
 const ACTIVATION_APP_NAME = 'activation-project';
@@ -98,18 +106,24 @@ async function getCodeDocByRawCode(activationDb, rawCode) {
   };
 }
 
-exports.validateCompanyCode = functions
-  .region('us-central1')
-  .https.onCall(async (data) => {
+exports.validateCompanyCode = onCall(
+  {
+    timeoutSeconds: 30,
+    memory: '256MiB',
+    // Rate-limit: max 5 concurrent calls per instance to mitigate brute-force
+    concurrency: 5,
+  },
+  async (request) => {
+    const data = request.data;
     const rawCode = (data?.companyCode || '').toString().trim().toUpperCase();
 
     // Keep input strict to reduce brute-force attempts and accidental invalid values.
     if (!rawCode || rawCode.length < 6 || rawCode.length > 64) {
-      throw new functions.https.HttpsError('invalid-argument', 'Please enter a valid company code.');
+      throw new HttpsError('invalid-argument', 'Please enter a valid company code.');
     }
 
     if (!/^[A-Z0-9_-]+$/.test(rawCode)) {
-      throw new functions.https.HttpsError('invalid-argument', 'Please enter a valid company code.');
+      throw new HttpsError('invalid-argument', 'Please enter a valid company code.');
     }
 
     try {
@@ -134,21 +148,23 @@ exports.validateCompanyCode = functions
         leaseDurationDays: ACTIVATION_LEASE_DAYS,
       };
     } catch (error) {
-      throw new functions.https.HttpsError('internal', error.message || 'Failed to validate company code.');
+      throw new HttpsError('internal', error.message || 'Failed to validate company code.');
     }
-  });
+  }
+);
 
-exports.refreshActivationLease = functions
-  .region('us-central1')
-  .https.onCall(async (data) => {
+exports.refreshActivationLease = onCall(
+  { timeoutSeconds: 30, memory: '256MiB', concurrency: 5 },
+  async (request) => {
+    const data = request.data;
     const leaseKey = (data?.leaseKey || '').toString().trim();
 
     if (!leaseKey || leaseKey.length < 6 || leaseKey.length > 128) {
-      throw new functions.https.HttpsError('invalid-argument', 'Invalid activation lease key.');
+      throw new HttpsError('invalid-argument', 'Invalid activation lease key.');
     }
 
     if (!/^[A-Za-z0-9_-]+$/.test(leaseKey)) {
-      throw new functions.https.HttpsError('invalid-argument', 'Invalid activation lease key.');
+      throw new HttpsError('invalid-argument', 'Invalid activation lease key.');
     }
 
     try {
@@ -168,31 +184,33 @@ exports.refreshActivationLease = functions
         leaseDurationDays: ACTIVATION_LEASE_DAYS,
       };
     } catch (error) {
-      throw new functions.https.HttpsError('internal', error.message || 'Failed to refresh activation lease.');
+      throw new HttpsError('internal', error.message || 'Failed to refresh activation lease.');
     }
-  });
+  }
+);
 
-exports.adminUpdateUserCredentials = functions
-  .region('us-central1')
-  .https.onCall(async (data, context) => {
-    if (!context.auth?.uid) {
-      throw new functions.https.HttpsError('unauthenticated', 'You must be signed in.');
+exports.adminUpdateUserCredentials = onCall(
+  { timeoutSeconds: 30, memory: '256MiB' },
+  async (request) => {
+    if (!request.auth?.uid) {
+      throw new HttpsError('unauthenticated', 'You must be signed in.');
     }
 
-    const callerUid = context.auth.uid;
+    const callerUid = request.auth.uid;
     const callerDoc = await admin.firestore().collection('users').doc(callerUid).get();
     const callerRole = callerDoc.data()?.role;
 
     if (callerRole !== 'superuser') {
-      throw new functions.https.HttpsError('permission-denied', 'Only superusers can update credentials.');
+      throw new HttpsError('permission-denied', 'Only superusers can update credentials.');
     }
 
+    const data = request.data;
     const uid = (data?.uid || '').toString().trim();
     const email = data?.email == null ? null : data.email.toString().trim().toLowerCase();
     const password = data?.password == null ? null : data.password.toString();
 
     if (!uid) {
-      throw new functions.https.HttpsError('invalid-argument', 'uid is required.');
+      throw new HttpsError('invalid-argument', 'uid is required.');
     }
 
     const updates = {};
@@ -201,13 +219,13 @@ exports.adminUpdateUserCredentials = functions
     }
     if (password) {
       if (password.length < 6) {
-        throw new functions.https.HttpsError('invalid-argument', 'Password must be at least 6 characters.');
+        throw new HttpsError('invalid-argument', 'Password must be at least 6 characters.');
       }
       updates.password = password;
     }
 
     if (Object.keys(updates).length === 0) {
-      throw new functions.https.HttpsError(
+      throw new HttpsError(
         'invalid-argument',
         'At least one of email or password is required.'
       );
@@ -217,16 +235,20 @@ exports.adminUpdateUserCredentials = functions
       await admin.auth().updateUser(uid, updates);
       return { success: true };
     } catch (error) {
-      throw new functions.https.HttpsError('internal', error.message || 'Failed to update auth user.');
+      throw new HttpsError('internal', error.message || 'Failed to update auth user.');
     }
-  });
+  }
+);
 
-exports.notifyLogoutRequestResolution = functions
-  .region('us-central1')
-  .firestore.document('users/{userId}')
-  .onUpdate(async (change, context) => {
-    const before = change.before.data() || {};
-    const after = change.after.data() || {};
+exports.notifyLogoutRequestResolution = onDocumentUpdated(
+  {
+    document: 'users/{userId}',
+    timeoutSeconds: 60,
+    memory: '256MiB',
+  },
+  async (event) => {
+    const before = event.data.before.data() || {};
+    const after = event.data.after.data() || {};
 
     const beforeStatus = before.logoutRequestStatus || null;
     const afterStatus = after.logoutRequestStatus || null;
@@ -254,10 +276,10 @@ exports.notifyLogoutRequestResolution = functions
     const notificationData = {
       type: 'logout_request_resolution',
       status: afterStatus,
-      userId: context.params.userId,
+      userId: event.params.userId,
     };
 
-    await change.after.ref.collection('notifications').add({
+    await event.data.after.ref.collection('notifications').add({
       title,
       message: body,
       status: afterStatus,
@@ -281,11 +303,12 @@ exports.notifyLogoutRequestResolution = functions
         data: notificationData,
       });
     } catch (error) {
-      functions.logger.error('Failed to send logout resolution notification', {
-        userId: context.params.userId,
+      console.error('Failed to send logout resolution notification', {
+        userId: event.params.userId,
         error: error.message || error,
       });
     }
 
     return null;
-  });
+  }
+);

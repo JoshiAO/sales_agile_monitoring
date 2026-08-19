@@ -7,11 +7,12 @@ import 'package:compact_sales_monitoring/models/user_model.dart';
 import 'package:compact_sales_monitoring/providers/auth_provider.dart';
 import 'package:compact_sales_monitoring/services/firestore_service.dart';
 import 'package:compact_sales_monitoring/widgets/web_storage_image.dart';
-import 'package:compact_sales_monitoring/widgets/data_usage_modal.dart';
+import 'package:compact_sales_monitoring/widgets/route_data_usage_view.dart';
+import 'package:compact_sales_monitoring/widgets/route_call_detail_card.dart';
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 
-class RouteDetailModal extends StatelessWidget {
+class RouteDetailModal extends StatefulWidget {
   final SalesRoute route;
   final AppUser salesman;
   final Future<void> Function()? onRouteChanged;
@@ -22,6 +23,13 @@ class RouteDetailModal extends StatelessWidget {
     required this.salesman,
     this.onRouteChanged,
   });
+
+  @override
+  State<RouteDetailModal> createState() => _RouteDetailModalState();
+}
+
+class _RouteDetailModalState extends State<RouteDetailModal> {
+  RoutePoint? _viewingDataPoint;
 
   String _normalizeImageUrl(String imageUrl) {
     final value = imageUrl.trim();
@@ -295,7 +303,7 @@ class RouteDetailModal extends StatelessWidget {
     if (approver == null) return;
 
     await FirestoreService().approveCallRetake(
-      routeId: route.routeId,
+      routeId: widget.route.routeId,
       isFirst: isFirst,
       approvedBy: approver.uid,
     );
@@ -307,16 +315,20 @@ class RouteDetailModal extends StatelessWidget {
       ),
     );
 
-    if (onRouteChanged != null) {
-      await onRouteChanged!();
+    if (widget.onRouteChanged != null) {
+      await widget.onRouteChanged!();
     }
 
     if (!context.mounted) return;
     Navigator.pop(context);
   }
 
+  // Data Usage View moved to RouteDataUsageView
+
   @override
   Widget build(BuildContext context) {
+    final route = widget.route;
+    final salesman = widget.salesman;
     final currentUser = context.watch<AuthProvider>().currentUser;
     final canApprove =
         currentUser?.role == UserRole.supervisor ||
@@ -329,15 +341,55 @@ class RouteDetailModal extends StatelessWidget {
 
     return Dialog(
       insetPadding: const EdgeInsets.all(16),
-      child: ConstrainedBox(
-        constraints: BoxConstraints(maxWidth: dialogWidth),
-        child: SingleChildScrollView(
-          child: Container(
-            padding: const EdgeInsets.all(24),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
+      clipBehavior: Clip.antiAlias,
+      child: Container(
+        width: dialogWidth,
+        height: MediaQuery.sizeOf(context).height * 0.85,
+        child: AnimatedSwitcher(
+          duration: const Duration(milliseconds: 300),
+          transitionBuilder: (Widget child, Animation<double> animation) {
+            final isDataView = child.key == const ValueKey('data_view');
+            final offsetAnimation = Tween<Offset>(
+              begin: isDataView ? const Offset(1.0, 0.0) : const Offset(-1.0, 0.0),
+              end: Offset.zero,
+            ).animate(CurvedAnimation(
+              parent: animation,
+              curve: Curves.easeInOut,
+            ));
+
+            return SlideTransition(
+              position: offsetAnimation,
+              child: child,
+            );
+          },
+          layoutBuilder: (Widget? currentChild, List<Widget> previousChildren) {
+            return Stack(
+              alignment: Alignment.topCenter,
+              children: <Widget>[
+                ...previousChildren,
+                if (currentChild != null) currentChild,
+              ],
+            );
+          },
+          child: _viewingDataPoint != null
+              ? Container(
+                  key: const ValueKey('data_view'),
+                  child: SingleChildScrollView(
+                    padding: const EdgeInsets.all(24),
+                    child: RouteDataUsageView(
+                      point: _viewingDataPoint!,
+                      onBack: () => setState(() => _viewingDataPoint = null),
+                    ),
+                  ),
+                )
+              : Container(
+                  key: const ValueKey('route_view'),
+                  child: SingleChildScrollView(
+                    padding: const EdgeInsets.all(24),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
@@ -400,225 +452,56 @@ class RouteDetailModal extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(height: 20),
-                Text(
-                  'First Call (Start)',
-                  style: Theme.of(context).textTheme.titleMedium,
-                ),
-                const SizedBox(height: 8),
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(8),
-                  child: _buildRouteImage(route.first.imageUrl),
-                ),
-                const SizedBox(height: 8),
-                Align(
-                  alignment: Alignment.centerRight,
-                  child: OutlinedButton.icon(
-                    onPressed: () {
-                      _openFullImagePreview(
-                        context,
-                        route.first.imageUrl,
-                        'First Call Image',
-                      );
-                    },
-                    icon: const Icon(Icons.open_in_full),
-                    label: const Text('Open Full Image'),
+                RouteCallDetailCard(
+                  title: 'First Call (Start)',
+                  point: route.first,
+                  imageWidget: _buildRouteImage(route.first.imageUrl),
+                  onOpenFullImage: () => _openFullImagePreview(
+                    context,
+                    route.first.imageUrl,
+                    'First Call Image',
                   ),
-                ),
-                const SizedBox(height: 12),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            'Location',
-                            style: Theme.of(context).textTheme.bodySmall,
-                          ),
-                          Text(
-                            '${route.first.lat.toStringAsFixed(4)}, ${route.first.lon.toStringAsFixed(4)}',
-                            style: const TextStyle(fontSize: 13),
-                          ),
-                        ],
-                      ),
-                    ),
-                    ElevatedButton.icon(
-                      onPressed: () {
-                        _openGoogleMaps(
-                          context,
-                          route.first.lat,
-                          route.first.lon,
-                        );
-                      },
-                      icon: const Icon(Icons.location_on),
-                      label: const Text('Maps'),
-                    ),
-                    const SizedBox(width: 8),
-                    ElevatedButton.icon(
-                      onPressed: () {
-                        Navigator.pushReplacement(
-                          context,
-                          MaterialPageRoute(builder: (context) => DataUsageModal(point: route.first)),
-                        );
-                      },
-                      icon: const Icon(Icons.data_usage),
-                      label: const Text('Data'),
-                    ),
-                  ],
-                ),
-                if (route.first.batteryLevel != null) ...[
-                  const SizedBox(height: 8),
-                  Text('Device Telemetry', style: Theme.of(context).textTheme.bodySmall),
-                  Text(
-                    'Battery: ${route.first.batteryLevel}% • UUID: ${route.first.uuid ?? 'N/A'}\n'
-                    '${route.first.productName ?? 'Unknown'} ${route.first.modelName ?? 'Device'}'
-                    '${route.first.serialNumber != null ? ' • SN: ${route.first.serialNumber}' : ''}',
-                    style: const TextStyle(fontSize: 12, color: Colors.grey),
+                  onOpenMaps: () => _openGoogleMaps(
+                    context,
+                    route.first.lat,
+                    route.first.lon,
                   ),
-                ],
-                if (canApprove &&
-                    route.firstRetakeRequested &&
-                    !route.firstRetakeApproved)
-                  Align(
-                    alignment: Alignment.centerRight,
-                    child: ElevatedButton.icon(
-                      onPressed: () => _approveRetake(context, isFirst: true),
-                      icon: const Icon(Icons.check),
-                      label: const Text('Approve First Call Retake'),
-                    ),
-                  ),
-                const SizedBox(height: 12),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'Time',
-                          style: Theme.of(context).textTheme.bodySmall,
-                        ),
-                        Text(
-                          route.first.timestamp.toString().split('.').first,
-                          style: const TextStyle(fontSize: 13),
-                        ),
-                      ],
-                    ),
-                  ],
+                  onDataTap: () {
+                    setState(() => _viewingDataPoint = route.first);
+                  },
+                  canApproveRetake: canApprove &&
+                      route.firstRetakeRequested &&
+                      !route.firstRetakeApproved,
+                  onApproveRetake: () => _approveRetake(context, isFirst: true),
+                  approveRetakeLabel: 'Approve First Call Retake',
                 ),
                 const SizedBox(height: 20),
                 if (route.hasLastCall) ...[
                   const Divider(),
                   const SizedBox(height: 20),
-                  Text(
-                    'Last Call (End)',
-                    style: Theme.of(context).textTheme.titleMedium,
-                  ),
-                  const SizedBox(height: 8),
-                  ClipRRect(
-                    borderRadius: BorderRadius.circular(8),
-                    child: _buildRouteImage(route.last.imageUrl),
-                  ),
-                  const SizedBox(height: 8),
-                  Align(
-                    alignment: Alignment.centerRight,
-                    child: OutlinedButton.icon(
-                      onPressed: () {
-                        _openFullImagePreview(
-                          context,
-                          route.last.imageUrl,
-                          'Last Call Image',
-                        );
-                      },
-                      icon: const Icon(Icons.open_in_full),
-                      label: const Text('Open Full Image'),
+                  RouteCallDetailCard(
+                    title: 'Last Call (End)',
+                    point: route.last,
+                    imageWidget: _buildRouteImage(route.last.imageUrl),
+                    onOpenFullImage: () => _openFullImagePreview(
+                      context,
+                      route.last.imageUrl,
+                      'Last Call Image',
                     ),
-                  ),
-                  const SizedBox(height: 12),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              'Location',
-                              style: Theme.of(context).textTheme.bodySmall,
-                            ),
-                            Text(
-                              '${route.last.lat.toStringAsFixed(4)}, ${route.last.lon.toStringAsFixed(4)}',
-                              style: const TextStyle(fontSize: 13),
-                            ),
-                          ],
-                        ),
-                      ),
-                      ElevatedButton.icon(
-                        onPressed: () {
-                          _openGoogleMaps(
-                            context,
-                            route.last.lat,
-                            route.last.lon,
-                          );
-                        },
-                        icon: const Icon(Icons.location_on),
-                        label: const Text('Maps'),
-                      ),
-                      const SizedBox(width: 8),
-                      ElevatedButton.icon(
-                        onPressed: () {
-                          Navigator.pushReplacement(
-                            context,
-                            MaterialPageRoute(builder: (context) => DataUsageModal(point: route.last)),
-                          );
-                        },
-                        icon: const Icon(Icons.data_usage),
-                        label: const Text('Data'),
-                      ),
-                    ],
-                  ),
-                  if (route.last.batteryLevel != null) ...[
-                    const SizedBox(height: 8),
-                    Text('Device Telemetry', style: Theme.of(context).textTheme.bodySmall),
-                    Text(
-                      'Battery: ${route.last.batteryLevel}% • UUID: ${route.last.uuid ?? 'N/A'}\n'
-                      '${route.last.productName ?? 'Unknown'} ${route.last.modelName ?? 'Device'}'
-                      '${route.last.serialNumber != null ? ' • SN: ${route.last.serialNumber}' : ''}',
-                      style: const TextStyle(fontSize: 12, color: Colors.grey),
+                    onOpenMaps: () => _openGoogleMaps(
+                      context,
+                      route.last.lat,
+                      route.last.lon,
                     ),
-                  ],
-                  const SizedBox(height: 12),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            'Time',
-                            style: Theme.of(context).textTheme.bodySmall,
-                          ),
-                          Text(
-                            route.last.timestamp.toString().split('.').first,
-                            style: const TextStyle(fontSize: 13),
-                          ),
-                        ],
-                      ),
-                    ],
+                    onDataTap: () {
+                      setState(() => _viewingDataPoint = route.last);
+                    },
+                    canApproveRetake: canApprove &&
+                        route.lastRetakeRequested &&
+                        !route.lastRetakeApproved,
+                    onApproveRetake: () => _approveRetake(context, isFirst: false),
+                    approveRetakeLabel: 'Approve Last Call Retake',
                   ),
-                  if (canApprove &&
-                      route.lastRetakeRequested &&
-                      !route.lastRetakeApproved)
-                    Align(
-                      alignment: Alignment.centerRight,
-                      child: ElevatedButton.icon(
-                        onPressed: () =>
-                            _approveRetake(context, isFirst: false),
-                        icon: const Icon(Icons.check),
-                        label: const Text('Approve Last Call Retake'),
-                      ),
-                    ),
                 ] else ...[
                   const Divider(),
                   const SizedBox(height: 20),
@@ -666,9 +549,10 @@ class RouteDetailModal extends StatelessWidget {
                     child: const Text('Close'),
                   ),
                 ),
-              ],
-            ),
-          ),
+                      ],
+                    ),
+                  ),
+                ),
         ),
       ),
     );

@@ -29,6 +29,20 @@
       ]
     },
     {
+      "collectionGroup": "routes",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "company_ID",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "date",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
       "collectionGroup": "agile_targets",
       "queryScope": "COLLECTION",
       "fields": [

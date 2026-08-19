@@ -139,6 +139,9 @@ class _MainAppHomeState extends State<MainAppHome>
   bool _transitionStarted = false;
   late AnimationController _transitionController;
 
+  late final ActivationProvider _activationProvider;
+  late final AuthProvider _authProvider;
+
   @override
   void initState() {
     super.initState();
@@ -155,8 +158,14 @@ class _MainAppHomeState extends State<MainAppHome>
       }
     });
 
+    _activationProvider = context.read<ActivationProvider>();
+    _authProvider = context.read<AuthProvider>();
+
+    _activationProvider.addListener(_tryStartTransition);
+    _authProvider.addListener(_tryStartTransition);
+
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      context.read<ActivationProvider>().initialize();
+      _activationProvider.initialize();
       context.read<VersionProvider>().checkVersion();
     });
   }
@@ -184,50 +193,43 @@ class _MainAppHomeState extends State<MainAppHome>
 
   @override
   void dispose() {
+    _activationProvider.removeListener(_tryStartTransition);
+    _authProvider.removeListener(_tryStartTransition);
     _transitionController.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    return Consumer2<ActivationProvider, AuthProvider>(
-      builder: (context, activationProvider, authProvider, _) {
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (!mounted) return;
-          _tryStartTransition();
-        });
+    return AnimatedBuilder(
+      animation: _transitionController,
+      builder: (context, _) {
+        // t: 0 → 1 over 1400ms
+        final t = _transitionController.value;
+        // Smooth ease-out curve
+        final easeT = Curves.easeOutQuart.transform(t);
 
-        return AnimatedBuilder(
-          animation: _transitionController,
-          builder: (context, _) {
-            // t: 0 → 1 over 1400ms
-            final t = _transitionController.value;
-            // Smooth ease-out curve
-            final easeT = Curves.easeOutQuart.transform(t);
+        // Height to slide (approximately screen height)
+        final slideDistance = MediaQuery.sizeOf(context).height;
 
-            // Height to slide (approximately screen height)
-            final slideDistance = MediaQuery.sizeOf(context).height;
+        return Stack(
+          fit: StackFit.expand,
+          children: [
+            // ── App Router (destination) slides UP from bottom ──
+            Transform.translate(
+              offset: Offset(0, slideDistance * (1 - easeT)),
+              child: const AppRouter(),
+            ),
 
-            return Stack(
-              fit: StackFit.expand,
-              children: [
-                // ── App Router (destination) slides UP from bottom ──
-                Transform.translate(
-                  offset: Offset(0, slideDistance * (1 - easeT)),
-                  child: const AppRouter(),
+            // ── Splash slides UP and exits ──
+            if (_showSplash)
+              Transform.translate(
+                offset: Offset(0, -slideDistance * easeT),
+                child: SplashScreen(
+                  onComplete: _completeSplash,
                 ),
-
-                // ── Splash slides UP and exits ──
-                if (_showSplash)
-                  Transform.translate(
-                    offset: Offset(0, -slideDistance * easeT),
-                    child: SplashScreen(
-                      onComplete: _completeSplash,
-                    ),
-                  ),
-              ],
-            );
-          },
+              ),
+          ],
         );
       },
     );

@@ -20,5 +20,5 @@ class AppConstants {
   static const String offlineAttribution = 'Offline Luzon map tiles';
   static const String osmTileUrl = 'https://a.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png';
   static const String osmAttribution = '© OpenStreetMap contributors © CARTO';
-  static const String osmUserAgentPackage = 'com.example.compact_sales_monitoring';
+  static const String osmUserAgentPackage = 'com.joshiao.compact_sales_monitoring';
 }

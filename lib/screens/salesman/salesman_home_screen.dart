@@ -767,8 +767,12 @@ class _SalesmanHomeScreenState extends State<SalesmanHomeScreen>
         serialNumber: telemetry['serialNumber'] as String?,
         uuid: telemetry['uuid'] as String?,
         batteryLevel: telemetry['batteryLevel'] as int?,
-        mobileDataUsage: dataUsage['mobile'],
-        wifiDataUsage: dataUsage['wifi'],
+        mobileDataUsage: (dataUsage['mobile'] as List<dynamic>?)
+            ?.map((e) => DataUsageEntry.fromMap(e as Map<String, dynamic>))
+            .toList(),
+        wifiDataUsage: (dataUsage['wifi'] as List<dynamic>?)
+            ?.map((e) => DataUsageEntry.fromMap(e as Map<String, dynamic>))
+            .toList(),
       );
 
       // Get existing route for today or create new one

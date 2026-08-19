@@ -6,6 +6,7 @@ import 'package:flutter_background_service/flutter_background_service.dart';
 import 'package:geolocator/geolocator.dart' as geo;
 import 'package:compact_sales_monitoring/services/firebase_service.dart';
 import 'package:compact_sales_monitoring/services/firestore_service.dart';
+import 'package:compact_sales_monitoring/services/checkpoint_queue_service.dart';
 import 'package:compact_sales_monitoring/models/route_model.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -23,7 +24,6 @@ class BackgroundLocationService {
         onStart: onStart,
         autoStart: false,
         isForegroundMode: true,
-        notificationChannelId: 'route_tracking_channel',
         initialNotificationTitle: 'Route Tracker Active',
         initialNotificationContent: 'Tracking your sales route in the background',
         foregroundServiceNotificationId: 888,
@@ -143,9 +143,14 @@ class BackgroundLocationService {
       try {
         await firestoreService.appendRouteCheckpoint(routeId, checkpoint);
       } catch (e) {
-        // Enqueue offline checkpoint
-        // For simplicity, we just save it to SharedPreferences queue here or use CheckpointQueueService.
-        // We will rely on the main app to flush checkpoints if it fails.
+        // Firestore write failed (offline, auth expired, etc.).
+        // Persist to the local queue so the main app can flush it when connectivity returns.
+        try {
+          await CheckpointQueueService().enqueue(routeId, checkpoint);
+        } catch (queueError) {
+          // If even the local queue fails, we cannot do more from the background isolate.
+          debugPrint('[BackgroundLocationService] Failed to enqueue checkpoint: $queueError');
+        }
       }
     });
   }
