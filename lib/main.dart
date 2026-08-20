@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:compact_sales_monitoring/services/firebase_service.dart';
 import 'package:compact_sales_monitoring/providers/auth_provider.dart';
 import 'package:compact_sales_monitoring/providers/activation_provider.dart';
@@ -11,10 +12,60 @@ import 'package:compact_sales_monitoring/app_router.dart';
 import 'package:compact_sales_monitoring/screens/splash_screen.dart';
 import 'package:compact_sales_monitoring/services/background_location_service.dart';
 
+/// Selectively clears corrupted background tracking keys left by older app
+/// versions (e.g. v2.1.4, v2.1.5). Only removes background service state —
+/// activation codes and Firebase Auth tokens are never touched.
+Future<void> _runV216Migration() async {
+  const migrationKey = 'has_migrated_v216';
+
+  // Keys used ONLY by the background location service — safe to wipe.
+  const backgroundTrackingKeys = [
+    'active_route_id',
+    'last_checkpoint_time',
+    'last_checkpoint_lat',
+    'last_checkpoint_lon',
+  ];
+
+  final prefs = await SharedPreferences.getInstance();
+
+  // Already migrated on a previous launch — skip.
+  if (prefs.getBool(migrationKey) == true) return;
+
+  debugPrint('[Migration] Running v2.1.6 migration: clearing stale background tracking state...');
+
+  // Delete ONLY background tracking keys.
+  // Keys like is_activated, activation_code, and Firebase Auth tokens
+  // are stored separately and are NOT affected.
+  for (final key in backgroundTrackingKeys) {
+    await prefs.remove(key);
+    debugPrint('[Migration] Removed key: $key');
+  }
+
+  // Mark migration as complete so it never runs again.
+  await prefs.setBool(migrationKey, true);
+  debugPrint('[Migration] v2.1.6 migration complete.');
+}
+
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await FirebaseService.initializeApp();
-  await BackgroundLocationService.initializeService();
+
+  // Step 1: Run the one-time migration to clear stale background state from
+  // older versions. This preserves login and activation data.
+  await _runV216Migration();
+
+  // Step 2: Initialize the background service with a safety net.
+  // If the native plugin has corrupted state that causes an immediate crash
+  // (e.g. ForegroundServiceStartNotAllowedException on Android 12+), we
+  // catch the error so the app can still launch normally. The service will
+  // re-initialize correctly the next time the salesman begins a call.
+  try {
+    await BackgroundLocationService.initializeService();
+  } catch (e, stack) {
+    debugPrint('[BackgroundService] Initialization failed (non-fatal): $e');
+    debugPrint('[BackgroundService] Stack: $stack');
+  }
+
   final initialBranding = await CompanyBrandingProvider.loadLastCachedBranding();
   runApp(MainApp(initialBranding: initialBranding));
 }
