@@ -25,7 +25,6 @@ class BackgroundLocationService {
         autoStart: false,
         autoStartOnBoot: false,
         isForegroundMode: true,
-        notificationChannelId: 'route_tracker',
         initialNotificationTitle: 'Route Tracker Active',
         initialNotificationContent: 'Tracking your sales route in the background',
         foregroundServiceNotificationId: 888,
