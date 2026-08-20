@@ -148,6 +148,8 @@ class BackgroundLocationService {
       );
 
       try {
+        // Also try to flush any previously queued offline checkpoints
+        await CheckpointQueueService().flush(firestoreService.appendRouteCheckpoint);
         await firestoreService.appendRouteCheckpoint(routeId, checkpoint);
       } catch (e) {
         try {
