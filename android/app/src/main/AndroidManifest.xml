@@ -48,10 +48,12 @@
         <service
             android:name="com.baseflow.geolocator.GeolocatorService"
             android:exported="false"
+            android:stopWithTask="false"
             android:foregroundServiceType="location" />
         <service
             android:name="id.flutter.flutter_background_service.BackgroundService"
             android:exported="false"
+            android:stopWithTask="false"
             tools:replace="android:exported"
             android:foregroundServiceType="location" />
 
