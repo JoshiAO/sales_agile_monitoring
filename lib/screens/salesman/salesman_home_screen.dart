@@ -22,6 +22,8 @@ import 'package:compact_sales_monitoring/services/storage_service.dart';
 import 'package:compact_sales_monitoring/services/firestore_service.dart';
 import 'package:compact_sales_monitoring/services/telemetry_service.dart';
 import 'package:compact_sales_monitoring/services/background_location_service.dart';
+import 'package:compact_sales_monitoring/screens/troubleshooting_screen.dart';
+import 'package:flutter_background_service/flutter_background_service.dart';
 
 class SalesmanHomeScreen extends StatefulWidget {
   const SalesmanHomeScreen({super.key});
@@ -489,6 +491,18 @@ class _SalesmanHomeScreenState extends State<SalesmanHomeScreen>
       if (_loadedForDate != null && _loadedForDate != _todayDate) {
         _loadTodayRoute();
       }
+
+      _checkAndRestartBackgroundService();
+    }
+  }
+
+  Future<void> _checkAndRestartBackgroundService() async {
+    if (!kIsWeb && _todayRouteId != null && _firstPoint != null && _lastPoint == null) {
+      final service = FlutterBackgroundService();
+      if (!(await service.isRunning())) {
+        debugPrint('[SalesmanHomeScreen] Background service was killed. Restarting...');
+        await BackgroundLocationService.startTracking(_todayRouteId!, _firstPoint!);
+      }
     }
   }
 
@@ -520,6 +534,39 @@ class _SalesmanHomeScreenState extends State<SalesmanHomeScreen>
     }
 
     final bgStatus = await Permission.locationAlways.request();
+    
+    // Check battery optimization
+    if (!kIsWeb && Platform.isAndroid) {
+      final isExempt = await Permission.ignoreBatteryOptimizations.isGranted;
+      if (!isExempt) {
+        if (mounted) {
+          final shouldRequest = await showDialog<bool>(
+            context: context,
+            builder: (context) => AlertDialog(
+              title: const Text('Background Tracking'),
+              content: const Text(
+                'To accurately track your route between calls, this app needs to run in the background. '
+                'Please allow "Unrestricted" battery usage for this app when prompted.',
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(context, false),
+                  child: const Text('Skip'),
+                ),
+                TextButton(
+                  onPressed: () => Navigator.pop(context, true),
+                  child: const Text('Continue'),
+                ),
+              ],
+            ),
+          );
+          if (shouldRequest == true) {
+            await Permission.ignoreBatteryOptimizations.request();
+          }
+        }
+      }
+    }
+
     // Start tracking in background service
     await BackgroundLocationService.startTracking(_todayRouteId!, _firstPoint!);
   }
@@ -938,6 +985,16 @@ class _SalesmanHomeScreenState extends State<SalesmanHomeScreen>
         title: const Text('Sales Route'),
         elevation: 0,
         actions: [
+          IconButton(
+            icon: const Icon(Icons.help_outline),
+            tooltip: 'Troubleshooting Guide',
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const TroubleshootingScreen()),
+              );
+            },
+          ),
           if (!kIsWeb) ...[
             StreamBuilder<int>(
               stream: currentUser == null

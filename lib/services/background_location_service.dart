@@ -22,8 +22,10 @@ class BackgroundLocationService {
     await service.configure(
       androidConfiguration: AndroidConfiguration(
         onStart: onStart,
-        autoStart: false,
+        autoStart: true,
+        autoStartOnBoot: true,
         isForegroundMode: true,
+        notificationChannelId: 'route_tracker',
         initialNotificationTitle: 'Route Tracker Active',
         initialNotificationContent: 'Tracking your sales route in the background',
         foregroundServiceNotificationId: 888,
@@ -76,6 +78,12 @@ class BackgroundLocationService {
     await FirebaseService.initializeApp();
     final firestoreService = FirestoreService();
     final prefs = await SharedPreferences.getInstance();
+
+    final activeRouteId = prefs.getString('active_route_id');
+    if (activeRouteId == null) {
+      service.stopSelf();
+      return;
+    }
 
     service.on('stopService').listen((event) {
       service.stopSelf();

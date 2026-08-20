@@ -1,7 +1,7 @@
 name: compact_sales_monitoring
 description: "Multi-role sales monitoring app with Firebase and OpenStreetMap."
 publish_to: 'none'
-version: 2.1.3+1
+version: 2.1.4+1
 
 environment:
   sdk: ^3.11.4
@@ -74,4 +74,5 @@ flutter:
 
   assets:
     - assets/images/
+    - assets/images/troubleshooting/
     - assets/tiles/luzon/
