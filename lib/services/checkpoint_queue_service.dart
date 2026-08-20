@@ -39,6 +39,7 @@ class CheckpointQueueService {
 
   Future<void> enqueue(String routeId, RouteCheckpoint checkpoint) async {
     final prefs = await SharedPreferences.getInstance();
+    await prefs.reload();
     final raw = prefs.getStringList(_prefsKey) ?? [];
     raw.add(
       jsonEncode(
@@ -60,6 +61,7 @@ class CheckpointQueueService {
     Future<void> Function(String routeId, RouteCheckpoint checkpoint) uploader,
   ) async {
     final prefs = await SharedPreferences.getInstance();
+    await prefs.reload();
     final raw = prefs.getStringList(_prefsKey) ?? [];
     if (raw.isEmpty) return;
 

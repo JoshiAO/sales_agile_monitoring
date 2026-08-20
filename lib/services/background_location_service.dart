@@ -91,12 +91,12 @@ class BackgroundLocationService {
     final stream = geo.Geolocator.getPositionStream(
       locationSettings: geo.AndroidSettings(
         accuracy: geo.LocationAccuracy.high,
-        distanceFilter: 50,
+        distanceFilter: 25, // Lowered to 25 meters to ensure the GPS hardware wakes up
         forceLocationManager: false,
       ),
     );
 
-    stream.listen((geo.Position position) async {
+    Future<void> processLocation(geo.Position position) async {
       await prefs.reload();
       final routeId = prefs.getString('active_route_id');
       if (routeId == null) {
@@ -150,15 +150,31 @@ class BackgroundLocationService {
       try {
         await firestoreService.appendRouteCheckpoint(routeId, checkpoint);
       } catch (e) {
-        // Firestore write failed (offline, auth expired, etc.).
-        // Persist to the local queue so the main app can flush it when connectivity returns.
         try {
           await CheckpointQueueService().enqueue(routeId, checkpoint);
         } catch (queueError) {
-          // If even the local queue fails, we cannot do more from the background isolate.
           debugPrint('[BackgroundLocationService] Failed to enqueue checkpoint: $queueError');
         }
       }
+    }
+
+    // 1. Process locations when the user moves
+    stream.listen(processLocation);
+
+    // 2. Force a location check periodically in case the user is completely stationary
+    Timer.periodic(const Duration(minutes: 30), (timer) async {
+      await prefs.reload();
+      if (prefs.getString('active_route_id') == null) {
+        timer.cancel();
+        return;
+      }
+      try {
+        final position = await geo.Geolocator.getCurrentPosition(
+          desiredAccuracy: geo.LocationAccuracy.high,
+          timeLimit: const Duration(seconds: 15),
+        );
+        await processLocation(position);
+      } catch (_) {}
     });
   }
 }
