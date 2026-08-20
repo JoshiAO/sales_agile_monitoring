@@ -22,8 +22,8 @@ class BackgroundLocationService {
     await service.configure(
       androidConfiguration: AndroidConfiguration(
         onStart: onStart,
-        autoStart: true,
-        autoStartOnBoot: true,
+        autoStart: false,
+        autoStartOnBoot: false,
         isForegroundMode: true,
         notificationChannelId: 'route_tracker',
         initialNotificationTitle: 'Route Tracker Active',
