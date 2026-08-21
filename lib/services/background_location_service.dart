@@ -254,22 +254,8 @@ class BackgroundLocationService {
       await flushPendingBatch(prefs, firestoreService);
     });
 
-    // 3. ALIVE PING: heartbeat every 5 minutes to prove the OS hasn't killed us.
-    // Check 'last_ping' in Firestore after testing to diagnose Realme OS kills.
-    Timer.periodic(const Duration(minutes: 5), (timer) async {
-      await prefs.reload();
-      final routeId = prefs.getString('active_route_id');
-      if (routeId == null) {
-        timer.cancel();
-        return;
-      }
-      try {
-        await firestoreService.updateRoutePing(routeId);
-        debugPrint('[BackgroundLocationService] Alive ping sent for route $routeId');
-      } catch (e) {
-        debugPrint('[BackgroundLocationService] Alive ping failed: $e');
-      }
-    });
+    // Removed diagnostic ALIVE PING (Firestore write) to protect the 20K/day free tier quota.
+    // Timer.periodic(const Duration(minutes: 5), ...) was here in v2.1.9.
   }
   
   static const String _batchPrefsKey = 'batched_checkpoints_v2';
