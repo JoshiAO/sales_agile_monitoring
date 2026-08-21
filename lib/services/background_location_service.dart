@@ -13,7 +13,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 class BackgroundLocationService {
   static const double _checkpointMinDistanceMeters = 500.0;
   static const int _checkpointMinIntervalMinutes = 30;
-  static const double _maxCheckpointAccuracyMeters = 80.0;
+  static const double _maxCheckpointAccuracyMeters = 250.0; // Increased to 250m to avoid dropping locations when phone is in pocket/car
 
   static Future<void> initializeService() async {
     if (kIsWeb) return;
@@ -92,6 +92,7 @@ class BackgroundLocationService {
       locationSettings: geo.AndroidSettings(
         accuracy: geo.LocationAccuracy.high,
         distanceFilter: 25, // Lowered to 25 meters to ensure the GPS hardware wakes up
+        intervalDuration: const Duration(seconds: 20),
         forceLocationManager: false,
       ),
     );
