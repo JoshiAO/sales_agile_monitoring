@@ -10,7 +10,12 @@ import 'package:compact_sales_monitoring/services/checkpoint_queue_service.dart'
 import 'package:compact_sales_monitoring/models/route_model.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
+import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'package:flutter_background_service_android/flutter_background_service_android.dart';
+import 'package:wakelock_plus/wakelock_plus.dart';
+import 'package:intl/intl.dart';
 
+@pragma('vm:entry-point')
 class BackgroundLocationService {
   static const double _checkpointMinDistanceMeters = 500.0;
   static const int _checkpointMinIntervalMinutes = 30;
@@ -26,8 +31,8 @@ class BackgroundLocationService {
         autoStart: false,
         autoStartOnBoot: false,
         isForegroundMode: true,
-        initialNotificationTitle: 'Route Tracker Active',
-        initialNotificationContent: 'Tracking your sales route in the background',
+        initialNotificationTitle: '📍 Route Tracker Active',
+        initialNotificationContent: 'Live tracking was on after first call, ended after last call.',
         foregroundServiceNotificationId: 888,
       ),
       iosConfiguration: IosConfiguration(
@@ -42,12 +47,21 @@ class BackgroundLocationService {
     if (kIsWeb) return;
     final service = FlutterBackgroundService();
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setString('active_route_id', routeId);
-    
-    // Set initial checkpoint base
-    await prefs.setString('last_checkpoint_time', firstPoint.timestamp.toIso8601String());
-    await prefs.setDouble('last_checkpoint_lat', firstPoint.lat);
-    await prefs.setDouble('last_checkpoint_lon', firstPoint.lon);
+    final previousRouteId = prefs.getString('active_route_id');
+    final previousFirstPointTime = prefs.getString('first_point_time');
+    final currentFirstPointTime = firstPoint.timestamp.toIso8601String();
+
+    if (previousRouteId != routeId || previousFirstPointTime != currentFirstPointTime) {
+      await prefs.setString('active_route_id', routeId);
+      await prefs.setString('first_point_time', currentFirstPointTime);
+      
+      // Set initial checkpoint base
+      await prefs.setString('route_start_time', DateTime.now().toIso8601String());
+      await prefs.setString('last_checkpoint_time', currentFirstPointTime);
+      await prefs.setDouble('last_checkpoint_lat', firstPoint.lat);
+      await prefs.setDouble('last_checkpoint_lon', firstPoint.lon);
+      await prefs.setInt('checkpoint_count', 0);
+    }
 
     await service.startService();
   }
@@ -61,6 +75,13 @@ class BackgroundLocationService {
     }
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove('active_route_id');
+  }
+
+  @pragma('vm:entry-point')
+  static void notificationTapBackground(NotificationResponse notificationResponse) {
+    if (notificationResponse.actionId == 'manual_checkpoint') {
+      FlutterBackgroundService().invoke('manual_checkpoint');
+    }
   }
 
   @pragma('vm:entry-point')
@@ -86,8 +107,43 @@ class BackgroundLocationService {
     }
 
     service.on('stopService').listen((event) {
+      WakelockPlus.disable();
       service.stopSelf();
     });
+    
+    // GUARANTEE CPU DOES NOT SLEEP
+    WakelockPlus.enable();
+
+    // INITIALIZE HIGH-PRIORITY ALARMS
+    final flutterLocalNotificationsPlugin = FlutterLocalNotificationsPlugin();
+    const androidInit = AndroidInitializationSettings('@mipmap/ic_launcher');
+    const initSettings = InitializationSettings(android: androidInit);
+    await flutterLocalNotificationsPlugin.initialize(
+      settings: initSettings,
+      onDidReceiveBackgroundNotificationResponse: notificationTapBackground,
+    );
+
+    await flutterLocalNotificationsPlugin.show(
+      id: 888,
+      title: '📍 Route Tracker Active',
+      body: 'Live tracking was on after first call, ended after last call.',
+      notificationDetails: const NotificationDetails(
+        android: AndroidNotificationDetails(
+          'compact_sales_tracker_channel',
+          'Live Tracking Service',
+          ongoing: true,
+          importance: Importance.low,
+          priority: Priority.low,
+          actions: [
+            AndroidNotificationAction(
+              'manual_checkpoint',
+              'Capture Checkpoint',
+              showsUserInterface: false,
+            ),
+          ],
+        ),
+      ),
+    );
 
     final stream = geo.Geolocator.getPositionStream(
       locationSettings: geo.AndroidSettings(
@@ -104,7 +160,7 @@ class BackgroundLocationService {
 
     // Declare as late so getBestAvailablePosition and resetWatchdog can reference it
     // before the body is assigned below.
-    late Future<void> Function(geo.Position) processLocation;
+    late Future<void> Function(geo.Position, [bool isManual]) processLocation;
 
     // Helper: get best available position. Falls back to last-known on timeout.
     // KEY FIX FOR INDOOR GPS: high-accuracy GPS times out indoors, but
@@ -139,7 +195,7 @@ class BackgroundLocationService {
     }
 
     // Assign body now — all helpers above are already in scope.
-    processLocation = (geo.Position position) async {
+    processLocation = (geo.Position position, [bool isManual = false]) async {
       resetWatchdog();
       processLocationCount++;
 
@@ -153,9 +209,7 @@ class BackgroundLocationService {
         return;
       }
 
-      if (position.accuracy > _maxCheckpointAccuracyMeters) return;
-
-      final now = position.timestamp;
+      final now = DateTime.now();
 
       final lastTimeStr = prefs.getString('last_checkpoint_time');
       final prevLat = prefs.getDouble('last_checkpoint_lat');
@@ -183,7 +237,14 @@ class BackgroundLocationService {
           prevLon != null &&
           distanceSinceLast >= _checkpointMinDistanceMeters;
 
-      if (!timeThresholdMet && !distanceThresholdMet) return;
+      if (!timeThresholdMet && !distanceThresholdMet && !isManual) return;
+
+      // If we are capturing based ONLY on distance, we demand high accuracy to prevent fake jumps.
+      // However, if the 30-minute timer triggered OR the user manually requested a checkpoint, 
+      // we accept whatever location we can get (even low-accuracy Cell/Wi-Fi positions).
+      if (!timeThresholdMet && !isManual && position.accuracy > _maxCheckpointAccuracyMeters) {
+        return;
+      }
 
       // Update base
       await prefs.setString('last_checkpoint_time', now.toIso8601String());
@@ -217,7 +278,7 @@ class BackgroundLocationService {
     void subscribeToLocation() {
       locationSubscription?.cancel();
       locationSubscription = stream.listen(
-        processLocation,
+        (pos) => processLocation(pos),
         onError: (e) {
           debugPrint('[BackgroundLocationService] Stream error: $e');
           Future.delayed(const Duration(seconds: 10), subscribeToLocation);
@@ -254,8 +315,14 @@ class BackgroundLocationService {
       await flushPendingBatch(prefs, firestoreService);
     });
 
-    // Removed diagnostic ALIVE PING (Firestore write) to protect the 20K/day free tier quota.
-    // Timer.periodic(const Duration(minutes: 5), ...) was here in v2.1.9.
+    service.on('manual_checkpoint').listen((_) async {
+      debugPrint('[BackgroundLocationService] Manual checkpoint triggered!');
+      final pos = await getBestAvailablePosition();
+      if (pos != null) {
+        await processLocation(pos, true);
+      }
+      await flushPendingBatch(prefs, firestoreService);
+    });
   }
   
   static const String _batchPrefsKey = 'batched_checkpoints_v2';

@@ -13,8 +13,11 @@ import 'package:provider/provider.dart';
 import 'package:qr/qr.dart';
 import 'package:saver_gallery/saver_gallery.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 import 'package:compact_sales_monitoring/models/route_model.dart';
 import 'package:compact_sales_monitoring/providers/auth_provider.dart';
+import 'package:compact_sales_monitoring/screens/salesman/salesman_tabs_screen.dart';
+import 'package:compact_sales_monitoring/screens/salesman/salesman_debug_screen.dart';
 import 'package:compact_sales_monitoring/screens/salesman/camera_screen.dart';
 import 'package:compact_sales_monitoring/services/checkpoint_queue_service.dart';
 import 'package:compact_sales_monitoring/services/location_service.dart';
@@ -987,7 +990,16 @@ class _SalesmanHomeScreenState extends State<SalesmanHomeScreen>
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Sales Route'),
+        title: GestureDetector(
+          onTap: (_firstRetakeRequested || _lastRetakeRequested) ? () async {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('Synchronizing account status...')),
+            );
+            await context.read<AuthProvider>().checkCurrentUser();
+            await _loadTodayRoute();
+          } : null,
+          child: const Text('Sales Route'),
+        ),
         elevation: 0,
         actions: [
           IconButton(
@@ -1001,6 +1013,18 @@ class _SalesmanHomeScreenState extends State<SalesmanHomeScreen>
             },
           ),
           if (!kIsWeb) ...[
+            IconButton(
+              tooltip: 'Debug Dashboard',
+              icon: const Icon(Icons.bug_report),
+              onPressed: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => const SalesmanDebugScreen(),
+                  ),
+                );
+              },
+            ),
             StreamBuilder<int>(
               stream: currentUser == null
                   ? const Stream<int>.empty()
@@ -1066,6 +1090,7 @@ class _SalesmanHomeScreenState extends State<SalesmanHomeScreen>
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
+              const Spacer(),
               // Title
               const Text(
                 'Daily Route Tracker',
@@ -1172,6 +1197,23 @@ class _SalesmanHomeScreenState extends State<SalesmanHomeScreen>
                   padding: EdgeInsets.only(top: 32),
                   child: CircularProgressIndicator(),
                 ),
+              
+              const Spacer(),
+              FutureBuilder<PackageInfo>(
+                future: PackageInfo.fromPlatform(),
+                builder: (context, snapshot) {
+                  final version = snapshot.data?.version ?? '';
+                  final build = snapshot.data?.buildNumber ?? '';
+                  final text = version.isNotEmpty ? 'v$version+$build' : '';
+                  return Padding(
+                    padding: const EdgeInsets.only(bottom: 16),
+                    child: Text(
+                      text,
+                      style: const TextStyle(fontSize: 10, color: Colors.grey),
+                    ),
+                  );
+                },
+              ),
             ],
           ),
         ),
