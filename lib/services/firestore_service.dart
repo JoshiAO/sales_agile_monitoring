@@ -385,6 +385,16 @@ class FirestoreService {
     });
   }
 
+  /// Writes a heartbeat timestamp to the route document.
+  /// Used by the background service alive-ping to prove the OS hasn't killed it.
+  /// Check 'last_ping' in Firestore console after testing.
+  Future<void> updateRoutePing(String routeId) async {
+    await _firebaseService.firestore.collection('routes').doc(routeId).update({
+      'last_ping': FieldValue.serverTimestamp(),
+    });
+  }
+
+
   Future<void> savePolylineCache(
     String routeId,
     List<CachedPolylinePoint> points, {

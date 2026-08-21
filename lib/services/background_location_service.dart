@@ -102,17 +102,35 @@ class BackgroundLocationService {
     Timer? streamWatchdog;
     Timer? periodicFlushTimer;
 
+    // Helper: get best available position. Falls back to last-known on timeout.
+    // This is the key fix for INDOOR GPS FAILURE: high-accuracy GPS times out
+    // indoors, but last-known position (from Wi-Fi/Cell) returns instantly.
+    Future<geo.Position?> getBestAvailablePosition() async {
+      try {
+        return await geo.Geolocator.getCurrentPosition(
+          desiredAccuracy: geo.LocationAccuracy.high,
+          timeLimit: const Duration(seconds: 15),
+        );
+      } catch (_) {
+        debugPrint('[BackgroundLocationService] GPS timeout/error. Falling back to last known position...');
+        try {
+          return await geo.Geolocator.getLastKnownPosition();
+        } catch (_) {
+          return null;
+        }
+      }
+    }
+
     void resetWatchdog() {
       streamWatchdog?.cancel();
       streamWatchdog = Timer(const Duration(minutes: 2), () async {
-        debugPrint('[BackgroundLocationService] GPS stream silent for 2 mins. Forcing check...');
-        try {
-          final position = await geo.Geolocator.getCurrentPosition(
-            desiredAccuracy: geo.LocationAccuracy.high,
-            timeLimit: const Duration(seconds: 15),
-          );
-          onStart(service); // Re-initialize the service loop
-        } catch (_) {}
+        debugPrint('[BackgroundLocationService] GPS stream silent for 2 mins. Forcing restart...');
+        final pos = await getBestAvailablePosition();
+        if (pos != null) {
+          await processLocation(pos);
+        } else {
+          onStart(service); // Re-initialize the service loop if no position at all
+        }
       });
     }
 
@@ -213,16 +231,12 @@ class BackgroundLocationService {
 
     // 1.5. Initial 3-minute check to guarantee an early checkpoint
     Timer(const Duration(minutes: 3), () async {
-      try {
-        final position = await geo.Geolocator.getCurrentPosition(
-          desiredAccuracy: geo.LocationAccuracy.high,
-          timeLimit: const Duration(seconds: 15),
-        );
-        await processLocation(position);
-      } catch (_) {}
+      final pos = await getBestAvailablePosition();
+      if (pos != null) await processLocation(pos);
     });
 
-    // 2. Force a location check periodically in case the user is completely stationary
+    // 2. Force a location check every 30 minutes for stationary users.
+    // Uses getBestAvailablePosition() which WILL NOT fail indoors.
     periodicFlushTimer?.cancel();
     periodicFlushTimer = Timer.periodic(const Duration(minutes: 30), (timer) async {
       await prefs.reload();
@@ -230,16 +244,29 @@ class BackgroundLocationService {
         timer.cancel();
         return;
       }
-      try {
-        final position = await geo.Geolocator.getCurrentPosition(
-          desiredAccuracy: geo.LocationAccuracy.high,
-          timeLimit: const Duration(seconds: 15),
-        );
-        await processLocation(position);
-      } catch (_) {}
+      final pos = await getBestAvailablePosition();
+      if (pos != null) await processLocation(pos);
       
-      // Flush accumulated batched checkpoints
+      // Flush any accumulated batched checkpoints regardless of position result
       await flushPendingBatch(prefs, firestoreService);
+    });
+
+    // 3. ALIVE PING: Write a heartbeat timestamp to Firestore every 5 minutes.
+    // Purpose: Prove whether Realme OS killed the service or whether the GPS
+    // itself is the problem. Check 'last_ping' in Firestore console after testing.
+    Timer.periodic(const Duration(minutes: 5), (timer) async {
+      await prefs.reload();
+      final routeId = prefs.getString('active_route_id');
+      if (routeId == null) {
+        timer.cancel();
+        return;
+      }
+      try {
+        await firestoreService.updateRoutePing(routeId);
+        debugPrint('[BackgroundLocationService] Alive ping sent for route $routeId');
+      } catch (e) {
+        debugPrint('[BackgroundLocationService] Alive ping failed: $e');
+      }
     });
   }
   
