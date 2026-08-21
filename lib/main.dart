@@ -46,13 +46,34 @@ Future<void> _runV216Migration() async {
   debugPrint('[Migration] v2.1.6 migration complete.');
 }
 
+/// Clears stale batch checkpoint data left by broken v2.1.7/v2.1.8 builds.
+/// Those builds had a race condition that could leave corrupt or unprocessed
+/// checkpoint data in the batch queue, causing silent upload failures.
+/// This migration wipes the batch so v2.1.9 starts with a clean slate.
+Future<void> _runV219Migration() async {
+  const migrationKey = 'has_migrated_v219';
+  const batchKey = 'batched_checkpoints_v2';
+
+  final prefs = await SharedPreferences.getInstance();
+  if (prefs.getBool(migrationKey) == true) return;
+
+  debugPrint('[Migration] Running v2.1.9 migration: clearing stale batch checkpoint data...');
+  await prefs.remove(batchKey);
+  await prefs.setInt('batch_pending_count', 0);
+  await prefs.remove('last_flush_time');
+
+  await prefs.setBool(migrationKey, true);
+  debugPrint('[Migration] v2.1.9 migration complete.');
+}
+
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await FirebaseService.initializeApp();
 
-  // Step 1: Run the one-time migration to clear stale background state from
-  // older versions. This preserves login and activation data.
+  // Step 1: Run one-time migrations to clear stale state from older versions.
+  // These preserve login, activation, and Firebase Auth data.
   await _runV216Migration();
+  await _runV219Migration();
 
   // Step 2: Initialize the background service with a safety net.
   // If the native plugin has corrupted state that causes an immediate crash
