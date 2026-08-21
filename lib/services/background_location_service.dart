@@ -102,9 +102,13 @@ class BackgroundLocationService {
     Timer? streamWatchdog;
     Timer? periodicFlushTimer;
 
+    // Declare as late so getBestAvailablePosition and resetWatchdog can reference it
+    // before the body is assigned below.
+    late Future<void> Function(geo.Position) processLocation;
+
     // Helper: get best available position. Falls back to last-known on timeout.
-    // This is the key fix for INDOOR GPS FAILURE: high-accuracy GPS times out
-    // indoors, but last-known position (from Wi-Fi/Cell) returns instantly.
+    // KEY FIX FOR INDOOR GPS: high-accuracy GPS times out indoors, but
+    // last-known position (from Wi-Fi/Cell towers) returns instantly.
     Future<geo.Position?> getBestAvailablePosition() async {
       try {
         return await geo.Geolocator.getCurrentPosition(
@@ -112,7 +116,7 @@ class BackgroundLocationService {
           timeLimit: const Duration(seconds: 15),
         );
       } catch (_) {
-        debugPrint('[BackgroundLocationService] GPS timeout/error. Falling back to last known position...');
+        debugPrint('[BackgroundLocationService] GPS timeout. Falling back to last known position...');
         try {
           return await geo.Geolocator.getLastKnownPosition();
         } catch (_) {
@@ -134,10 +138,11 @@ class BackgroundLocationService {
       });
     }
 
-    Future<void> processLocation(geo.Position position) async {
+    // Assign body now — all helpers above are already in scope.
+    processLocation = (geo.Position position) async {
       resetWatchdog();
       processLocationCount++;
-      
+
       // Reduce SharedPreferences disk reads
       if (processLocationCount == 1 || processLocationCount % 5 == 0) {
         await prefs.reload();
@@ -151,7 +156,7 @@ class BackgroundLocationService {
       if (position.accuracy > _maxCheckpointAccuracyMeters) return;
 
       final now = position.timestamp;
-      
+
       final lastTimeStr = prefs.getString('last_checkpoint_time');
       final prevLat = prefs.getDouble('last_checkpoint_lat');
       final prevLon = prefs.getDouble('last_checkpoint_lon');
@@ -184,7 +189,7 @@ class BackgroundLocationService {
       await prefs.setString('last_checkpoint_time', now.toIso8601String());
       await prefs.setDouble('last_checkpoint_lat', position.latitude);
       await prefs.setDouble('last_checkpoint_lon', position.longitude);
-      
+
       final currentCount = prefs.getInt('checkpoint_count') ?? 0;
       await prefs.setInt('checkpoint_count', currentCount + 1);
 
@@ -196,21 +201,19 @@ class BackgroundLocationService {
 
       // OFFLINE FIRST: Accumulate locally, do not upload directly here.
       await _persistToLocalBatch(prefs, routeId, checkpoint);
-      
-      // RACING CONDITION FIX:
-      // If we just added a time-based checkpoint, it means ~30 minutes have passed.
-      // We immediately force a flush here to guarantee it doesn't get stuck in the batch
-      // waiting for the next periodic timer.
+
+      // RACE CONDITION FIX: immediately flush after a time-based checkpoint
+      // so it doesn't sit in the batch until the next 30-min timer fires.
       final lastFlushStr = prefs.getString('last_flush_time');
       final lastFlush = lastFlushStr != null ? DateTime.parse(lastFlushStr) : null;
       if (lastFlush == null || now.difference(lastFlush).inMinutes >= _checkpointMinIntervalMinutes) {
         await flushPendingBatch(prefs, firestoreService);
       }
-    }
+    };
 
-    // 1. Process locations when the user moves
+    // 1. Process locations when the user moves (stream-based)
     StreamSubscription<geo.Position>? locationSubscription;
-    
+
     void subscribeToLocation() {
       locationSubscription?.cancel();
       locationSubscription = stream.listen(
@@ -236,7 +239,7 @@ class BackgroundLocationService {
     });
 
     // 2. Force a location check every 30 minutes for stationary users.
-    // Uses getBestAvailablePosition() which WILL NOT fail indoors.
+    // getBestAvailablePosition() will NOT fail indoors — it falls back to last known.
     periodicFlushTimer?.cancel();
     periodicFlushTimer = Timer.periodic(const Duration(minutes: 30), (timer) async {
       await prefs.reload();
@@ -246,14 +249,13 @@ class BackgroundLocationService {
       }
       final pos = await getBestAvailablePosition();
       if (pos != null) await processLocation(pos);
-      
-      // Flush any accumulated batched checkpoints regardless of position result
+
+      // Flush any accumulated batch regardless of position result
       await flushPendingBatch(prefs, firestoreService);
     });
 
-    // 3. ALIVE PING: Write a heartbeat timestamp to Firestore every 5 minutes.
-    // Purpose: Prove whether Realme OS killed the service or whether the GPS
-    // itself is the problem. Check 'last_ping' in Firestore console after testing.
+    // 3. ALIVE PING: heartbeat every 5 minutes to prove the OS hasn't killed us.
+    // Check 'last_ping' in Firestore after testing to diagnose Realme OS kills.
     Timer.periodic(const Duration(minutes: 5), (timer) async {
       await prefs.reload();
       final routeId = prefs.getString('active_route_id');
