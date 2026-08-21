@@ -100,6 +100,7 @@ class BackgroundLocationService {
 
     int processLocationCount = 0;
     Timer? streamWatchdog;
+    Timer? periodicFlushTimer;
 
     void resetWatchdog() {
       streamWatchdog?.cancel();
@@ -177,6 +178,16 @@ class BackgroundLocationService {
 
       // OFFLINE FIRST: Accumulate locally, do not upload directly here.
       await _persistToLocalBatch(prefs, routeId, checkpoint);
+      
+      // RACING CONDITION FIX:
+      // If we just added a time-based checkpoint, it means ~30 minutes have passed.
+      // We immediately force a flush here to guarantee it doesn't get stuck in the batch
+      // waiting for the next periodic timer.
+      final lastFlushStr = prefs.getString('last_flush_time');
+      final lastFlush = lastFlushStr != null ? DateTime.parse(lastFlushStr) : null;
+      if (lastFlush == null || now.difference(lastFlush).inMinutes >= _checkpointMinIntervalMinutes) {
+        await flushPendingBatch(prefs, firestoreService);
+      }
     }
 
     // 1. Process locations when the user moves
@@ -212,7 +223,8 @@ class BackgroundLocationService {
     });
 
     // 2. Force a location check periodically in case the user is completely stationary
-    Timer.periodic(const Duration(minutes: 30), (timer) async {
+    periodicFlushTimer?.cancel();
+    periodicFlushTimer = Timer.periodic(const Duration(minutes: 30), (timer) async {
       await prefs.reload();
       if (prefs.getString('active_route_id') == null) {
         timer.cancel();
