@@ -51,6 +51,10 @@ class CheckpointQueueService {
         ).toJson(),
       ),
     );
+    // Cap at 200 entries to prevent unbounded SharedPreferences growth
+    if (raw.length > 200) {
+      raw.removeAt(0); // Drop oldest
+    }
     await prefs.setStringList(_prefsKey, raw);
   }
 

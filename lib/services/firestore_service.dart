@@ -373,6 +373,18 @@ class FirestoreService {
     });
   }
 
+  Future<void> appendRouteCheckpointsBatch(
+    String routeId,
+    List<RouteCheckpoint> checkpoints,
+  ) async {
+    if (checkpoints.isEmpty) return;
+    await _firebaseService.firestore.collection('routes').doc(routeId).update({
+      'checkpoints': FieldValue.arrayUnion(
+        checkpoints.map((c) => c.toMap()).toList(),
+      ),
+    });
+  }
+
   Future<void> savePolylineCache(
     String routeId,
     List<CachedPolylinePoint> points, {

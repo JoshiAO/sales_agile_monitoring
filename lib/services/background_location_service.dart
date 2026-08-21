@@ -9,6 +9,7 @@ import 'package:compact_sales_monitoring/services/firestore_service.dart';
 import 'package:compact_sales_monitoring/services/checkpoint_queue_service.dart';
 import 'package:compact_sales_monitoring/models/route_model.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'dart:convert';
 
 class BackgroundLocationService {
   static const double _checkpointMinDistanceMeters = 500.0;
@@ -91,14 +92,37 @@ class BackgroundLocationService {
     final stream = geo.Geolocator.getPositionStream(
       locationSettings: geo.AndroidSettings(
         accuracy: geo.LocationAccuracy.high,
-        distanceFilter: 25, // Lowered to 25 meters to ensure the GPS hardware wakes up
+        distanceFilter: 0, // Unconditional periodic wakeups; software filtering handles 500m logic
         intervalDuration: const Duration(seconds: 20),
         forceLocationManager: false,
       ),
     );
 
+    int processLocationCount = 0;
+    Timer? streamWatchdog;
+
+    void resetWatchdog() {
+      streamWatchdog?.cancel();
+      streamWatchdog = Timer(const Duration(minutes: 2), () async {
+        debugPrint('[BackgroundLocationService] GPS stream silent for 2 mins. Forcing check...');
+        try {
+          final position = await geo.Geolocator.getCurrentPosition(
+            desiredAccuracy: geo.LocationAccuracy.high,
+            timeLimit: const Duration(seconds: 15),
+          );
+          onStart(service); // Re-initialize the service loop
+        } catch (_) {}
+      });
+    }
+
     Future<void> processLocation(geo.Position position) async {
-      await prefs.reload();
+      resetWatchdog();
+      processLocationCount++;
+      
+      // Reduce SharedPreferences disk reads
+      if (processLocationCount == 1 || processLocationCount % 5 == 0) {
+        await prefs.reload();
+      }
       final routeId = prefs.getString('active_route_id');
       if (routeId == null) {
         service.stopSelf();
@@ -141,6 +165,9 @@ class BackgroundLocationService {
       await prefs.setString('last_checkpoint_time', now.toIso8601String());
       await prefs.setDouble('last_checkpoint_lat', position.latitude);
       await prefs.setDouble('last_checkpoint_lon', position.longitude);
+      
+      final currentCount = prefs.getInt('checkpoint_count') ?? 0;
+      await prefs.setInt('checkpoint_count', currentCount + 1);
 
       final checkpoint = RouteCheckpoint(
         lat: position.latitude,
@@ -148,21 +175,41 @@ class BackgroundLocationService {
         timestamp: now,
       );
 
-      try {
-        // Also try to flush any previously queued offline checkpoints
-        await CheckpointQueueService().flush(firestoreService.appendRouteCheckpoint);
-        await firestoreService.appendRouteCheckpoint(routeId, checkpoint);
-      } catch (e) {
-        try {
-          await CheckpointQueueService().enqueue(routeId, checkpoint);
-        } catch (queueError) {
-          debugPrint('[BackgroundLocationService] Failed to enqueue checkpoint: $queueError');
-        }
-      }
+      // OFFLINE FIRST: Accumulate locally, do not upload directly here.
+      await _persistToLocalBatch(prefs, routeId, checkpoint);
     }
 
     // 1. Process locations when the user moves
-    stream.listen(processLocation);
+    StreamSubscription<geo.Position>? locationSubscription;
+    
+    void subscribeToLocation() {
+      locationSubscription?.cancel();
+      locationSubscription = stream.listen(
+        processLocation,
+        onError: (e) {
+          debugPrint('[BackgroundLocationService] Stream error: $e');
+          Future.delayed(const Duration(seconds: 10), subscribeToLocation);
+        },
+        onDone: () {
+          debugPrint('[BackgroundLocationService] Stream done. Re-subscribing...');
+          Future.delayed(const Duration(seconds: 5), subscribeToLocation);
+        },
+      );
+    }
+
+    subscribeToLocation();
+    resetWatchdog();
+
+    // 1.5. Initial 3-minute check to guarantee an early checkpoint
+    Timer(const Duration(minutes: 3), () async {
+      try {
+        final position = await geo.Geolocator.getCurrentPosition(
+          desiredAccuracy: geo.LocationAccuracy.high,
+          timeLimit: const Duration(seconds: 15),
+        );
+        await processLocation(position);
+      } catch (_) {}
+    });
 
     // 2. Force a location check periodically in case the user is completely stationary
     Timer.periodic(const Duration(minutes: 30), (timer) async {
@@ -178,6 +225,78 @@ class BackgroundLocationService {
         );
         await processLocation(position);
       } catch (_) {}
+      
+      // Flush accumulated batched checkpoints
+      await flushPendingBatch(prefs, firestoreService);
     });
+  }
+  
+  static const String _batchPrefsKey = 'batched_checkpoints_v2';
+  
+  static Future<void> _persistToLocalBatch(SharedPreferences prefs, String routeId, RouteCheckpoint cp) async {
+    final raw = prefs.getStringList(_batchPrefsKey) ?? [];
+    raw.add(jsonEncode({
+      'routeId': routeId,
+      'lat': cp.lat,
+      'lon': cp.lon,
+      'timestamp': cp.timestamp.millisecondsSinceEpoch,
+    }));
+    await prefs.setStringList(_batchPrefsKey, raw);
+    await prefs.setInt('batch_pending_count', raw.length);
+  }
+
+  static Future<void> flushPendingBatch([SharedPreferences? providedPrefs, FirestoreService? providedFs]) async {
+    final prefs = providedPrefs ?? await SharedPreferences.getInstance();
+    final fs = providedFs ?? FirestoreService();
+    
+    await prefs.reload();
+    final raw = prefs.getStringList(_batchPrefsKey) ?? [];
+    if (raw.isEmpty) return;
+
+    final Map<String, List<RouteCheckpoint>> checkpointsByRoute = {};
+    final Map<String, List<String>> rawStringsByRoute = {};
+    final List<String> remainingRaw = [];
+
+    for (final entryStr in raw) {
+      try {
+        final map = jsonDecode(entryStr) as Map<String, dynamic>;
+        final routeId = map['routeId'] as String;
+        final cp = RouteCheckpoint(
+          lat: (map['lat'] as num).toDouble(),
+          lon: (map['lon'] as num).toDouble(),
+          timestamp: DateTime.fromMillisecondsSinceEpoch(map['timestamp'] as int),
+        );
+        checkpointsByRoute.putIfAbsent(routeId, () => []).add(cp);
+        rawStringsByRoute.putIfAbsent(routeId, () => []).add(entryStr);
+      } catch (_) {}
+    }
+
+    bool flushOccurred = false;
+    for (final entry in checkpointsByRoute.entries) {
+      final routeId = entry.key;
+      try {
+        await fs.appendRouteCheckpointsBatch(routeId, entry.value);
+        flushOccurred = true;
+      } catch (e) {
+        debugPrint('[BackgroundLocationService] Batch flush failed for route $routeId: $e');
+        // Only keep the checkpoints for routes that failed to upload
+        remainingRaw.addAll(rawStringsByRoute[routeId]!);
+      }
+    }
+
+    // Only update SharedPreferences if something actually succeeded or changed
+    if (remainingRaw.length != raw.length) {
+      if (remainingRaw.isEmpty) {
+        await prefs.remove(_batchPrefsKey);
+        await prefs.setInt('batch_pending_count', 0);
+      } else {
+        await prefs.setStringList(_batchPrefsKey, remainingRaw);
+        await prefs.setInt('batch_pending_count', remainingRaw.length);
+      }
+    }
+
+    if (flushOccurred) {
+      await prefs.setString('last_flush_time', DateTime.now().toIso8601String());
+    }
   }
 }

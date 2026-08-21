@@ -75,6 +75,7 @@ class _SalesmanHomeScreenState extends State<SalesmanHomeScreen>
 
       // Ensure pending offline checkpoints are attempted at day rollover,
       // then load fresh route state for the new date.
+      BackgroundLocationService.flushPendingBatch().catchError((_) {});
       _checkpointQueue
           .flush(_firestoreService.appendRouteCheckpoint)
           .catchError((_) {});
@@ -472,6 +473,7 @@ class _SalesmanHomeScreenState extends State<SalesmanHomeScreen>
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _scheduleMidnightRollover();
+    BackgroundLocationService.flushPendingBatch().catchError((_) {});
     _checkpointQueue
         .flush(_firestoreService.appendRouteCheckpoint)
         .catchError((_) {});
@@ -484,6 +486,7 @@ class _SalesmanHomeScreenState extends State<SalesmanHomeScreen>
       // Flush any offline-queued checkpoints each time the app comes to the
       // foreground — covers the case where data returned while the app was
       // backgrounded or while the salesman was stationary (no GPS events).
+      BackgroundLocationService.flushPendingBatch().catchError((_) {});
       _checkpointQueue
           .flush(_firestoreService.appendRouteCheckpoint)
           .catchError((_) {});
@@ -881,6 +884,7 @@ class _SalesmanHomeScreenState extends State<SalesmanHomeScreen>
           // Flush any checkpoints queued while data was off before we stop
           // tracking (syncCheckpointTracking cancels the stream once lastPoint
           // is set, so this is the last reliable upload window).
+          await BackgroundLocationService.flushPendingBatch();
           _checkpointQueue
               .flush(_firestoreService.appendRouteCheckpoint)
               .catchError((_) {});
@@ -936,6 +940,7 @@ class _SalesmanHomeScreenState extends State<SalesmanHomeScreen>
             _lastCheckpointLon = null;
           });
           // Flush queued offline checkpoints before stream is cancelled.
+          await BackgroundLocationService.flushPendingBatch();
           _checkpointQueue
               .flush(_firestoreService.appendRouteCheckpoint)
               .catchError((_) {});
