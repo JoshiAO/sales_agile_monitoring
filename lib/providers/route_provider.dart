@@ -144,13 +144,24 @@ class RouteProvider extends ChangeNotifier {
     _approximatePolylines.clear();
 
     for (final route in _routes) {
-      final anchors = <LatLng>[
-        if (route.hasFirstCall) LatLng(route.first.lat, route.first.lon),
-        ...route.sortedCheckpoints.map(
-          (checkpoint) => LatLng(checkpoint.lat, checkpoint.lon),
-        ),
-        if (route.hasLastCall) LatLng(route.last.lat, route.last.lon),
-      ];
+      final anchors = <LatLng>[];
+      final anchorOfflineStatus = <bool>[];
+
+      if (route.hasFirstCall) {
+        anchors.add(LatLng(route.first.lat, route.first.lon));
+        anchorOfflineStatus.add(false); // First call is online
+      }
+
+      for (var checkpoint in route.sortedCheckpoints) {
+        anchors.add(LatLng(checkpoint.lat, checkpoint.lon));
+        bool isOffline = (checkpoint.isMobileDataOn != true && checkpoint.isWifiOn != true);
+        anchorOfflineStatus.add(isOffline);
+      }
+
+      if (route.hasLastCall) {
+        anchors.add(LatLng(route.last.lat, route.last.lon));
+        anchorOfflineStatus.add(false); // Last call acts as end anchor
+      }
 
       if (anchors.length < 2) {
         final cachedFallback = route.cachedPolyline
@@ -174,9 +185,34 @@ class RouteProvider extends ChangeNotifier {
           cachedPolyline.isNotEmpty &&
           _isCacheFresh(route)) {
         
-        final isApprox = route.cachedPolylineApproximate || _matchesAnchorPolyline(cachedPolyline, anchors);
-        _routePolylines[route.routeId] = [RouteSegment(points: cachedPolyline, isApproximate: isApprox)];
-        if (isApprox) {
+        final segments = <RouteSegment>[];
+        int lastIndex = 0;
+        final distance = const Distance();
+        for (int i = 0; i < anchors.length - 1; i++) {
+          int closestIdx = lastIndex;
+          double minDist = double.infinity;
+          for (int j = lastIndex; j < cachedPolyline.length; j++) {
+            double dist = distance.as(LengthUnit.Meter, anchors[i + 1], cachedPolyline[j]);
+            if (dist < minDist) {
+              minDist = dist;
+              closestIdx = j;
+            }
+          }
+          if (closestIdx == lastIndex && closestIdx < cachedPolyline.length - 1) {
+             closestIdx++;
+          }
+          segments.add(RouteSegment(
+            points: cachedPolyline.sublist(lastIndex, closestIdx + 1),
+            isApproximate: anchorOfflineStatus[i],
+          ));
+          lastIndex = closestIdx;
+        }
+        if (lastIndex < cachedPolyline.length - 1 && segments.isNotEmpty) {
+          segments.last.points.addAll(cachedPolyline.sublist(lastIndex + 1));
+        }
+
+        _routePolylines[route.routeId] = segments;
+        if (segments.any((s) => s.isApproximate)) {
           _approximatePolylines.add(route.routeId);
         }
         continue;
@@ -190,11 +226,12 @@ class RouteProvider extends ChangeNotifier {
       for (var i = 0; i < anchors.length - 1; i++) {
         final start = anchors[i];
         final end = anchors[i + 1];
+        final isOffline = anchorOfflineStatus[i];
 
         try {
           final osrmSegment = await _routingService.getRoute(start, end);
           if (osrmSegment.length >= 2) {
-            segments.add(RouteSegment(points: osrmSegment, isApproximate: false));
+            segments.add(RouteSegment(points: osrmSegment, isApproximate: isOffline));
             
             if (fullPolyline.isEmpty) {
               fullPolyline.addAll(osrmSegment);
