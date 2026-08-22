@@ -20,8 +20,8 @@ import 'package:connectivity_plus/connectivity_plus.dart';
 @pragma('vm:entry-point')
 class BackgroundLocationService {
   static const double _checkpointMinDistanceMeters = 500.0;
-  static const int _checkpointMinIntervalMinutes = 2; // Strict 2-minute checkpoints
-  static const int _batchUploadIntervalMinutes = 30; // Upload batches every 30 minutes
+  static const int _checkpointMinIntervalMinutes = 1; // Strict 1-minute checkpoints
+  static const int _batchUploadIntervalMinutes = 60; // Upload batches every 60 minutes
   static const double _maxCheckpointAccuracyMeters = 250.0;
 
   static Future<void> initializeService() async {
@@ -324,10 +324,10 @@ class BackgroundLocationService {
       if (pos != null) await processLocation(pos);
     });
 
-    // 2. Force a location check every 2 minutes for stationary users.
+    // 2. Force a location check every 1 minute for stationary users.
     // getBestAvailablePosition() will NOT fail indoors — it falls back to last known.
     periodicFlushTimer?.cancel();
-    periodicFlushTimer = Timer.periodic(const Duration(minutes: 2), (timer) async {
+    periodicFlushTimer = Timer.periodic(const Duration(minutes: 1), (timer) async {
       await prefs.reload();
       if (prefs.getString('active_route_id') == null) {
         timer.cancel();
