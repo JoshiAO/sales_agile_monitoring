@@ -167,19 +167,10 @@ class _SalesmanDebugScreenState extends State<SalesmanDebugScreen> {
                   Expanded(
                     child: _buildStatCard(
                       icon: Icons.location_on_rounded,
-                      title: 'Total Checkpoints',
-                      value: '$_checkpointCount',
+                      title: 'Checkpoints',
+                      value: '${_checkpointCount - _pendingTimestamps.length}',
                       color: Colors.blue.shade600,
-                      extra: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text('Uploaded: ${_checkpointCount - _pendingTimestamps.length}', 
-                               style: TextStyle(fontSize: 12, color: Colors.green.shade700, fontWeight: FontWeight.w700)),
-                          const SizedBox(height: 2),
-                          Text('Pending: ${_pendingTimestamps.length}', 
-                               style: TextStyle(fontSize: 12, color: Colors.red.shade700, fontWeight: FontWeight.w700)),
-                        ],
-                      ),
+                      badgeCount: _pendingTimestamps.length,
                     ),
                   ),
                   const SizedBox(width: 16),
@@ -315,7 +306,7 @@ class _SalesmanDebugScreenState extends State<SalesmanDebugScreen> {
     required String title,
     required String value,
     required Color color,
-    Widget? extra,
+    int? badgeCount,
   }) {
     return Container(
       padding: const EdgeInsets.all(20),
@@ -334,13 +325,18 @@ class _SalesmanDebugScreenState extends State<SalesmanDebugScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Container(
-            padding: const EdgeInsets.all(10),
-            decoration: BoxDecoration(
-              color: color.withOpacity(0.1),
-              shape: BoxShape.circle,
+          Badge(
+            isLabelVisible: badgeCount != null && badgeCount > 0,
+            label: Text(badgeCount?.toString() ?? ''),
+            backgroundColor: Colors.red.shade700,
+            child: Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: color.withOpacity(0.1),
+                shape: BoxShape.circle,
+              ),
+              child: Icon(icon, color: color, size: 24),
             ),
-            child: Icon(icon, color: color, size: 24),
           ),
           const SizedBox(height: 16),
           Text(
@@ -359,10 +355,6 @@ class _SalesmanDebugScreenState extends State<SalesmanDebugScreen> {
               color: Colors.grey.shade600,
             ),
           ),
-          if (extra != null) ...[
-            const SizedBox(height: 8),
-            extra,
-          ],
         ],
       ),
     );
