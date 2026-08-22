@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter/gestures.dart';
 import 'package:provider/provider.dart';
 import 'package:intl/intl.dart';
 import 'package:compact_sales_monitoring/models/user_model.dart';
@@ -1249,8 +1250,8 @@ class _SuperUserDashboardState extends State<SuperUserDashboard> {
                     ),
                     if (_selectedCheckpointId != null)
                       Positioned(
-                        bottom: _focusedRouteId != null ? 220 : 160,
-                        right: 12,
+                        bottom: _focusedRouteId != null ? 100 : 40,
+                        right: 60,
                         child: _buildCheckpointDataOverlay(routeProvider),
                       ),
                     if (_focusedRouteId != null)
@@ -1352,11 +1353,15 @@ class _SuperUserDashboardState extends State<SuperUserDashboard> {
           ),
         ],
       ),
-      child: ListView.builder(
-        scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-        itemCount: allPoints.length,
-        itemBuilder: (context, index) {
+      child: ScrollConfiguration(
+        behavior: ScrollConfiguration.of(context).copyWith(
+          dragDevices: {PointerDeviceKind.touch, PointerDeviceKind.mouse},
+        ),
+        child: ListView.builder(
+          scrollDirection: Axis.horizontal,
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          itemCount: allPoints.length,
+          itemBuilder: (context, index) {
           final item = allPoints[index];
           final type = item['type'] as String;
           final time = DateFormat('hh:mm a').format(item['timestamp'] as DateTime);
@@ -1432,6 +1437,7 @@ class _SuperUserDashboardState extends State<SuperUserDashboard> {
             ),
           );
         },
+      ),
       ),
     );
   }
