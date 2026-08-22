@@ -697,7 +697,7 @@ class _SuperUserDashboardState extends State<SuperUserDashboard> {
     return Positioned(
       top: 12,
       left: 0,
-      bottom: 12,
+      bottom: _focusedRouteId != null ? 92 : 12,
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
