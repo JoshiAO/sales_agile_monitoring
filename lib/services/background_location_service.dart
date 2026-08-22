@@ -21,7 +21,7 @@ import 'package:connectivity_plus/connectivity_plus.dart';
 class BackgroundLocationService {
   static const double _checkpointMinDistanceMeters = 500.0;
   static const int _checkpointMinIntervalMinutes = 1; // Strict 1-minute checkpoints
-  static const int _batchUploadIntervalMinutes = 60; // Upload batches every 60 minutes
+  static const int _batchUploadIntervalMinutes = 30; // Upload batches every 30 minutes
   static const double _maxCheckpointAccuracyMeters = 250.0;
 
   static Future<void> initializeService() async {
