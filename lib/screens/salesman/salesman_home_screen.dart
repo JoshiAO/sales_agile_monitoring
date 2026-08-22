@@ -212,19 +212,20 @@ class _SalesmanHomeScreenState extends State<SalesmanHomeScreen>
     final baseImage = img.bakeOrientation(decoded);
     final output = img.Image.from(baseImage);
 
-    // Place all details in a bottom-right square panel.
+    // Place all details in a bottom-right rectangular panel.
     final panelPadding = max(12, (output.width * 0.015).toInt());
-    final panelSize = max(250, min(output.width, output.height) ~/ 3);
-    final panelX = output.width - panelSize - panelPadding;
-    final panelY = output.height - panelSize - panelPadding;
+    final panelWidth = max(450, (output.width * 0.45).toInt());
+    final panelHeight = 165;
+    final panelX = output.width - panelWidth - panelPadding;
+    final panelY = output.height - panelHeight - panelPadding;
 
     // Outer soft shadow block
     img.fillRect(
       output,
       x1: panelX - 2,
       y1: panelY - 2,
-      x2: panelX + panelSize + 2,
-      y2: panelY + panelSize + 2,
+      x2: panelX + panelWidth + 2,
+      y2: panelY + panelHeight + 2,
       color: img.ColorRgba8(0, 0, 0, 120),
     );
 
@@ -232,8 +233,8 @@ class _SalesmanHomeScreenState extends State<SalesmanHomeScreen>
       output,
       x1: panelX,
       y1: panelY,
-      x2: panelX + panelSize,
-      y2: panelY + panelSize,
+      x2: panelX + panelWidth,
+      y2: panelY + panelHeight,
       color: img.ColorRgba8(18, 20, 24, 205),
     );
 
@@ -242,13 +243,31 @@ class _SalesmanHomeScreenState extends State<SalesmanHomeScreen>
       output,
       x1: panelX,
       y1: panelY,
-      x2: panelX + panelSize,
-      y2: panelY + panelSize,
+      x2: panelX + panelWidth,
+      y2: panelY + panelHeight,
       color: img.ColorRgba8(255, 255, 255, 210),
     );
 
     final mapsUrl = _googleMapsLink(position.latitude, position.longitude);
-    final qrSize = max(88, (panelSize * 0.46).toInt());
+    const innerPadding = 12;
+    
+    // Draw Title Centered
+    final titleStr = 'CALL DETAILS';
+    final titleX = panelX + (panelWidth ~/ 2) - 75; // Approx centering for arial24
+    final titleY = panelY + innerPadding;
+    img.drawString(
+      output,
+      titleStr,
+      font: img.arial24,
+      x: titleX,
+      y: titleY,
+      color: img.ColorRgb8(255, 255, 255),
+    );
+
+    final contentStartY = titleY + 32;
+
+    // Build QR Code
+    final qrSize = 100;
     final qrImage = img.Image(width: qrSize, height: qrSize);
     img.fill(qrImage, color: img.ColorRgb8(255, 255, 255));
 
@@ -278,39 +297,29 @@ class _SalesmanHomeScreenState extends State<SalesmanHomeScreen>
       }
     }
 
-    const innerPadding = 10;
-    final qrX = panelX + ((panelSize - qrSize) ~/ 2);
-    final qrY = panelY + panelSize - qrSize - innerPadding;
+    // Place QR Code on the Left
+    final qrX = panelX + innerPadding + 4;
+    final qrY = contentStartY;
 
     img.fillRect(
       output,
-      x1: qrX - 5,
-      y1: qrY - 5,
-      x2: qrX + qrSize + 5,
-      y2: qrY + qrSize + 5,
+      x1: qrX - 4,
+      y1: qrY - 4,
+      x2: qrX + qrSize + 4,
+      y2: qrY + qrSize + 4,
       color: img.ColorRgb8(255, 255, 255),
     );
     img.compositeImage(output, qrImage, dstX: qrX, dstY: qrY);
 
-    final textX = panelX + innerPadding;
-    var textY = panelY + innerPadding;
-
-    img.drawString(
-      output,
-      'CALL DETAILS',
-      font: img.arial24,
-      x: textX,
-      y: textY,
-      color: img.ColorRgb8(255, 255, 255),
-    );
-    textY += 30;
+    // Place Text Details on the Right
+    final textX = qrX + qrSize + 16;
+    var textY = contentStartY + 4;
 
     final lines = <String>[
       'Salesman: $salesmanName',
       'Long-Lat: ${position.longitude.toStringAsFixed(6)}, ${position.latitude.toStringAsFixed(6)}',
       'Date: ${DateFormat('yyyy-MM-dd').format(capturedAt)}',
-      'Time: ${DateFormat('HH:mm:ss').format(capturedAt)}',
-      'Scan QR to open map',
+      'Time: ${DateFormat('hh:mm a').format(capturedAt)}',
     ];
 
     for (final line in lines) {
@@ -322,7 +331,7 @@ class _SalesmanHomeScreenState extends State<SalesmanHomeScreen>
         y: textY,
         color: img.ColorRgb8(255, 255, 255),
       );
-      textY += 20;
+      textY += 24;
     }
 
     final appDir = await getApplicationDocumentsDirectory();
