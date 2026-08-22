@@ -50,6 +50,10 @@ class BackgroundLocationService {
     if (kIsWeb) return;
     final service = FlutterBackgroundService();
     final prefs = await SharedPreferences.getInstance();
+    
+    // Unconditionally ensure any leftover end time is wiped when tracking starts/resumes
+    await prefs.remove('route_end_time');
+    
     final previousRouteId = prefs.getString('active_route_id');
     final previousFirstPointTime = prefs.getString('first_point_time');
     final currentFirstPointTime = firstPoint.timestamp.toIso8601String();
@@ -58,9 +62,8 @@ class BackgroundLocationService {
       await prefs.setString('active_route_id', routeId);
       await prefs.setString('first_point_time', currentFirstPointTime);
       
-      // Set initial checkpoint base and properly clear any old end time
+      // Set initial checkpoint base
       await prefs.setString('route_start_time', currentFirstPointTime);
-      await prefs.remove('route_end_time');
       
       await prefs.setString('last_checkpoint_time', currentFirstPointTime);
       await prefs.setDouble('last_checkpoint_lat', firstPoint.lat);
