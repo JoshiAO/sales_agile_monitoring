@@ -23,6 +23,7 @@ class _SalesmanDebugScreenState extends State<SalesmanDebugScreen> {
   double? _lastLon;
   String _startTimeStr = 'Not started';
   List<Map<String, dynamic>> _pendingCheckpoints = [];
+  Set<int> _pendingTimestamps = {};
 
   @override
   void initState() {
@@ -67,14 +68,24 @@ class _SalesmanDebugScreenState extends State<SalesmanDebugScreen> {
     _lastLat = _prefs!.getDouble('last_checkpoint_lat');
     _lastLon = _prefs!.getDouble('last_checkpoint_lon');
 
-    final rawBatch = _prefs!.getStringList('batched_checkpoints_v2') ?? [];
+    final rawBatch = _prefs!.getStringList('session_checkpoints_history') ?? [];
     _pendingCheckpoints = rawBatch.map((e) {
       try {
         return jsonDecode(e) as Map<String, dynamic>;
       } catch (_) {
         return <String, dynamic>{};
       }
-    }).where((e) => e.isNotEmpty).toList();
+    }).where((e) => e.isNotEmpty).toList().reversed.toList();
+
+    final rawPending = _prefs!.getStringList('batched_checkpoints_v2') ?? [];
+    _pendingTimestamps = rawPending.map((e) {
+      try {
+        final map = jsonDecode(e) as Map<String, dynamic>;
+        return map['timestamp'] as int?;
+      } catch (_) {
+        return null;
+      }
+    }).where((e) => e != null).cast<int>().toSet();
 
     if (mounted) {
       setState(() {});
@@ -225,7 +236,7 @@ class _SalesmanDebugScreenState extends State<SalesmanDebugScreen> {
             if (_pendingCheckpoints.isNotEmpty) ...[
               const SizedBox(height: 32),
               const Text(
-                'Pending Checkpoints (Offline Queue)',
+                'Checkpoint History',
                 style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
               ),
               const SizedBox(height: 12),
@@ -236,23 +247,41 @@ class _SalesmanDebugScreenState extends State<SalesmanDebugScreen> {
                 final time = ts != null 
                     ? DateFormat('hh:mm:ss a').format(DateTime.fromMillisecondsSinceEpoch(ts))
                     : 'Unknown';
+                final isPending = ts != null && _pendingTimestamps.contains(ts);
+                final statusColor = isPending ? Colors.red : Colors.green;
+                final statusText = isPending ? 'Pending' : 'Uploaded';
+                final statusIcon = isPending ? Icons.cloud_upload : Icons.cloud_done;
+
                 return Card(
                   elevation: 0,
                   margin: const EdgeInsets.only(bottom: 8),
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(12),
-                    side: BorderSide(color: Colors.grey.shade300),
+                    side: BorderSide(color: statusColor.withOpacity(0.3)),
                   ),
                   child: ListTile(
                     leading: Container(
                       padding: const EdgeInsets.all(8),
                       decoration: BoxDecoration(
-                        color: Colors.blue.withOpacity(0.1),
+                        color: statusColor.withOpacity(0.1),
                         shape: BoxShape.circle,
                       ),
-                      child: const Icon(Icons.location_on, color: Colors.blue, size: 20),
+                      child: Icon(statusIcon, color: statusColor, size: 20),
                     ),
-                    title: Text(time, style: const TextStyle(fontWeight: FontWeight.w600)),
+                    title: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text(time, style: const TextStyle(fontWeight: FontWeight.w600)),
+                        Text(
+                          statusText,
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w700,
+                            color: statusColor,
+                          ),
+                        ),
+                      ],
+                    ),
                     subtitle: Text('Lat: ${lat?.toStringAsFixed(5)}, Lon: ${lon?.toStringAsFixed(5)}'),
                   ),
                 );

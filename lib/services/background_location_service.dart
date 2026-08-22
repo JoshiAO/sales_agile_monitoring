@@ -61,6 +61,7 @@ class BackgroundLocationService {
       await prefs.setDouble('last_checkpoint_lat', firstPoint.lat);
       await prefs.setDouble('last_checkpoint_lon', firstPoint.lon);
       await prefs.setInt('checkpoint_count', 0);
+      await prefs.remove('session_checkpoints_history');
     }
 
     await service.startService();
@@ -329,14 +330,19 @@ class BackgroundLocationService {
   
   static Future<void> _persistToLocalBatch(SharedPreferences prefs, String routeId, RouteCheckpoint cp) async {
     final raw = prefs.getStringList(_batchPrefsKey) ?? [];
-    raw.add(jsonEncode({
+    final jsonStr = jsonEncode({
       'routeId': routeId,
       'lat': cp.lat,
       'lon': cp.lon,
       'timestamp': cp.timestamp.millisecondsSinceEpoch,
-    }));
+    });
+    raw.add(jsonStr);
     await prefs.setStringList(_batchPrefsKey, raw);
     await prefs.setInt('batch_pending_count', raw.length);
+    
+    final history = prefs.getStringList('session_checkpoints_history') ?? [];
+    history.add(jsonStr);
+    await prefs.setStringList('session_checkpoints_history', history);
   }
 
   static Future<void> flushPendingBatch([SharedPreferences? providedPrefs, FirestoreService? providedFs]) async {
