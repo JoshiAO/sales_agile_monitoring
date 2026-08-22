@@ -42,10 +42,14 @@ class _SalesmanDebugScreenState extends State<SalesmanDebugScreen> {
     _prefs!.reload(); // Ensure we get the latest background updates
     
     final startStr = _prefs!.getString('route_start_time');
+    final endStr = _prefs!.getString('route_end_time');
+    
     if (startStr != null) {
       final startTime = DateTime.parse(startStr);
       _startTimeStr = DateFormat('hh:mm a').format(startTime);
-      final activeDuration = DateTime.now().difference(startTime);
+      
+      final endTime = endStr != null ? DateTime.parse(endStr) : DateTime.now();
+      final activeDuration = endTime.difference(startTime);
       
       final hours = activeDuration.inHours.toString().padLeft(2, '0');
       final minutes = (activeDuration.inMinutes % 60).toString().padLeft(2, '0');

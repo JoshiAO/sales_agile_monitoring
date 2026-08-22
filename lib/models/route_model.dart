@@ -41,6 +41,7 @@ class RoutePoint {
   final String? serialNumber;
   final String? uuid;
   final int? batteryLevel;
+  final String? appVersion;
   final List<DataUsageEntry>? mobileDataUsage;
   final List<DataUsageEntry>? wifiDataUsage;
 
@@ -54,6 +55,7 @@ class RoutePoint {
     this.serialNumber,
     this.uuid,
     this.batteryLevel,
+    this.appVersion,
     this.mobileDataUsage,
     this.wifiDataUsage,
   });
@@ -69,6 +71,7 @@ class RoutePoint {
       serialNumber: data['serialNumber'] as String?,
       uuid: data['uuid'] as String?,
       batteryLevel: data['batteryLevel'] as int?,
+      appVersion: data['appVersion'] as String?,
       mobileDataUsage: (data['mobileDataUsage'] as List<dynamic>?)
           ?.map((e) => DataUsageEntry.fromMap(e as Map<String, dynamic>))
           .toList(),
@@ -89,6 +92,7 @@ class RoutePoint {
       if (serialNumber != null) 'serialNumber': serialNumber,
       if (uuid != null) 'uuid': uuid,
       if (batteryLevel != null) 'batteryLevel': batteryLevel,
+      if (appVersion != null) 'appVersion': appVersion,
       if (mobileDataUsage != null)
         'mobileDataUsage': mobileDataUsage!.map((e) => e.toMap()).toList(),
       if (wifiDataUsage != null)
@@ -101,11 +105,17 @@ class RouteCheckpoint {
   final double lat;
   final double lon;
   final DateTime timestamp;
+  final int? batteryLevel;
+  final bool? isMobileDataOn;
+  final bool? isWifiOn;
 
   RouteCheckpoint({
     required this.lat,
     required this.lon,
     required this.timestamp,
+    this.batteryLevel,
+    this.isMobileDataOn,
+    this.isWifiOn,
   });
 
   factory RouteCheckpoint.fromMap(Map<String, dynamic> data) {
@@ -113,11 +123,21 @@ class RouteCheckpoint {
       lat: (data['lat'] as num?)?.toDouble() ?? 0.0,
       lon: (data['lon'] as num?)?.toDouble() ?? 0.0,
       timestamp: (data['timestamp'] as Timestamp?)?.toDate() ?? DateTime.now(),
+      batteryLevel: data['batteryLevel'] as int?,
+      isMobileDataOn: data['isMobileDataOn'] as bool?,
+      isWifiOn: data['isWifiOn'] as bool?,
     );
   }
 
   Map<String, dynamic> toMap() {
-    return {'lat': lat, 'lon': lon, 'timestamp': timestamp};
+    return {
+      'lat': lat, 
+      'lon': lon, 
+      'timestamp': timestamp,
+      if (batteryLevel != null) 'batteryLevel': batteryLevel,
+      if (isMobileDataOn != null) 'isMobileDataOn': isMobileDataOn,
+      if (isWifiOn != null) 'isWifiOn': isWifiOn,
+    };
   }
 }
 

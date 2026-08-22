@@ -356,10 +356,10 @@ class _SupervisorDashboardState extends State<SupervisorDashboard> {
   /// stores all cached points with one timestamp.
   List<RouteCheckpoint> _cachedPolylineAsCheckpoints(
     SalesRoute route, {
-    List<LatLng>? renderedPolyline,
+    List<RouteSegment>? renderedPolyline,
   }) {
     final fromCache = route.cachedPolyline;
-    final fromRendered = renderedPolyline ?? const <LatLng>[];
+    final fromRendered = renderedPolyline?.expand((s) => s.points).toList() ?? const <LatLng>[];
     final useCache = fromCache.length >= 2;
     if (!useCache && fromRendered.length < 2) return [];
 
@@ -443,9 +443,9 @@ class _SupervisorDashboardState extends State<SupervisorDashboard> {
     SalesRoute route,
     RouteProvider routeProvider,
   ) {
-    final cached = routeProvider.routePolylines[route.routeId];
-    if (cached != null && cached.isNotEmpty) {
-      return cached;
+    final cachedSegments = routeProvider.routePolylines[route.routeId];
+    if (cachedSegments != null && cachedSegments.isNotEmpty) {
+      return cachedSegments.expand((s) => s.points).toList();
     }
 
     return [
@@ -758,63 +758,42 @@ class _SupervisorDashboardState extends State<SupervisorDashboard> {
                           ],
                         ),
 
-                        // Polylines — road-accurate routes
+                        // Polylines — mixed segments (solid for online, dotted for offline)
                         PolylineLayer(
                           polylines: routeProvider.routes
                               .where(
-                                (r) =>
-                                  (_focusedRouteId == null ||
-                                    r.routeId == _focusedRouteId) &&
-                                  !routeProvider.isApproximate(r.routeId),
+                                (r) => _focusedRouteId == null || r.routeId == _focusedRouteId,
                               )
-                              .map((route) {
-                                final polyline =
-                                    routeProvider.routePolylines[route.routeId];
-                                final routeColor = routeProvider
-                                    .routeColorForSalesman(route.salesmanId);
-                                return Polyline(
-                                  points:
-                                      polyline ??
-                                      [
-                                        LatLng(
-                                          route.first.lat,
-                                          route.first.lon,
-                                        ),
-                                      ],
-                                  color: routeColor.withValues(alpha: 0.78),
-                                  strokeWidth: 4,
-                                );
-                              })
-                              .toList(),
-                        ),
-
-                        // Polylines — approximate (offline fallback) routes
-                        PolylineLayer(
-                          polylines: routeProvider.routes
-                              .where(
-                                (r) =>
-                                  (_focusedRouteId == null ||
-                                    r.routeId == _focusedRouteId) &&
-                                  routeProvider.isApproximate(r.routeId),
-                              )
-                              .map((route) {
-                                final polyline =
-                                    routeProvider.routePolylines[route.routeId];
-                                final routeColor = routeProvider
-                                    .routeColorForSalesman(route.salesmanId);
-                                return Polyline(
-                                  points:
-                                      polyline ??
-                                      [
-                                        LatLng(
-                                          route.first.lat,
-                                          route.first.lon,
-                                        ),
-                                      ],
-                                  color: routeColor.withValues(alpha: 0.62),
-                                  strokeWidth: 3,
-                                  isDotted: true,
-                                );
+                              .expand((route) {
+                                final segments = routeProvider.routePolylines[route.routeId];
+                                final routeColor = routeProvider.routeColorForSalesman(route.salesmanId);
+                                
+                                if (segments == null || segments.isEmpty) {
+                                  return [
+                                    Polyline(
+                                      points: [LatLng(route.first.lat, route.first.lon)],
+                                      color: routeColor.withValues(alpha: 0.78),
+                                      strokeWidth: 4,
+                                    )
+                                  ];
+                                }
+                                
+                                return segments.map((segment) {
+                                  if (segment.isApproximate) {
+                                    return Polyline(
+                                      points: segment.points,
+                                      color: routeColor.withValues(alpha: 0.62),
+                                      strokeWidth: 3,
+                                      isDotted: true,
+                                    );
+                                  } else {
+                                    return Polyline(
+                                      points: segment.points,
+                                      color: routeColor.withValues(alpha: 0.78),
+                                      strokeWidth: 4,
+                                    );
+                                  }
+                                });
                               })
                               .toList(),
                         ),

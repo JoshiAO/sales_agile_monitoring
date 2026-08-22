@@ -82,12 +82,12 @@ class RouteCallDetailCard extends StatelessWidget {
             ),
           ],
         ),
-        if (point.batteryLevel != null) ...[
+        if (point.batteryLevel != null || point.appVersion != null) ...[
           const SizedBox(height: 8),
           Text('Device Telemetry', style: Theme.of(context).textTheme.bodySmall),
           Text(
-            'Battery: ${point.batteryLevel}% • UUID: ${point.uuid ?? 'N/A'}\n'
-            '${point.productName ?? 'Unknown'} ${point.modelName ?? 'Device'}'
+            'App Ver: ${point.appVersion ?? 'N/A'} • Battery: ${point.batteryLevel != null ? '${point.batteryLevel}%' : 'N/A'}\n'
+            'UUID: ${point.uuid ?? 'N/A'} • ${point.productName ?? 'Unknown'} ${point.modelName ?? 'Device'}'
             '${point.serialNumber != null ? ' • SN: ${point.serialNumber}' : ''}',
             style: const TextStyle(fontSize: 12, color: Colors.grey),
           ),

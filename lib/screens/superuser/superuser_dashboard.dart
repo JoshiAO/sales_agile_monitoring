@@ -461,10 +461,10 @@ class _SuperUserDashboardState extends State<SuperUserDashboard> {
   /// stores all cached points with one timestamp.
   List<RouteCheckpoint> _cachedPolylineAsCheckpoints(
     SalesRoute route, {
-    List<LatLng>? renderedPolyline,
+    List<RouteSegment>? renderedPolyline,
   }) {
     final fromCache = route.cachedPolyline;
-    final fromRendered = renderedPolyline ?? const <LatLng>[];
+    final fromRendered = renderedPolyline?.expand((s) => s.points).toList() ?? const <LatLng>[];
     final useCache = fromCache.length >= 2;
     if (!useCache && fromRendered.length < 2) return [];
 
@@ -548,9 +548,9 @@ class _SuperUserDashboardState extends State<SuperUserDashboard> {
     SalesRoute route,
     RouteProvider routeProvider,
   ) {
-    final cached = routeProvider.routePolylines[route.routeId];
-    if (cached != null && cached.isNotEmpty) {
-      return cached;
+    final cachedSegments = routeProvider.routePolylines[route.routeId];
+    if (cachedSegments != null && cachedSegments.isNotEmpty) {
+      return cachedSegments.expand((s) => s.points).toList();
     }
 
     return [
@@ -868,63 +868,42 @@ class _SuperUserDashboardState extends State<SuperUserDashboard> {
                           ],
                         ),
 
-                        // Polylines — road-accurate routes
+                        // Polylines — mixed segments (solid for online, dotted for offline)
                         PolylineLayer(
                           polylines: routeProvider.routes
                               .where(
-                                (r) =>
-                                  (_focusedRouteId == null ||
-                                    r.routeId == _focusedRouteId) &&
-                                  !routeProvider.isApproximate(r.routeId),
+                                (r) => _focusedRouteId == null || r.routeId == _focusedRouteId,
                               )
-                              .map((route) {
-                                final polyline =
-                                    routeProvider.routePolylines[route.routeId];
-                                final routeColor = routeProvider
-                                    .routeColorForSalesman(route.salesmanId);
-                                return Polyline(
-                                  points:
-                                      polyline ??
-                                      [
-                                        LatLng(
-                                          route.first.lat,
-                                          route.first.lon,
-                                        ),
-                                      ],
-                                  color: routeColor.withValues(alpha: 0.78),
-                                  strokeWidth: 4,
-                                );
-                              })
-                              .toList(),
-                        ),
-
-                        // Polylines — approximate (offline fallback) routes
-                        PolylineLayer(
-                          polylines: routeProvider.routes
-                              .where(
-                                (r) =>
-                                  (_focusedRouteId == null ||
-                                    r.routeId == _focusedRouteId) &&
-                                  routeProvider.isApproximate(r.routeId),
-                              )
-                              .map((route) {
-                                final polyline =
-                                    routeProvider.routePolylines[route.routeId];
-                                final routeColor = routeProvider
-                                    .routeColorForSalesman(route.salesmanId);
-                                return Polyline(
-                                  points:
-                                      polyline ??
-                                      [
-                                        LatLng(
-                                          route.first.lat,
-                                          route.first.lon,
-                                        ),
-                                      ],
-                                  color: routeColor.withValues(alpha: 0.62),
-                                  strokeWidth: 3,
-                                  isDotted: true,
-                                );
+                              .expand((route) {
+                                final segments = routeProvider.routePolylines[route.routeId];
+                                final routeColor = routeProvider.routeColorForSalesman(route.salesmanId);
+                                
+                                if (segments == null || segments.isEmpty) {
+                                  return [
+                                    Polyline(
+                                      points: [LatLng(route.first.lat, route.first.lon)],
+                                      color: routeColor.withValues(alpha: 0.78),
+                                      strokeWidth: 4,
+                                    )
+                                  ];
+                                }
+                                
+                                return segments.map((segment) {
+                                  if (segment.isApproximate) {
+                                    return Polyline(
+                                      points: segment.points,
+                                      color: routeColor.withValues(alpha: 0.62),
+                                      strokeWidth: 3,
+                                      isDotted: true,
+                                    );
+                                  } else {
+                                    return Polyline(
+                                      points: segment.points,
+                                      color: routeColor.withValues(alpha: 0.78),
+                                      strokeWidth: 4,
+                                    );
+                                  }
+                                });
                               })
                               .toList(),
                         ),
@@ -1268,6 +1247,19 @@ class _SuperUserDashboardState extends State<SuperUserDashboard> {
                         ],
                       ),
                     ),
+                    if (_selectedCheckpointId != null)
+                      Positioned(
+                        bottom: _focusedRouteId != null ? 220 : 160,
+                        right: 12,
+                        child: _buildCheckpointDataOverlay(routeProvider),
+                      ),
+                    if (_focusedRouteId != null)
+                      Positioned(
+                        bottom: 0,
+                        left: 0,
+                        right: 0,
+                        child: _buildTimelineScroller(routeProvider),
+                      ),
                     if (_isArchiving)
                       Positioned.fill(
                         child: ColoredBox(
@@ -1296,6 +1288,216 @@ class _SuperUserDashboardState extends State<SuperUserDashboard> {
                 );
               },
             ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildTimelineScroller(RouteProvider routeProvider) {
+    if (_focusedRouteId == null) return const SizedBox.shrink();
+    
+    final route = routeProvider.routes.firstWhere(
+      (r) => r.routeId == _focusedRouteId,
+      orElse: () => routeProvider.routes.first, // Should not happen
+    );
+
+    final routeColor = routeProvider.routeColorForSalesman(route.salesmanId);
+
+    // Collect all points
+    final allPoints = <Map<String, dynamic>>[];
+    
+    if (route.hasFirstCall) {
+      allPoints.add({
+        'type': 'first',
+        'lat': route.first.lat,
+        'lon': route.first.lon,
+        'timestamp': route.first.timestamp,
+        'label': 'First Call',
+      });
+    }
+
+    for (var i = 0; i < route.sortedCheckpoints.length; i++) {
+      final cp = route.sortedCheckpoints[i];
+      allPoints.add({
+        'type': 'checkpoint',
+        'checkpoint': cp,
+        'lat': cp.lat,
+        'lon': cp.lon,
+        'timestamp': cp.timestamp,
+        'label': 'Checkpoint ${i + 1}',
+        'id': _checkpointId(route, cp),
+      });
+    }
+
+    if (route.hasLastCall) {
+      allPoints.add({
+        'type': 'last',
+        'lat': route.last.lat,
+        'lon': route.last.lon,
+        'timestamp': route.last.timestamp,
+        'label': 'Last Call',
+      });
+    }
+
+    return Container(
+      height: 80,
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.95),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.1),
+            blurRadius: 10,
+            offset: const Offset(0, -2),
+          ),
+        ],
+      ),
+      child: ListView.builder(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        itemCount: allPoints.length,
+        itemBuilder: (context, index) {
+          final item = allPoints[index];
+          final type = item['type'] as String;
+          final time = DateFormat('hh:mm a').format(item['timestamp'] as DateTime);
+          final label = item['label'] as String;
+          
+          final isSelected = type == 'checkpoint' && _selectedCheckpointId == item['id'];
+
+          Color iconColor = routeColor;
+          IconData icon = Icons.place;
+          
+          if (type == 'first') {
+            iconColor = Colors.green;
+            icon = Icons.outlined_flag;
+          } else if (type == 'last') {
+            iconColor = Colors.red;
+            icon = Icons.flag;
+          }
+
+          return GestureDetector(
+            onTap: () {
+              // Move map to this point
+              _mapController.move(LatLng(item['lat'] as double, item['lon'] as double), 16);
+              
+              if (type == 'checkpoint') {
+                setState(() {
+                  _selectedCheckpointId = item['id'] as String;
+                });
+              } else {
+                setState(() {
+                  _selectedCheckpointId = null;
+                });
+              }
+            },
+            child: Container(
+              margin: const EdgeInsets.only(right: 12),
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              decoration: BoxDecoration(
+                color: isSelected ? routeColor.withValues(alpha: 0.1) : Colors.transparent,
+                border: Border.all(
+                  color: isSelected ? routeColor : Colors.grey.withValues(alpha: 0.3),
+                  width: isSelected ? 2 : 1,
+                ),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Row(
+                    children: [
+                      Icon(icon, color: iconColor, size: 16),
+                      const SizedBox(width: 4),
+                      Text(
+                        label,
+                        style: const TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    time,
+                    style: TextStyle(
+                      fontSize: 11,
+                      color: Colors.grey[700],
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _buildCheckpointDataOverlay(RouteProvider routeProvider) {
+    if (_selectedCheckpointId == null) return const SizedBox.shrink();
+    
+    // Find the matching checkpoint
+    RouteCheckpoint? targetCheckpoint;
+    for (final route in routeProvider.routes) {
+      for (final cp in route.sortedCheckpoints) {
+        if (_checkpointId(route, cp) == _selectedCheckpointId) {
+          targetCheckpoint = cp;
+          break;
+        }
+      }
+      if (targetCheckpoint != null) break;
+    }
+
+    if (targetCheckpoint == null) return const SizedBox.shrink();
+
+    final time = DateFormat('hh:mm a').format(targetCheckpoint.timestamp);
+    final isDataOn = targetCheckpoint.isMobileDataOn == true ? 'On' : 'Off';
+    final isWifiOn = targetCheckpoint.isWifiOn == true ? 'On' : 'Off';
+    final battery = targetCheckpoint.batteryLevel != null ? '${targetCheckpoint.batteryLevel}%' : 'N/A';
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      decoration: BoxDecoration(
+        color: Colors.black.withValues(alpha: 0.85),
+        borderRadius: BorderRadius.circular(12),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.3),
+            blurRadius: 10,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            'Checkpoint Data',
+            style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w700),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'Time: $time',
+            style: const TextStyle(color: Colors.white70, fontSize: 12),
+          ),
+          const SizedBox(height: 2),
+          Text(
+            'Battery: $battery',
+            style: const TextStyle(color: Colors.white70, fontSize: 12),
+          ),
+          const SizedBox(height: 2),
+          Text(
+            'Data: $isDataOn',
+            style: const TextStyle(color: Colors.white70, fontSize: 12),
+          ),
+          const SizedBox(height: 2),
+          Text(
+            'Wifi: $isWifiOn',
+            style: const TextStyle(color: Colors.white70, fontSize: 12),
           ),
         ],
       ),

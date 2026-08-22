@@ -6,6 +6,7 @@ import 'package:usage_stats/usage_stats.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:uuid/uuid.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 
 class TelemetryService {
   static final DeviceInfoPlugin _deviceInfo = DeviceInfoPlugin();
@@ -28,9 +29,15 @@ class TelemetryService {
     String? modelName;
     String? serialNumber;
     int? batteryLevel;
+    String? appVersion;
 
     try {
       batteryLevel = await _battery.batteryLevel;
+    } catch (_) {}
+
+    try {
+      final packageInfo = await PackageInfo.fromPlatform();
+      appVersion = '${packageInfo.version}+${packageInfo.buildNumber}';
     } catch (_) {}
 
     try {
@@ -57,6 +64,7 @@ class TelemetryService {
       'serialNumber': serialNumber,
       'uuid': uuid,
       'batteryLevel': batteryLevel,
+      'appVersion': appVersion,
     };
   }
 

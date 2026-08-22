@@ -7,6 +7,12 @@ import 'package:compact_sales_monitoring/services/firestore_service.dart';
 import 'package:compact_sales_monitoring/services/routing_service.dart';
 import 'package:latlong2/latlong.dart';
 
+class RouteSegment {
+  final List<LatLng> points;
+  final bool isApproximate;
+  RouteSegment({required this.points, this.isApproximate = false});
+}
+
 class RouteProvider extends ChangeNotifier {
   static final List<Color> _routeColorPalette = _buildRouteColorPalette();
 
@@ -14,7 +20,7 @@ class RouteProvider extends ChangeNotifier {
   final RoutingService _routingService = RoutingService();
 
   List<SalesRoute> _routes = [];
-  Map<String, List<LatLng>> _routePolylines = {};
+  Map<String, List<RouteSegment>> _routePolylines = {};
 
   /// Route IDs whose polyline is approximate (straight-line fallback).
   final Set<String> _approximatePolylines = {};
@@ -23,7 +29,7 @@ class RouteProvider extends ChangeNotifier {
   String? _error;
 
   List<SalesRoute> get routes => _routes;
-  Map<String, List<LatLng>> get routePolylines => _routePolylines;
+  Map<String, List<RouteSegment>> get routePolylines => _routePolylines;
 
   /// Returns true for a given routeId if the displayed line is a
   /// straight-line fallback due to an offline/error condition.
@@ -151,10 +157,10 @@ class RouteProvider extends ChangeNotifier {
             .map((p) => LatLng(p.lat, p.lon))
             .toList();
         if (cachedFallback.length >= 2) {
-          _routePolylines[route.routeId] = cachedFallback;
-          _approximatePolylines.add(route.routeId);
+          _routePolylines[route.routeId] = [RouteSegment(points: cachedFallback, isApproximate: route.cachedPolylineApproximate)];
+          if (route.cachedPolylineApproximate) _approximatePolylines.add(route.routeId);
         } else {
-          _routePolylines[route.routeId] = anchors;
+          _routePolylines[route.routeId] = [RouteSegment(points: anchors, isApproximate: true)];
         }
         continue;
       }
@@ -167,17 +173,18 @@ class RouteProvider extends ChangeNotifier {
       if (!forceRoadRefresh &&
           cachedPolyline.isNotEmpty &&
           _isCacheFresh(route)) {
-        _routePolylines[route.routeId] = cachedPolyline;
-        if (route.cachedPolylineApproximate ||
-            _matchesAnchorPolyline(cachedPolyline, anchors)) {
+        
+        final isApprox = route.cachedPolylineApproximate || _matchesAnchorPolyline(cachedPolyline, anchors);
+        _routePolylines[route.routeId] = [RouteSegment(points: cachedPolyline, isApproximate: isApprox)];
+        if (isApprox) {
           _approximatePolylines.add(route.routeId);
         }
         continue;
       }
 
       // Build strict ordered segments: first -> checkpoints -> last.
-      // This guarantees the line passes each checkpoint in chronological order.
-      final polyline = <LatLng>[];
+      final segments = <RouteSegment>[];
+      final fullPolyline = <LatLng>[];
       var hasApproximateSegment = false;
 
       for (var i = 0; i < anchors.length - 1; i++) {
@@ -185,38 +192,44 @@ class RouteProvider extends ChangeNotifier {
         final end = anchors[i + 1];
 
         try {
-          final segment = await _routingService.getRoute(start, end);
-          if (segment.length >= 2) {
-            if (polyline.isEmpty) {
-              polyline.addAll(segment);
+          final osrmSegment = await _routingService.getRoute(start, end);
+          if (osrmSegment.length >= 2) {
+            segments.add(RouteSegment(points: osrmSegment, isApproximate: false));
+            
+            if (fullPolyline.isEmpty) {
+              fullPolyline.addAll(osrmSegment);
             } else {
-              polyline.addAll(segment.skip(1));
+              fullPolyline.addAll(osrmSegment.skip(1));
             }
           } else {
             hasApproximateSegment = true;
-            if (polyline.isEmpty) {
-              polyline.add(start);
+            segments.add(RouteSegment(points: [start, end], isApproximate: true));
+            
+            if (fullPolyline.isEmpty) {
+              fullPolyline.add(start);
             }
-            polyline.add(end);
+            fullPolyline.add(end);
           }
         } catch (_) {
           hasApproximateSegment = true;
-          if (polyline.isEmpty) {
-            polyline.add(start);
+          segments.add(RouteSegment(points: [start, end], isApproximate: true));
+          
+          if (fullPolyline.isEmpty) {
+            fullPolyline.add(start);
           }
-          polyline.add(end);
+          fullPolyline.add(end);
         }
       }
 
-      if (polyline.length < 2) {
+      if (segments.isEmpty || fullPolyline.length < 2) {
         if (cachedPolyline.isNotEmpty) {
-          _routePolylines[route.routeId] = cachedPolyline;
-          if (route.cachedPolylineApproximate ||
-              _matchesAnchorPolyline(cachedPolyline, anchors)) {
+          final isApprox = route.cachedPolylineApproximate || _matchesAnchorPolyline(cachedPolyline, anchors);
+          _routePolylines[route.routeId] = [RouteSegment(points: cachedPolyline, isApproximate: isApprox)];
+          if (isApprox) {
             _approximatePolylines.add(route.routeId);
           }
         } else {
-          _routePolylines[route.routeId] = anchors;
+          _routePolylines[route.routeId] = [RouteSegment(points: anchors, isApproximate: true)];
           _approximatePolylines.add(route.routeId);
           _firestoreService
               .savePolylineCache(
@@ -231,22 +244,31 @@ class RouteProvider extends ChangeNotifier {
         continue;
       }
 
-      _routePolylines[route.routeId] = polyline;
+      _routePolylines[route.routeId] = segments;
 
       if (hasApproximateSegment) {
         if (cachedPolyline.isNotEmpty) {
-          _routePolylines[route.routeId] = cachedPolyline;
-          if (route.cachedPolylineApproximate ||
-              _matchesAnchorPolyline(cachedPolyline, anchors)) {
-            _approximatePolylines.add(route.routeId);
-          }
-        } else {
-          _routePolylines[route.routeId] = polyline;
+          // If we had a mix of successes and failures but cache exists, we might want to just keep the new segments anyway so we get the mixed view.
+          // BUT, to respect the previous logic, if there is a cached polyline, we fallback to it.
+          // Actually, let's keep the NEW mixed segments because that's what the user wants to see!
+          _routePolylines[route.routeId] = segments; // Prefer the new mixed segments over the old cache
           _approximatePolylines.add(route.routeId);
           _firestoreService
               .savePolylineCache(
                 route.routeId,
-                _buildTimedCachePointsFromPolyline(route, polyline),
+                _buildTimedCachePointsFromPolyline(route, fullPolyline),
+                isApproximate: true,
+              )
+              .catchError((e) {
+                developer.log('[RouteProvider] Failed to cache approximate polyline for ${route.routeId}: $e', name: 'RouteProvider');
+              });
+        } else {
+          _routePolylines[route.routeId] = segments;
+          _approximatePolylines.add(route.routeId);
+          _firestoreService
+              .savePolylineCache(
+                route.routeId,
+                _buildTimedCachePointsFromPolyline(route, fullPolyline),
                 isApproximate: true,
               )
               .catchError((e) {
@@ -255,7 +277,7 @@ class RouteProvider extends ChangeNotifier {
         }
       } else {
         // Persist only fully road-aware paths to avoid caching straight fallbacks.
-        final cachePoints = _buildTimedCachePointsFromPolyline(route, polyline);
+        final cachePoints = _buildTimedCachePointsFromPolyline(route, fullPolyline);
         _firestoreService
             .savePolylineCache(route.routeId, cachePoints, isApproximate: false)
             .catchError((e) {

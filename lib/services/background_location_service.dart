@@ -14,12 +14,15 @@ import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:flutter_background_service_android/flutter_background_service_android.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 import 'package:intl/intl.dart';
+import 'package:battery_plus/battery_plus.dart';
+import 'package:connectivity_plus/connectivity_plus.dart';
 
 @pragma('vm:entry-point')
 class BackgroundLocationService {
   static const double _checkpointMinDistanceMeters = 500.0;
-  static const int _checkpointMinIntervalMinutes = 30;
-  static const double _maxCheckpointAccuracyMeters = 250.0; // Increased to 250m to avoid dropping locations when phone is in pocket/car
+  static const int _checkpointMinIntervalMinutes = 2; // Strict 2-minute checkpoints
+  static const int _batchUploadIntervalMinutes = 30; // Upload batches every 30 minutes
+  static const double _maxCheckpointAccuracyMeters = 250.0;
 
   static Future<void> initializeService() async {
     if (kIsWeb) return;
@@ -75,6 +78,7 @@ class BackgroundLocationService {
       service.invoke('stopService');
     }
     final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('route_end_time', DateTime.now().toIso8601String());
     await prefs.remove('active_route_id');
   }
 
@@ -107,7 +111,14 @@ class BackgroundLocationService {
       return;
     }
 
+    StreamSubscription<geo.Position>? locationSubscription;
+    Timer? streamWatchdog;
+    Timer? periodicFlushTimer;
+
     service.on('stopService').listen((event) {
+      locationSubscription?.cancel();
+      streamWatchdog?.cancel();
+      periodicFlushTimer?.cancel();
       WakelockPlus.disable();
       service.stopSelf();
     });
@@ -156,8 +167,6 @@ class BackgroundLocationService {
     );
 
     int processLocationCount = 0;
-    Timer? streamWatchdog;
-    Timer? periodicFlushTimer;
 
     // Declare as late so getBestAvailablePosition and resetWatchdog can reference it
     // before the body is assigned below.
@@ -255,26 +264,41 @@ class BackgroundLocationService {
       final currentCount = prefs.getInt('checkpoint_count') ?? 0;
       await prefs.setInt('checkpoint_count', currentCount + 1);
 
+      int? batteryLevel;
+      bool? isMobileDataOn;
+      bool? isWifiOn;
+      
+      try {
+        batteryLevel = await Battery().batteryLevel;
+      } catch (_) {}
+      
+      try {
+        final connectivityResult = await Connectivity().checkConnectivity();
+        isMobileDataOn = connectivityResult.contains(ConnectivityResult.mobile);
+        isWifiOn = connectivityResult.contains(ConnectivityResult.wifi);
+      } catch (_) {}
+
       final checkpoint = RouteCheckpoint(
         lat: position.latitude,
         lon: position.longitude,
         timestamp: now,
+        batteryLevel: batteryLevel,
+        isMobileDataOn: isMobileDataOn,
+        isWifiOn: isWifiOn,
       );
 
       // OFFLINE FIRST: Accumulate locally, do not upload directly here.
       await _persistToLocalBatch(prefs, routeId, checkpoint);
 
-      // RACE CONDITION FIX: immediately flush after a time-based checkpoint
-      // so it doesn't sit in the batch until the next 30-min timer fires.
+      // Upload if 30 minutes have passed since last flush, OR if it's a manual checkpoint.
       final lastFlushStr = prefs.getString('last_flush_time');
       final lastFlush = lastFlushStr != null ? DateTime.parse(lastFlushStr) : null;
-      if (lastFlush == null || now.difference(lastFlush).inMinutes >= _checkpointMinIntervalMinutes) {
+      if (isManual || lastFlush == null || now.difference(lastFlush).inMinutes >= _batchUploadIntervalMinutes) {
         await flushPendingBatch(prefs, firestoreService);
       }
     };
 
     // 1. Process locations when the user moves (stream-based)
-    StreamSubscription<geo.Position>? locationSubscription;
 
     void subscribeToLocation() {
       locationSubscription?.cancel();
@@ -300,10 +324,10 @@ class BackgroundLocationService {
       if (pos != null) await processLocation(pos);
     });
 
-    // 2. Force a location check every 30 minutes for stationary users.
+    // 2. Force a location check every 2 minutes for stationary users.
     // getBestAvailablePosition() will NOT fail indoors — it falls back to last known.
     periodicFlushTimer?.cancel();
-    periodicFlushTimer = Timer.periodic(const Duration(minutes: 30), (timer) async {
+    periodicFlushTimer = Timer.periodic(const Duration(minutes: 2), (timer) async {
       await prefs.reload();
       if (prefs.getString('active_route_id') == null) {
         timer.cancel();
@@ -312,8 +336,12 @@ class BackgroundLocationService {
       final pos = await getBestAvailablePosition();
       if (pos != null) await processLocation(pos);
 
-      // Flush any accumulated batch regardless of position result
-      await flushPendingBatch(prefs, firestoreService);
+      // Flush any accumulated batch if the 30 min timer is up
+      final lastFlushStr = prefs.getString('last_flush_time');
+      final lastFlush = lastFlushStr != null ? DateTime.parse(lastFlushStr) : null;
+      if (lastFlush == null || DateTime.now().difference(lastFlush).inMinutes >= _batchUploadIntervalMinutes) {
+        await flushPendingBatch(prefs, firestoreService);
+      }
     });
 
     service.on('manual_checkpoint').listen((_) async {
@@ -330,12 +358,17 @@ class BackgroundLocationService {
   
   static Future<void> _persistToLocalBatch(SharedPreferences prefs, String routeId, RouteCheckpoint cp) async {
     final raw = prefs.getStringList(_batchPrefsKey) ?? [];
-    final jsonStr = jsonEncode({
+    final jsonMap = {
       'routeId': routeId,
       'lat': cp.lat,
       'lon': cp.lon,
       'timestamp': cp.timestamp.millisecondsSinceEpoch,
-    });
+    };
+    if (cp.batteryLevel != null) jsonMap['batteryLevel'] = cp.batteryLevel as dynamic;
+    if (cp.isMobileDataOn != null) jsonMap['isMobileDataOn'] = cp.isMobileDataOn as dynamic;
+    if (cp.isWifiOn != null) jsonMap['isWifiOn'] = cp.isWifiOn as dynamic;
+
+    final jsonStr = jsonEncode(jsonMap);
     raw.add(jsonStr);
     await prefs.setStringList(_batchPrefsKey, raw);
     await prefs.setInt('batch_pending_count', raw.length);
@@ -365,6 +398,9 @@ class BackgroundLocationService {
           lat: (map['lat'] as num).toDouble(),
           lon: (map['lon'] as num).toDouble(),
           timestamp: DateTime.fromMillisecondsSinceEpoch(map['timestamp'] as int),
+          batteryLevel: map['batteryLevel'] as int?,
+          isMobileDataOn: map['isMobileDataOn'] as bool?,
+          isWifiOn: map['isWifiOn'] as bool?,
         );
         checkpointsByRoute.putIfAbsent(routeId, () => []).add(cp);
         rawStringsByRoute.putIfAbsent(routeId, () => []).add(entryStr);
