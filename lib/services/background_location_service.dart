@@ -58,8 +58,10 @@ class BackgroundLocationService {
       await prefs.setString('active_route_id', routeId);
       await prefs.setString('first_point_time', currentFirstPointTime);
       
-      // Set initial checkpoint base
-      await prefs.setString('route_start_time', DateTime.now().toIso8601String());
+      // Set initial checkpoint base and properly clear any old end time
+      await prefs.setString('route_start_time', currentFirstPointTime);
+      await prefs.remove('route_end_time');
+      
       await prefs.setString('last_checkpoint_time', currentFirstPointTime);
       await prefs.setDouble('last_checkpoint_lat', firstPoint.lat);
       await prefs.setDouble('last_checkpoint_lon', firstPoint.lon);
