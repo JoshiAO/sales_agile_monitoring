@@ -160,36 +160,39 @@ class _SalesmanDebugScreenState extends State<SalesmanDebugScreen> {
             const SizedBox(height: 32),
             
             // Statistics Grid
-            Row(
-              children: [
-                Expanded(
-                  child: _buildStatCard(
-                    icon: Icons.location_on_rounded,
-                    title: 'Total Checkpoints',
-                    value: '$_checkpointCount',
-                    color: Colors.blue.shade600,
-                    extra: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text('Uploaded: ${_checkpointCount - _pendingTimestamps.length}', 
-                             style: TextStyle(fontSize: 12, color: Colors.green.shade700, fontWeight: FontWeight.w700)),
-                        const SizedBox(height: 2),
-                        Text('Pending: ${_pendingTimestamps.length}', 
-                             style: TextStyle(fontSize: 12, color: Colors.red.shade700, fontWeight: FontWeight.w700)),
-                      ],
+            IntrinsicHeight(
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Expanded(
+                    child: _buildStatCard(
+                      icon: Icons.location_on_rounded,
+                      title: 'Total Checkpoints',
+                      value: '$_checkpointCount',
+                      color: Colors.blue.shade600,
+                      extra: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text('Uploaded: ${_checkpointCount - _pendingTimestamps.length}', 
+                               style: TextStyle(fontSize: 12, color: Colors.green.shade700, fontWeight: FontWeight.w700)),
+                          const SizedBox(height: 2),
+                          Text('Pending: ${_pendingTimestamps.length}', 
+                               style: TextStyle(fontSize: 12, color: Colors.red.shade700, fontWeight: FontWeight.w700)),
+                        ],
+                      ),
                     ),
                   ),
-                ),
-                const SizedBox(width: 16),
-                Expanded(
-                  child: _buildStatCard(
-                    icon: Icons.cloud_done_rounded,
-                    title: 'Last Sync',
-                    value: _lastSync,
-                    color: Colors.green.shade600,
+                  const SizedBox(width: 16),
+                  Expanded(
+                    child: _buildStatCard(
+                      icon: Icons.cloud_done_rounded,
+                      title: 'Last Sync',
+                      value: _lastSync,
+                      color: Colors.green.shade600,
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
             const SizedBox(height: 16),
             
