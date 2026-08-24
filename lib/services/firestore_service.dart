@@ -435,19 +435,7 @@ class FirestoreService {
     List<CachedPolylinePoint> points, {
     bool isApproximate = false,
   }) async {
-    final cacheTime = DateTime.now();
-    await _firebaseService.firestore.collection('routes').doc(routeId).update({
-      'cachedPolyline': points
-          .map(
-            (p) => CachedPolylinePoint(
-              lat: p.lat,
-              lon: p.lon,
-              timestamp: p.timestamp ?? cacheTime,
-            ).toMap(),
-          )
-          .toList(),
-      'cachedPolylineApproximate': isApproximate,
-    });
+    // Deprecated in v2.2.2: 1-minute checkpoints provide smooth routes directly.
   }
 
   Future<void> requestCallRetake({

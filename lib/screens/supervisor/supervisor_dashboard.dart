@@ -350,67 +350,11 @@ class _SupervisorDashboardState extends State<SupervisorDashboard> {
     return lastDistanceMeters > _checkpointEndpointOverlapMeters;
   }
 
-  /// Returns checkpoints synthesised from [route.cachedPolyline] for offline
-  /// routes where explicit checkpoints were not persisted.
-  /// Same-timestamp cache points are still accepted because legacy data often
-  /// stores all cached points with one timestamp.
   List<RouteCheckpoint> _cachedPolylineAsCheckpoints(
     SalesRoute route, {
     List<RouteSegment>? renderedPolyline,
   }) {
-    final fromCache = route.cachedPolyline;
-    final fromRendered = renderedPolyline?.expand((s) => s.points).toList() ?? const <LatLng>[];
-    final useCache = fromCache.length >= 2;
-    if (!useCache && fromRendered.length < 2) return [];
-
-    final distance = const Distance();
-    const dedupeMeters = 30.0;
-    const minSpacingMeters = 120.0;
-
-    final realAnchors = <LatLng>[
-      if (route.hasFirstCall) LatLng(route.first.lat, route.first.lon),
-      ...route.sortedCheckpoints.map((c) => LatLng(c.lat, c.lon)),
-      if (route.hasLastCall) LatLng(route.last.lat, route.last.lon),
-    ];
-
-    final result = <RouteCheckpoint>[];
-    LatLng? lastAdded;
-
-    final sourceLength = useCache ? fromCache.length : fromRendered.length;
-    for (var i = 0; i < sourceLength; i++) {
-      final pLat = useCache ? fromCache[i].lat : fromRendered[i].latitude;
-      final pLon = useCache ? fromCache[i].lon : fromRendered[i].longitude;
-      final pTimestamp = useCache ? fromCache[i].timestamp : null;
-      final pt = LatLng(pLat, pLon);
-
-      final tooCloseToReal = realAnchors.any(
-        (anchor) => distance.as(LengthUnit.Meter, pt, anchor) <= dedupeMeters,
-      );
-      if (tooCloseToReal) {
-        continue;
-      }
-
-      if (lastAdded != null) {
-        final spacing = distance.as(LengthUnit.Meter, lastAdded, pt);
-        if (spacing < minSpacingMeters) {
-          continue;
-        }
-      }
-
-      result.add(
-        RouteCheckpoint(
-          lat: pLat,
-          lon: pLon,
-          timestamp:
-              pTimestamp ??
-              route.first.timestamp.add(Duration(seconds: i + 1)),
-        ),
-      );
-      lastAdded = pt;
-    }
-
-    result.sort((a, b) => a.timestamp.compareTo(b.timestamp));
-    return result;
+    return const [];
   }
 
   Widget _buildRouteStatusChip(SalesRoute route, RouteProvider routeProvider) {
