@@ -1,3 +1,4 @@
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
@@ -37,6 +38,7 @@ class _SupervisorDashboardState extends State<SupervisorDashboard> {
   String? _selectedCheckpointId;
   String? _selectedCurrentLocationRouteId;
   String? _focusedRouteId;
+  final ScrollController _timelineScrollController = ScrollController();
 
   @override
   void initState() {
@@ -197,9 +199,11 @@ class _SupervisorDashboardState extends State<SupervisorDashboard> {
 
     return GestureDetector(
       onTap: () {
+        final cpId = _checkpointId(route, checkpoint);
         setState(() {
-          _selectedCheckpointId = _checkpointId(route, checkpoint);
+          _selectedCheckpointId = cpId;
         });
+        _scrollToCheckpointInTimeline(cpId, route);
       },
       child: Column(
         mainAxisSize: MainAxisSize.min,
@@ -1081,10 +1085,282 @@ class _SupervisorDashboardState extends State<SupervisorDashboard> {
                         ],
                       ),
                     ),
+                    if (_selectedCheckpointId != null)
+                      Positioned(
+                        bottom: _focusedRouteId != null ? 100 : 40,
+                        right: 60,
+                        child: _buildCheckpointDataOverlay(routeProvider),
+                      ),
+                    if (_focusedRouteId != null)
+                      Positioned(
+                        bottom: 0,
+                        left: 0,
+                        right: 0,
+                        child: _buildTimelineScroller(routeProvider),
+                      ),
                   ],
                 );
               },
             ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _scrollToCheckpointInTimeline(String cpId, SalesRoute route) {
+    if (!_timelineScrollController.hasClients) return;
+
+    final allPoints = <Map<String, dynamic>>[];
+    if (route.hasFirstCall) {
+      allPoints.add({'id': 'first'});
+    }
+
+    for (var i = 0; i < route.sortedCheckpoints.length; i++) {
+      final cp = route.sortedCheckpoints[i];
+      allPoints.add({'id': _checkpointId(route, cp)});
+    }
+
+    if (route.hasLastCall) {
+      allPoints.add({'id': 'last'});
+    }
+
+    final index = allPoints.indexWhere((p) => p['id'] == cpId);
+    if (index != -1) {
+      const itemWidth = 140.0;
+      final targetOffset = (index * itemWidth) - 120.0;
+      _timelineScrollController.animateTo(
+        targetOffset.clamp(
+          0.0,
+          _timelineScrollController.position.maxScrollExtent,
+        ),
+        duration: const Duration(milliseconds: 350),
+        curve: Curves.easeInOut,
+      );
+    }
+  }
+
+  Widget _buildTimelineScroller(RouteProvider routeProvider) {
+    if (_focusedRouteId == null) return const SizedBox.shrink();
+
+    final route = routeProvider.routes.firstWhere(
+      (r) => r.routeId == _focusedRouteId,
+      orElse: () => routeProvider.routes.first,
+    );
+
+    final routeColor = routeProvider.routeColorForSalesman(route.salesmanId);
+
+    final allPoints = <Map<String, dynamic>>[];
+
+    if (route.hasFirstCall) {
+      allPoints.add({
+        'type': 'first',
+        'lat': route.first.lat,
+        'lon': route.first.lon,
+        'timestamp': route.first.timestamp,
+        'label': 'First Call',
+      });
+    }
+
+    for (var i = 0; i < route.sortedCheckpoints.length; i++) {
+      final cp = route.sortedCheckpoints[i];
+      allPoints.add({
+        'type': 'checkpoint',
+        'checkpoint': cp,
+        'lat': cp.lat,
+        'lon': cp.lon,
+        'timestamp': cp.timestamp,
+        'label': 'Checkpoint ${i + 1}',
+        'id': _checkpointId(route, cp),
+      });
+    }
+
+    if (route.hasLastCall) {
+      allPoints.add({
+        'type': 'last',
+        'lat': route.last.lat,
+        'lon': route.last.lon,
+        'timestamp': route.last.timestamp,
+        'label': 'Last Call',
+      });
+    }
+
+    return Container(
+      height: 80,
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.95),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.1),
+            blurRadius: 10,
+            offset: const Offset(0, -2),
+          ),
+        ],
+      ),
+      child: ScrollConfiguration(
+        behavior: ScrollConfiguration.of(context).copyWith(
+          dragDevices: {PointerDeviceKind.touch, PointerDeviceKind.mouse},
+        ),
+        child: ListView.builder(
+          controller: _timelineScrollController,
+          scrollDirection: Axis.horizontal,
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          itemCount: allPoints.length,
+          itemBuilder: (context, index) {
+            final item = allPoints[index];
+            final type = item['type'] as String;
+            final time = DateFormat('hh:mm a').format(item['timestamp'] as DateTime);
+            final label = item['label'] as String;
+
+            final isSelected =
+                type == 'checkpoint' && _selectedCheckpointId == item['id'];
+
+            Color iconColor = routeColor;
+            IconData icon = Icons.place;
+
+            if (type == 'first') {
+              iconColor = Colors.green;
+              icon = Icons.outlined_flag;
+            } else if (type == 'last') {
+              iconColor = Colors.red;
+              icon = Icons.flag;
+            }
+
+            return GestureDetector(
+              onTap: () {
+                _mapController.move(
+                  LatLng(item['lat'] as double, item['lon'] as double),
+                  16,
+                );
+
+                if (type == 'checkpoint') {
+                  setState(() {
+                    _selectedCheckpointId = item['id'] as String;
+                  });
+                } else {
+                  setState(() {
+                    _selectedCheckpointId = null;
+                  });
+                }
+              },
+              child: Container(
+                margin: const EdgeInsets.only(right: 12),
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                decoration: BoxDecoration(
+                  color: isSelected
+                      ? routeColor.withValues(alpha: 0.1)
+                      : Colors.transparent,
+                  border: Border.all(
+                    color: isSelected
+                        ? routeColor
+                        : Colors.grey.withValues(alpha: 0.3),
+                    width: isSelected ? 2 : 1,
+                  ),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Row(
+                      children: [
+                        Icon(icon, color: iconColor, size: 16),
+                        const SizedBox(width: 4),
+                        Text(
+                          label,
+                          style: const TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      time,
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: Colors.grey[700],
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        ),
+      ),
+    );
+  }
+
+  Widget _buildCheckpointDataOverlay(RouteProvider routeProvider) {
+    if (_selectedCheckpointId == null) return const SizedBox.shrink();
+
+    RouteCheckpoint? targetCheckpoint;
+    for (final route in routeProvider.routes) {
+      for (final cp in route.sortedCheckpoints) {
+        if (_checkpointId(route, cp) == _selectedCheckpointId) {
+          targetCheckpoint = cp;
+          break;
+        }
+      }
+      if (targetCheckpoint != null) break;
+    }
+
+    if (targetCheckpoint == null) return const SizedBox.shrink();
+
+    final time = DateFormat('hh:mm a').format(targetCheckpoint.timestamp);
+    final isDataOn = targetCheckpoint.isMobileDataOn == true ? 'On' : 'Off';
+    final isWifiOn = targetCheckpoint.isWifiOn == true ? 'On' : 'Off';
+    final battery = targetCheckpoint.batteryLevel != null
+        ? '${targetCheckpoint.batteryLevel}%'
+        : 'N/A';
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      decoration: BoxDecoration(
+        color: Colors.black.withValues(alpha: 0.85),
+        borderRadius: BorderRadius.circular(12),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.3),
+            blurRadius: 10,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Text(
+            'Checkpoint Data',
+            style: TextStyle(
+              color: Colors.white,
+              fontSize: 14,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'Time: $time',
+            style: const TextStyle(color: Colors.white70, fontSize: 12),
+          ),
+          const SizedBox(height: 2),
+          Text(
+            'Battery: $battery',
+            style: const TextStyle(color: Colors.white70, fontSize: 12),
+          ),
+          const SizedBox(height: 2),
+          Text(
+            'Data: $isDataOn',
+            style: const TextStyle(color: Colors.white70, fontSize: 12),
+          ),
+          const SizedBox(height: 2),
+          Text(
+            'Wifi: $isWifiOn',
+            style: const TextStyle(color: Colors.white70, fontSize: 12),
           ),
         ],
       ),

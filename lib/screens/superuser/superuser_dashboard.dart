@@ -43,6 +43,7 @@ class _SuperUserDashboardState extends State<SuperUserDashboard> {
   String? _selectedCheckpointId;
   String? _selectedCurrentLocationRouteId;
   String? _focusedRouteId;
+  final ScrollController _timelineScrollController = ScrollController();
 
   @override
   void initState() {
@@ -303,9 +304,11 @@ class _SuperUserDashboardState extends State<SuperUserDashboard> {
 
     return GestureDetector(
       onTap: () {
+        final cpId = _checkpointId(route, checkpoint);
         setState(() {
-          _selectedCheckpointId = _checkpointId(route, checkpoint);
+          _selectedCheckpointId = cpId;
         });
+        _scrollToCheckpointInTimeline(cpId, route);
       },
       child: Column(
         mainAxisSize: MainAxisSize.min,
@@ -1239,6 +1242,38 @@ class _SuperUserDashboardState extends State<SuperUserDashboard> {
     );
   }
 
+  void _scrollToCheckpointInTimeline(String cpId, SalesRoute route) {
+    if (!_timelineScrollController.hasClients) return;
+
+    final allPoints = <Map<String, dynamic>>[];
+    if (route.hasFirstCall) {
+      allPoints.add({'id': 'first'});
+    }
+
+    for (var i = 0; i < route.sortedCheckpoints.length; i++) {
+      final cp = route.sortedCheckpoints[i];
+      allPoints.add({'id': _checkpointId(route, cp)});
+    }
+
+    if (route.hasLastCall) {
+      allPoints.add({'id': 'last'});
+    }
+
+    final index = allPoints.indexWhere((p) => p['id'] == cpId);
+    if (index != -1) {
+      const itemWidth = 140.0;
+      final targetOffset = (index * itemWidth) - 120.0;
+      _timelineScrollController.animateTo(
+        targetOffset.clamp(
+          0.0,
+          _timelineScrollController.position.maxScrollExtent,
+        ),
+        duration: const Duration(milliseconds: 350),
+        curve: Curves.easeInOut,
+      );
+    }
+  }
+
   Widget _buildTimelineScroller(RouteProvider routeProvider) {
     if (_focusedRouteId == null) return const SizedBox.shrink();
     
@@ -1302,6 +1337,7 @@ class _SuperUserDashboardState extends State<SuperUserDashboard> {
           dragDevices: {PointerDeviceKind.touch, PointerDeviceKind.mouse},
         ),
         child: ListView.builder(
+          controller: _timelineScrollController,
           scrollDirection: Axis.horizontal,
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
           itemCount: allPoints.length,
