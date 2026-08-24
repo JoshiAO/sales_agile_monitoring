@@ -598,10 +598,16 @@ class _SalesmanHomeScreenState extends State<SalesmanHomeScreen>
     final user = authProvider.currentUser;
 
     if (user != null) {
-      final routes = await _firestoreService.getRoutesBySalesman(
-        user.uid,
-        _todayDate,
-      );
+      List<SalesRoute> routes = [];
+      try {
+        routes = await _firestoreService.getRoutesBySalesman(
+          user.uid,
+          _todayDate,
+        ).timeout(const Duration(seconds: 3));
+      } catch (e) {
+        debugPrint('[SalesmanHomeScreen] Unable to load online route (offline): $e');
+      }
+
       if (routes.isNotEmpty) {
         final route = routes[0];
         final firstLocalPath = route.hasFirstCall
@@ -948,7 +954,7 @@ class _SalesmanHomeScreenState extends State<SalesmanHomeScreen>
                 hasLastCall: false,
                 companyId: user.companyId,
                 customRouteId: generatedRouteId,
-              );
+              ).timeout(const Duration(seconds: 3));
             } catch (e) {
               debugPrint('[SalesmanHomeScreen] Firestore createRoute failed (offline): $e');
               isOfflineFirstCall = true;
