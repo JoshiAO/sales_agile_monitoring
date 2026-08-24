@@ -146,9 +146,7 @@ class RouteProvider extends ChangeNotifier {
 
       if (route.hasFirstCall) {
         anchors.add(LatLng(route.first.lat, route.first.lon));
-        anchorOfflineStatus.add(
-          (route.first.isMobileDataOn == false) && (route.first.isWifiOn == false),
-        );
+        anchorOfflineStatus.add(false);
       }
 
       for (final checkpoint in route.sortedCheckpoints) {
@@ -189,43 +187,8 @@ class RouteProvider extends ChangeNotifier {
 
       _routePolylines[route.routeId] = segments;
       if (hasApproximateSegment) {
-    final migrationWrites = <Future<void>>[];
-
-    for (final route in _routes) {
-      if (route.cachedPolyline.isEmpty ||
-          route.hasCachedPolylineApproximateFlag) {
-        continue;
+        _approximatePolylines.add(route.routeId);
       }
-
-      final anchors = <LatLng>[
-        if (route.hasFirstCall) LatLng(route.first.lat, route.first.lon),
-        ...route.sortedCheckpoints.map(
-          (checkpoint) => LatLng(checkpoint.lat, checkpoint.lon),
-        ),
-        if (route.hasLastCall) LatLng(route.last.lat, route.last.lon),
-      ];
-
-      final cachedPolyline = route.cachedPolyline
-          .map((p) => LatLng(p.lat, p.lon))
-          .toList();
-
-      final isApproximate = _matchesAnchorPolyline(cachedPolyline, anchors);
-
-      migrationWrites.add(
-        _firestoreService
-            .savePolylineCache(
-              route.routeId,
-              route.cachedPolyline,
-              isApproximate: isApproximate,
-            )
-            .catchError((e) {
-              developer.log('[RouteProvider] Failed to migrate legacy polyline flag for ${route.routeId}: $e', name: 'RouteProvider');
-            }),
-      );
-    }
-
-    if (migrationWrites.isNotEmpty) {
-      await Future.wait(migrationWrites);
     }
   }
 
