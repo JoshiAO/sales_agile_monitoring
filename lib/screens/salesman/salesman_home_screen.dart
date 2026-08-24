@@ -1,6 +1,8 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
+import 'package:uuid/uuid.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:geolocator/geolocator.dart' as geo;
@@ -620,21 +622,61 @@ class _SalesmanHomeScreenState extends State<SalesmanHomeScreen>
         });
         _syncCheckpointTracking();
       } else {
-        setState(() {
-          _todayRouteId = null;
-          _firstPoint = null;
-          _lastPoint = null;
-          _firstRetakeRequested = false;
-          _firstRetakeApproved = false;
-          _lastRetakeRequested = false;
-          _lastRetakeApproved = false;
-          _firstLocalImagePath = null;
-          _lastLocalImagePath = null;
-        });
-        _syncCheckpointTracking();
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.reload();
+        final rawPending = prefs.getString('pending_first_call_v2');
+        if (rawPending != null && rawPending.isNotEmpty) {
+          try {
+            final pendingMap = jsonDecode(rawPending) as Map<String, dynamic>;
+            final pendingRouteId = pendingMap['routeId'] as String;
+            final pendingLocalPath = pendingMap['stampedLocalImagePath'] as String? ?? pendingMap['localImagePath'] as String?;
+            final locationTime = DateTime.fromMillisecondsSinceEpoch(pendingMap['locationTime'] as int);
+
+            final routePoint = RoutePoint(
+              lat: (pendingMap['lat'] as num).toDouble(),
+              lon: (pendingMap['lon'] as num).toDouble(),
+              imageUrl: '',
+              timestamp: locationTime,
+            );
+
+            setState(() {
+              _todayRouteId = pendingRouteId;
+              _firstPoint = routePoint;
+              _lastPoint = null;
+              _firstLocalImagePath = pendingLocalPath;
+              _firstRetakeRequested = false;
+              _firstRetakeApproved = false;
+              _lastRetakeRequested = false;
+              _lastRetakeApproved = false;
+              _lastCheckpointTime = routePoint.timestamp;
+              _lastCheckpointLat = routePoint.lat;
+              _lastCheckpointLon = routePoint.lon;
+            });
+            _syncCheckpointTracking();
+          } catch (_) {
+            _resetRouteState();
+          }
+        } else {
+          _resetRouteState();
+        }
       }
     }
     _loadedForDate = _todayDate;
+  }
+
+  void _resetRouteState() {
+    setState(() {
+      _todayRouteId = null;
+      _firstPoint = null;
+      _lastPoint = null;
+      _firstRetakeRequested = false;
+      _firstRetakeApproved = false;
+      _lastRetakeRequested = false;
+      _lastRetakeApproved = false;
+      _firstLocalImagePath = null;
+      _lastLocalImagePath = null;
+    });
+    _syncCheckpointTracking();
   }
 
   Future<void> _requestRetake(bool isFirst) async {
@@ -807,16 +849,31 @@ class _SalesmanHomeScreenState extends State<SalesmanHomeScreen>
         isFirst: isFirst,
       );
 
-      // Upload image to Firebase Storage
-      final imageUrl = await _storageService.uploadRouteImage(
-        stampedResult.uploadFile,
-        user.uid,
-        timestamp,
-      );
-
       // Fetch Device Telemetry and Data Usage
       final telemetry = await TelemetryService.getDeviceTelemetry();
       final dataUsage = await TelemetryService.getDataUsage();
+
+      String imageUrl = '';
+      bool isOfflineFirstCall = false;
+
+      if (isFirst) {
+        try {
+          imageUrl = await _storageService.uploadRouteImage(
+            stampedResult.uploadFile,
+            user.uid,
+            timestamp,
+          );
+        } catch (e) {
+          debugPrint('[SalesmanHomeScreen] First call storage upload failed (offline): $e');
+          isOfflineFirstCall = true;
+        }
+      } else {
+        imageUrl = await _storageService.uploadRouteImage(
+          stampedResult.uploadFile,
+          user.uid,
+          timestamp,
+        );
+      }
 
       // Create RoutePoint
       final routePoint = RoutePoint(
@@ -838,50 +895,105 @@ class _SalesmanHomeScreenState extends State<SalesmanHomeScreen>
             .toList(),
       );
 
-      // Get existing route for today or create new one
-      final existingRoutes = await _firestoreService.getRoutesBySalesman(
-        user.uid,
-        _todayDate,
-      );
+      if (isFirst) {
+        final generatedRouteId = const Uuid().v4();
+        if (isOfflineFirstCall) {
+          final pendingCallData = {
+            'routeId': generatedRouteId,
+            'salesmanId': user.uid,
+            'supervisorId': user.supervisorId ?? '',
+            'companyId': user.companyId,
+            'date': _todayDate,
+            'localImagePath': stampedResult.uploadFile.path,
+            'stampedLocalImagePath': stampedResult.localFile.path,
+            'timestamp': timestamp,
+            'locationTime': locationTime.millisecondsSinceEpoch,
+            'lat': position.latitude,
+            'lon': position.longitude,
+            'productName': telemetry['productName'],
+            'modelName': telemetry['modelName'],
+            'serialNumber': telemetry['serialNumber'],
+            'uuid': telemetry['uuid'],
+            'batteryLevel': telemetry['batteryLevel'],
+            'appVersion': telemetry['appVersion'],
+            'mobileDataUsage': (dataUsage['mobile'] as List<dynamic>?)
+                ?.map((e) => DataUsageEntry.fromMap(e as Map<String, dynamic>).toMap())
+                .toList(),
+            'wifiDataUsage': (dataUsage['wifi'] as List<dynamic>?)
+                ?.map((e) => DataUsageEntry.fromMap(e as Map<String, dynamic>).toMap())
+                .toList(),
+          };
 
-      if (existingRoutes.isEmpty) {
-        if (isFirst) {
-          final routeId = await _firestoreService.createRoute(
-            salesmanId: user.uid,
-            supervisorId: user.supervisorId ?? '',
-            date: _todayDate,
-            first: routePoint,
-            last: routePoint,
-            hasFirstCall: true,
-            hasLastCall: false,
-          );
-
-          setState(() {
-            _todayRouteId = routeId;
-            _firstPoint = routePoint;
-            _lastPoint = null;
-            _firstLocalImagePath = stampedResult.localFile.path;
-            _firstRetakeRequested = false;
-            _firstRetakeApproved = false;
-            _lastRetakeRequested = false;
-            _lastRetakeApproved = false;
-            _lastCheckpointTime = routePoint.timestamp;
-            _lastCheckpointLat = routePoint.lat;
-            _lastCheckpointLon = routePoint.lon;
-          });
-          _syncCheckpointTracking();
-
-          if (!mounted) return;
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(
-                gallerySaveError == null
-                    ? 'First call saved and copied to gallery. Now take the last call.'
-                    : 'First call saved. Gallery copy failed.',
-              ),
-            ),
-          );
+          final prefs = await SharedPreferences.getInstance();
+          await prefs.setString('pending_first_call_v2', jsonEncode(pendingCallData));
         } else {
+          try {
+            await _firestoreService.createRoute(
+              salesmanId: user.uid,
+              supervisorId: user.supervisorId ?? '',
+              date: _todayDate,
+              first: routePoint,
+              last: routePoint,
+              hasFirstCall: true,
+              hasLastCall: false,
+              companyId: user.companyId,
+              customRouteId: generatedRouteId,
+            );
+          } catch (e) {
+            debugPrint('[SalesmanHomeScreen] Firestore createRoute failed (offline): $e');
+            isOfflineFirstCall = true;
+            final pendingCallData = {
+              'routeId': generatedRouteId,
+              'salesmanId': user.uid,
+              'supervisorId': user.supervisorId ?? '',
+              'companyId': user.companyId,
+              'date': _todayDate,
+              'localImagePath': stampedResult.uploadFile.path,
+              'stampedLocalImagePath': stampedResult.localFile.path,
+              'timestamp': timestamp,
+              'locationTime': locationTime.millisecondsSinceEpoch,
+              'lat': position.latitude,
+              'lon': position.longitude,
+              'productName': telemetry['productName'],
+              'modelName': telemetry['modelName'],
+              'serialNumber': telemetry['serialNumber'],
+              'uuid': telemetry['uuid'],
+              'batteryLevel': telemetry['batteryLevel'],
+              'appVersion': telemetry['appVersion'],
+            };
+            final prefs = await SharedPreferences.getInstance();
+            await prefs.setString('pending_first_call_v2', jsonEncode(pendingCallData));
+          }
+        }
+
+        setState(() {
+          _todayRouteId = generatedRouteId;
+          _firstPoint = routePoint;
+          _lastPoint = null;
+          _firstLocalImagePath = stampedResult.localFile.path;
+          _firstRetakeRequested = false;
+          _firstRetakeApproved = false;
+          _lastRetakeRequested = false;
+          _lastRetakeApproved = false;
+          _lastCheckpointTime = routePoint.timestamp;
+          _lastCheckpointLat = routePoint.lat;
+          _lastCheckpointLon = routePoint.lon;
+        });
+        _syncCheckpointTracking();
+
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              isOfflineFirstCall
+                  ? 'First call saved offline. Live tracking started.'
+                  : (gallerySaveError == null
+                      ? 'First call saved and copied to gallery. Now take the last call.'
+                      : 'First call saved. Gallery copy failed.'),
+            ),
+          ),
+        );
+      } else {
           if (_firstPoint == null) {
             if (!mounted) return;
             ScaffoldMessenger.of(context).showSnackBar(

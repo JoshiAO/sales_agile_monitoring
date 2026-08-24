@@ -258,8 +258,9 @@ class FirestoreService {
     List<RouteCheckpoint> checkpoints = const [],
     double? distance,
     String? companyId,
+    String? customRouteId,
   }) async {
-    final routeId = uuid.v4();
+    final routeId = customRouteId ?? uuid.v4();
 
     await _firebaseService.firestore.collection('routes').doc(routeId).set({
       'salesmanId': salesmanId,

@@ -1,7 +1,7 @@
 name: compact_sales_monitoring
 description: "Multi-role sales monitoring app with Firebase and OpenStreetMap."
 publish_to: 'none'
-version: 2.1.22+12
+version: 2.2.1+13
 
 environment:
   sdk: ^3.11.4

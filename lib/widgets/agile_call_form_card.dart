@@ -5,6 +5,7 @@ import 'package:compact_sales_monitoring/models/agile_model.dart';
 import 'package:compact_sales_monitoring/models/route_model.dart';
 import 'package:compact_sales_monitoring/providers/auth_provider.dart';
 import 'package:compact_sales_monitoring/services/firestore_service.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 class AgileCallFormCard extends StatefulWidget {
   const AgileCallFormCard({super.key});
@@ -25,6 +26,8 @@ class _AgileCallFormCardState extends State<AgileCallFormCard> {
   final TextEditingController _sttController = TextEditingController();
   late final String _date;
 
+  bool _isFirstCallCompleted = false;
+  bool _isFirstCallPendingUpload = false;
   bool _isLastCallCompleted = false;
   bool _isSubmitted = false;
   bool _isLoading = true;
@@ -66,10 +69,17 @@ class _AgileCallFormCardState extends State<AgileCallFormCard> {
       final routes = results[0] as List<SalesRoute>;
       final submission = results[1] as AgileSubmission?;
 
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.reload();
+      final isFirstPending = prefs.containsKey('pending_first_call_v2');
+
+      final firstCallCompleted = routes.any((route) => route.hasFirstCall == true);
       final lastCallCompleted = routes.any((route) => route.hasLastCall == true);
 
       if (!mounted) return;
       setState(() {
+        _isFirstCallCompleted = firstCallCompleted;
+        _isFirstCallPendingUpload = isFirstPending;
         _isLastCallCompleted = lastCallCompleted;
 
         if (submission != null) {
@@ -391,20 +401,41 @@ class _AgileCallFormCardState extends State<AgileCallFormCard> {
                             Row(
                               children: [
                                 Expanded(
-                                  child: Text(
-                                    _isLastCallCompleted
-                                        ? 'Last Call status: Completed/Uploaded'
-                                        : 'Last Call status: Pending',
-                                    style: TextStyle(
-                                      color: _isLastCallCompleted
-                                          ? Colors.green.shade700
-                                          : Colors.orange.shade700,
-                                      fontWeight: FontWeight.w600,
-                                    ),
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        _isFirstCallPendingUpload
+                                            ? 'First Call status: Pending Upload'
+                                            : (_isFirstCallCompleted
+                                                ? 'First Call status: Completed/Uploaded'
+                                                : 'First Call status: Pending'),
+                                        style: TextStyle(
+                                          color: _isFirstCallPendingUpload
+                                              ? Colors.orange.shade800
+                                              : (_isFirstCallCompleted
+                                                  ? Colors.green.shade700
+                                                  : Colors.grey.shade700),
+                                          fontWeight: FontWeight.w600,
+                                        ),
+                                      ),
+                                      const SizedBox(height: 4),
+                                      Text(
+                                        _isLastCallCompleted
+                                            ? 'Last Call status: Completed/Uploaded'
+                                            : 'Last Call status: Pending',
+                                        style: TextStyle(
+                                          color: _isLastCallCompleted
+                                              ? Colors.green.shade700
+                                              : Colors.orange.shade700,
+                                          fontWeight: FontWeight.w600,
+                                        ),
+                                      ),
+                                    ],
                                   ),
                                 ),
                                 IconButton(
-                                  tooltip: 'Refresh last call status',
+                                  tooltip: 'Refresh call status',
                                   onPressed: _isSubmitting ? null : _loadAgileState,
                                   icon: const Icon(Icons.refresh),
                                 ),

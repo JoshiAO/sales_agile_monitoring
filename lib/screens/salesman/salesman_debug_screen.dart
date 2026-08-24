@@ -73,13 +73,43 @@ class _SalesmanDebugScreenState extends State<SalesmanDebugScreen> {
     _lastLon = _prefs!.getDouble('last_checkpoint_lon');
 
     final rawBatch = _prefs!.getStringList('session_checkpoints_history') ?? [];
-    _pendingCheckpoints = rawBatch.map((e) {
+    final checkpoints = rawBatch.map((e) {
       try {
         return jsonDecode(e) as Map<String, dynamic>;
       } catch (_) {
         return <String, dynamic>{};
       }
     }).where((e) => e.isNotEmpty).toList().reversed.toList();
+
+    final rawPendingFirstCall = _prefs!.getString('pending_first_call_v2');
+    if (rawPendingFirstCall != null && rawPendingFirstCall.isNotEmpty) {
+      try {
+        final map = jsonDecode(rawPendingFirstCall) as Map<String, dynamic>;
+        checkpoints.insert(0, {
+          'isFirstCall': true,
+          'isPending': true,
+          'lat': map['lat'],
+          'lon': map['lon'],
+          'timestamp': map['locationTime'],
+        });
+      } catch (_) {}
+    } else {
+      final firstTimeStr = _prefs!.getString('first_point_time');
+      if (firstTimeStr != null) {
+        try {
+          final firstTime = DateTime.parse(firstTimeStr);
+          checkpoints.add({
+            'isFirstCall': true,
+            'isPending': false,
+            'lat': _prefs!.getDouble('last_checkpoint_lat'),
+            'lon': _prefs!.getDouble('last_checkpoint_lon'),
+            'timestamp': firstTime.millisecondsSinceEpoch,
+          });
+        } catch (_) {}
+      }
+    }
+
+    _pendingCheckpoints = checkpoints;
 
     final rawPending = _prefs!.getStringList('batched_checkpoints_v2') ?? [];
     _pendingTimestamps = rawPending.map((e) {
@@ -249,12 +279,56 @@ class _SalesmanDebugScreenState extends State<SalesmanDebugScreen> {
               ),
               const SizedBox(height: 12),
               ..._pendingCheckpoints.map((cp) {
+                final isFirstCall = cp['isFirstCall'] == true;
                 final lat = cp['lat'] as num?;
                 final lon = cp['lon'] as num?;
                 final ts = cp['timestamp'] as int?;
                 final time = ts != null 
                     ? DateFormat('hh:mm:ss a').format(DateTime.fromMillisecondsSinceEpoch(ts))
                     : 'Unknown';
+
+                if (isFirstCall) {
+                  final isPending = cp['isPending'] == true;
+                  final statusColor = isPending ? Colors.orange.shade800 : Colors.purple.shade700;
+                  final statusText = isPending ? 'First Call (Pending)' : 'First Call (Uploaded)';
+                  final statusIcon = isPending ? Icons.add_a_photo_outlined : Icons.camera_alt_rounded;
+
+                  return Card(
+                    elevation: 1,
+                    margin: const EdgeInsets.only(bottom: 8),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      side: BorderSide(color: statusColor, width: 1.5),
+                    ),
+                    color: isPending ? Colors.orange.shade50 : Colors.purple.shade50,
+                    child: ListTile(
+                      leading: Container(
+                        padding: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(
+                          color: statusColor.withOpacity(0.15),
+                          shape: BoxShape.circle,
+                        ),
+                        child: Icon(statusIcon, color: statusColor, size: 20),
+                      ),
+                      title: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Text(time, style: TextStyle(fontWeight: FontWeight.w700, color: statusColor)),
+                          Text(
+                            statusText,
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w700,
+                              color: statusColor,
+                            ),
+                          ),
+                        ],
+                      ),
+                      subtitle: Text('Lat: ${lat?.toStringAsFixed(5) ?? 'N/A'}, Lon: ${lon?.toStringAsFixed(5) ?? 'N/A'}'),
+                    ),
+                  );
+                }
+
                 final isPending = ts != null && _pendingTimestamps.contains(ts);
                 final statusColor = isPending ? Colors.red : Colors.green;
                 final statusText = isPending ? 'Pending' : 'Uploaded';

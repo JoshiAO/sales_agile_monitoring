@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 import 'dart:ui';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
@@ -6,6 +7,7 @@ import 'package:flutter_background_service/flutter_background_service.dart';
 import 'package:geolocator/geolocator.dart' as geo;
 import 'package:compact_sales_monitoring/services/firebase_service.dart';
 import 'package:compact_sales_monitoring/services/firestore_service.dart';
+import 'package:compact_sales_monitoring/services/storage_service.dart';
 import 'package:compact_sales_monitoring/services/checkpoint_queue_service.dart';
 import 'package:compact_sales_monitoring/models/route_model.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -383,11 +385,92 @@ class BackgroundLocationService {
     await prefs.setStringList('session_checkpoints_history', history);
   }
 
+  static Future<bool> flushPendingFirstCall([
+    SharedPreferences? providedPrefs,
+    FirestoreService? providedFs,
+    StorageService? providedStorage,
+  ]) async {
+    final prefs = providedPrefs ?? await SharedPreferences.getInstance();
+    await prefs.reload();
+    final rawJson = prefs.getString('pending_first_call_v2');
+    if (rawJson == null || rawJson.isEmpty) return false;
+
+    final fs = providedFs ?? FirestoreService();
+    final storage = providedStorage ?? StorageService();
+
+    try {
+      final map = jsonDecode(rawJson) as Map<String, dynamic>;
+      final localPath = map['localImagePath'] as String?;
+      if (localPath == null || !File(localPath).existsSync()) {
+        await prefs.remove('pending_first_call_v2');
+        return false;
+      }
+
+      final salesmanId = map['salesmanId'] as String;
+      final timestamp = map['timestamp'] as String;
+      final imageFile = File(localPath);
+
+      final imageUrl = await storage.uploadRouteImage(
+        imageFile,
+        salesmanId,
+        timestamp,
+      );
+
+      final locationTime = DateTime.fromMillisecondsSinceEpoch(
+        map['locationTime'] as int,
+      );
+
+      final routePoint = RoutePoint(
+        lat: (map['lat'] as num).toDouble(),
+        lon: (map['lon'] as num).toDouble(),
+        imageUrl: imageUrl,
+        timestamp: locationTime,
+        productName: map['productName'] as String?,
+        modelName: map['modelName'] as String?,
+        serialNumber: map['serialNumber'] as String?,
+        uuid: map['uuid'] as String?,
+        batteryLevel: map['batteryLevel'] as int?,
+        appVersion: map['appVersion'] as String?,
+        mobileDataUsage: (map['mobileDataUsage'] as List<dynamic>?)
+            ?.map((e) => DataUsageEntry.fromMap(e as Map<String, dynamic>))
+            .toList(),
+        wifiDataUsage: (map['wifiDataUsage'] as List<dynamic>?)
+            ?.map((e) => DataUsageEntry.fromMap(e as Map<String, dynamic>))
+            .toList(),
+      );
+
+      final routeId = map['routeId'] as String;
+      final supervisorId = map['supervisorId'] as String;
+      final date = map['date'] as String;
+      final companyId = map['companyId'] as String?;
+
+      await fs.createRoute(
+        salesmanId: salesmanId,
+        supervisorId: supervisorId,
+        date: date,
+        first: routePoint,
+        last: routePoint,
+        hasFirstCall: true,
+        hasLastCall: false,
+        companyId: companyId,
+        customRouteId: routeId,
+      );
+
+      await prefs.remove('pending_first_call_v2');
+      return true;
+    } catch (e) {
+      debugPrint('[BackgroundLocationService] Failed to flush pending first call: $e');
+      return false;
+    }
+  }
+
   static Future<void> flushPendingBatch([SharedPreferences? providedPrefs, FirestoreService? providedFs]) async {
     final prefs = providedPrefs ?? await SharedPreferences.getInstance();
     final fs = providedFs ?? FirestoreService();
     
     await prefs.reload();
+    await flushPendingFirstCall(prefs, fs);
+
     final raw = prefs.getStringList(_batchPrefsKey) ?? [];
     if (raw.isEmpty) return;
 
