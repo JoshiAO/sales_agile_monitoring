@@ -143,10 +143,10 @@ class RouteProvider extends ChangeNotifier {
     for (final route in _routes) {
       final sortedCps = route.sortedCheckpoints;
       
-      // Downsample checkpoints if oversized (e.g. legacy/long-running routes with thousands of checkpoints)
+      // Downsample checkpoints if oversized for fast OSRM road snapping
       final List<RouteCheckpoint> effectiveCheckpoints;
-      if (sortedCps.length > 300) {
-        final step = (sortedCps.length / 300).ceil();
+      if (sortedCps.length > 200) {
+        final step = (sortedCps.length / 200).ceil();
         effectiveCheckpoints = <RouteCheckpoint>[];
         for (var i = 0; i < sortedCps.length; i += step) {
           effectiveCheckpoints.add(sortedCps[i]);
@@ -159,23 +159,17 @@ class RouteProvider extends ChangeNotifier {
       }
 
       final anchors = <LatLng>[];
-      final anchorOfflineStatus = <bool>[];
 
       if (route.hasFirstCall) {
         anchors.add(LatLng(route.first.lat, route.first.lon));
-        anchorOfflineStatus.add(false);
       }
 
       for (final checkpoint in effectiveCheckpoints) {
         anchors.add(LatLng(checkpoint.lat, checkpoint.lon));
-        anchorOfflineStatus.add(
-          (checkpoint.isMobileDataOn == false) && (checkpoint.isWifiOn == false),
-        );
       }
 
       if (route.hasLastCall) {
         anchors.add(LatLng(route.last.lat, route.last.lon));
-        anchorOfflineStatus.add(false);
       }
 
       if (anchors.length < 2) {
@@ -185,33 +179,49 @@ class RouteProvider extends ChangeNotifier {
         continue;
       }
 
-      // Merge continuous segments with matching offline status into a single RouteSegment
-      final segments = <RouteSegment>[];
-      var currentPoints = <LatLng>[anchors[0]];
-      var currentIsOffline = anchorOfflineStatus[0];
-      var hasApproximateSegment = currentIsOffline;
+      // Real-time client OSRM road snapping across waypoint batches
+      final roadWaypoints = <LatLng>[];
+      var isApproximate = false;
 
-      for (var i = 0; i < anchors.length - 1; i++) {
-        final endPoint = anchors[i + 1];
-        final nextIsOffline = anchorOfflineStatus[i];
+      try {
+        for (var i = 0; i < anchors.length; i += 35) {
+          final batch = anchors.sublist(
+            i,
+            math.min(i + 40, anchors.length),
+          );
+          if (batch.length < 2) continue;
 
-        if (nextIsOffline != currentIsOffline) {
-          currentPoints.add(endPoint);
-          segments.add(RouteSegment(points: currentPoints, isApproximate: currentIsOffline));
-          currentPoints = <LatLng>[endPoint];
-          currentIsOffline = nextIsOffline;
-          if (nextIsOffline) hasApproximateSegment = true;
-        } else {
-          currentPoints.add(endPoint);
+          final osrmBatch = await _routingService.getRouteForWaypoints(batch);
+          if (osrmBatch.length >= 2) {
+            if (roadWaypoints.isEmpty) {
+              roadWaypoints.addAll(osrmBatch);
+            } else {
+              roadWaypoints.addAll(osrmBatch.skip(1));
+            }
+          } else {
+            isApproximate = true;
+            if (roadWaypoints.isEmpty) {
+              roadWaypoints.addAll(batch);
+            } else {
+              roadWaypoints.addAll(batch.skip(1));
+            }
+          }
         }
+      } catch (e) {
+        developer.log(
+          '[RouteProvider] OSRM road routing fallback for ${route.routeId}: $e',
+          name: 'RouteProvider',
+        );
+        isApproximate = true;
+        roadWaypoints.addAll(anchors);
       }
 
-      if (currentPoints.length >= 2) {
-        segments.add(RouteSegment(points: currentPoints, isApproximate: currentIsOffline));
-      }
+      final finalPoints = roadWaypoints.length >= 2 ? roadWaypoints : anchors;
+      _routePolylines[route.routeId] = [
+        RouteSegment(points: finalPoints, isApproximate: isApproximate),
+      ];
 
-      _routePolylines[route.routeId] = segments;
-      if (hasApproximateSegment) {
+      if (isApproximate) {
         _approximatePolylines.add(route.routeId);
       }
     }
