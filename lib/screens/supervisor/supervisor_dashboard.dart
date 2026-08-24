@@ -790,7 +790,7 @@ class _SupervisorDashboardState extends State<SupervisorDashboard> {
                                 r.routeId == _focusedRouteId,
                               )
                               .expand(
-                                (route) => route.sortedCheckpoints
+                                (route) => route.downsampledMapCheckpoints
                                     .where(
                                       (checkpoint) => _shouldShowCheckpoint(
                                         route,

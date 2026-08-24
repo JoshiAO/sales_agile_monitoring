@@ -248,13 +248,10 @@ class BackgroundLocationService {
         );
       }
 
-      final timeThresholdMet = timeSinceLast.inMinutes >= _checkpointMinIntervalMinutes;
-      final distanceThresholdMet =
-          prevLat != null &&
-          prevLon != null &&
-          distanceSinceLast >= _checkpointMinDistanceMeters;
+      final timeThresholdMet = timeSinceLast.inSeconds >= 60;
 
-      if (!timeThresholdMet && !distanceThresholdMet && !isManual) return;
+      // Strict 1-minute interval requirement unless triggered manually
+      if (!timeThresholdMet && !isManual) return;
 
       // If we are capturing based ONLY on distance, we demand high accuracy to prevent fake jumps.
       // However, if the 30-minute timer triggered OR the user manually requested a checkpoint, 

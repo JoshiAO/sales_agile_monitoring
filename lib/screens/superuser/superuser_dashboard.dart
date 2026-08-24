@@ -901,7 +901,7 @@ class _SuperUserDashboardState extends State<SuperUserDashboard> {
                                 r.routeId == _focusedRouteId,
                               )
                               .expand(
-                                (route) => route.sortedCheckpoints
+                                (route) => route.downsampledMapCheckpoints
                                     .where(
                                       (checkpoint) => _shouldShowCheckpoint(
                                         route,

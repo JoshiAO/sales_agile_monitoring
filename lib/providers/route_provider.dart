@@ -141,6 +141,23 @@ class RouteProvider extends ChangeNotifier {
     _approximatePolylines.clear();
 
     for (final route in _routes) {
+      final sortedCps = route.sortedCheckpoints;
+      
+      // Downsample checkpoints if oversized (e.g. legacy/long-running routes with thousands of checkpoints)
+      final List<RouteCheckpoint> effectiveCheckpoints;
+      if (sortedCps.length > 300) {
+        final step = (sortedCps.length / 300).ceil();
+        effectiveCheckpoints = <RouteCheckpoint>[];
+        for (var i = 0; i < sortedCps.length; i += step) {
+          effectiveCheckpoints.add(sortedCps[i]);
+        }
+        if (sortedCps.isNotEmpty && effectiveCheckpoints.last != sortedCps.last) {
+          effectiveCheckpoints.add(sortedCps.last);
+        }
+      } else {
+        effectiveCheckpoints = sortedCps;
+      }
+
       final anchors = <LatLng>[];
       final anchorOfflineStatus = <bool>[];
 
@@ -149,7 +166,7 @@ class RouteProvider extends ChangeNotifier {
         anchorOfflineStatus.add(false);
       }
 
-      for (final checkpoint in route.sortedCheckpoints) {
+      for (final checkpoint in effectiveCheckpoints) {
         anchors.add(LatLng(checkpoint.lat, checkpoint.lon));
         anchorOfflineStatus.add(
           (checkpoint.isMobileDataOn == false) && (checkpoint.isWifiOn == false),
@@ -168,21 +185,29 @@ class RouteProvider extends ChangeNotifier {
         continue;
       }
 
+      // Merge continuous segments with matching offline status into a single RouteSegment
       final segments = <RouteSegment>[];
-      var hasApproximateSegment = false;
+      var currentPoints = <LatLng>[anchors[0]];
+      var currentIsOffline = anchorOfflineStatus[0];
+      var hasApproximateSegment = currentIsOffline;
 
       for (var i = 0; i < anchors.length - 1; i++) {
-        final start = anchors[i];
-        final end = anchors[i + 1];
-        final isOffline = anchorOfflineStatus[i];
+        final endPoint = anchors[i + 1];
+        final nextIsOffline = anchorOfflineStatus[i];
 
-        segments.add(RouteSegment(
-          points: [start, end],
-          isApproximate: isOffline,
-        ));
-        if (isOffline) {
-          hasApproximateSegment = true;
+        if (nextIsOffline != currentIsOffline) {
+          currentPoints.add(endPoint);
+          segments.add(RouteSegment(points: currentPoints, isApproximate: currentIsOffline));
+          currentPoints = <LatLng>[endPoint];
+          currentIsOffline = nextIsOffline;
+          if (nextIsOffline) hasApproximateSegment = true;
+        } else {
+          currentPoints.add(endPoint);
         }
+      }
+
+      if (currentPoints.length >= 2) {
+        segments.add(RouteSegment(points: currentPoints, isApproximate: currentIsOffline));
       }
 
       _routePolylines[route.routeId] = segments;

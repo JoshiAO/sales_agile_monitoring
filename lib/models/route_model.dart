@@ -304,6 +304,21 @@ class SalesRoute {
   // Prefer stored distance when available, otherwise use computed estimate.
   double get distanceKm => distance ?? estimatedDistanceKm;
 
+  // Downsample checkpoints for map marker rendering when route has thousands of points
+  List<RouteCheckpoint> get downsampledMapCheckpoints {
+    final sorted = sortedCheckpoints;
+    if (sorted.length <= 150) return sorted;
+    final step = (sorted.length / 150).ceil();
+    final result = <RouteCheckpoint>[];
+    for (var i = 0; i < sorted.length; i += step) {
+      result.add(sorted[i]);
+    }
+    if (sorted.isNotEmpty && result.last != sorted.last) {
+      result.add(sorted.last);
+    }
+    return result;
+  }
+
   static double _haversineKm(
     double lat1,
     double lon1,
