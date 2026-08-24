@@ -895,53 +895,18 @@ class _SalesmanHomeScreenState extends State<SalesmanHomeScreen>
             .toList(),
       );
 
-      if (isFirst) {
-        final generatedRouteId = const Uuid().v4();
-        if (isOfflineFirstCall) {
-          final pendingCallData = {
-            'routeId': generatedRouteId,
-            'salesmanId': user.uid,
-            'supervisorId': user.supervisorId ?? '',
-            'companyId': user.companyId,
-            'date': _todayDate,
-            'localImagePath': stampedResult.uploadFile.path,
-            'stampedLocalImagePath': stampedResult.localFile.path,
-            'timestamp': timestamp,
-            'locationTime': locationTime.millisecondsSinceEpoch,
-            'lat': position.latitude,
-            'lon': position.longitude,
-            'productName': telemetry['productName'],
-            'modelName': telemetry['modelName'],
-            'serialNumber': telemetry['serialNumber'],
-            'uuid': telemetry['uuid'],
-            'batteryLevel': telemetry['batteryLevel'],
-            'appVersion': telemetry['appVersion'],
-            'mobileDataUsage': (dataUsage['mobile'] as List<dynamic>?)
-                ?.map((e) => DataUsageEntry.fromMap(e as Map<String, dynamic>).toMap())
-                .toList(),
-            'wifiDataUsage': (dataUsage['wifi'] as List<dynamic>?)
-                ?.map((e) => DataUsageEntry.fromMap(e as Map<String, dynamic>).toMap())
-                .toList(),
-          };
+      List<SalesRoute> existingRoutes = [];
+      try {
+        existingRoutes = await _firestoreService.getRoutesBySalesman(
+          user.uid,
+          _todayDate,
+        );
+      } catch (_) {}
 
-          final prefs = await SharedPreferences.getInstance();
-          await prefs.setString('pending_first_call_v2', jsonEncode(pendingCallData));
-        } else {
-          try {
-            await _firestoreService.createRoute(
-              salesmanId: user.uid,
-              supervisorId: user.supervisorId ?? '',
-              date: _todayDate,
-              first: routePoint,
-              last: routePoint,
-              hasFirstCall: true,
-              hasLastCall: false,
-              companyId: user.companyId,
-              customRouteId: generatedRouteId,
-            );
-          } catch (e) {
-            debugPrint('[SalesmanHomeScreen] Firestore createRoute failed (offline): $e');
-            isOfflineFirstCall = true;
+      if (existingRoutes.isEmpty) {
+        if (isFirst) {
+          final generatedRouteId = const Uuid().v4();
+          if (isOfflineFirstCall) {
             final pendingCallData = {
               'routeId': generatedRouteId,
               'salesmanId': user.uid,
@@ -960,40 +925,84 @@ class _SalesmanHomeScreenState extends State<SalesmanHomeScreen>
               'uuid': telemetry['uuid'],
               'batteryLevel': telemetry['batteryLevel'],
               'appVersion': telemetry['appVersion'],
+              'mobileDataUsage': (dataUsage['mobile'] as List<dynamic>?)
+                  ?.map((e) => DataUsageEntry.fromMap(e as Map<String, dynamic>).toMap())
+                  .toList(),
+              'wifiDataUsage': (dataUsage['wifi'] as List<dynamic>?)
+                  ?.map((e) => DataUsageEntry.fromMap(e as Map<String, dynamic>).toMap())
+                  .toList(),
             };
+
             final prefs = await SharedPreferences.getInstance();
             await prefs.setString('pending_first_call_v2', jsonEncode(pendingCallData));
+          } else {
+            try {
+              await _firestoreService.createRoute(
+                salesmanId: user.uid,
+                supervisorId: user.supervisorId ?? '',
+                date: _todayDate,
+                first: routePoint,
+                last: routePoint,
+                hasFirstCall: true,
+                hasLastCall: false,
+                companyId: user.companyId,
+                customRouteId: generatedRouteId,
+              );
+            } catch (e) {
+              debugPrint('[SalesmanHomeScreen] Firestore createRoute failed (offline): $e');
+              isOfflineFirstCall = true;
+              final pendingCallData = {
+                'routeId': generatedRouteId,
+                'salesmanId': user.uid,
+                'supervisorId': user.supervisorId ?? '',
+                'companyId': user.companyId,
+                'date': _todayDate,
+                'localImagePath': stampedResult.uploadFile.path,
+                'stampedLocalImagePath': stampedResult.localFile.path,
+                'timestamp': timestamp,
+                'locationTime': locationTime.millisecondsSinceEpoch,
+                'lat': position.latitude,
+                'lon': position.longitude,
+                'productName': telemetry['productName'],
+                'modelName': telemetry['modelName'],
+                'serialNumber': telemetry['serialNumber'],
+                'uuid': telemetry['uuid'],
+                'batteryLevel': telemetry['batteryLevel'],
+                'appVersion': telemetry['appVersion'],
+              };
+              final prefs = await SharedPreferences.getInstance();
+              await prefs.setString('pending_first_call_v2', jsonEncode(pendingCallData));
+            }
           }
-        }
 
-        setState(() {
-          _todayRouteId = generatedRouteId;
-          _firstPoint = routePoint;
-          _lastPoint = null;
-          _firstLocalImagePath = stampedResult.localFile.path;
-          _firstRetakeRequested = false;
-          _firstRetakeApproved = false;
-          _lastRetakeRequested = false;
-          _lastRetakeApproved = false;
-          _lastCheckpointTime = routePoint.timestamp;
-          _lastCheckpointLat = routePoint.lat;
-          _lastCheckpointLon = routePoint.lon;
-        });
-        _syncCheckpointTracking();
+          setState(() {
+            _todayRouteId = generatedRouteId;
+            _firstPoint = routePoint;
+            _lastPoint = null;
+            _firstLocalImagePath = stampedResult.localFile.path;
+            _firstRetakeRequested = false;
+            _firstRetakeApproved = false;
+            _lastRetakeRequested = false;
+            _lastRetakeApproved = false;
+            _lastCheckpointTime = routePoint.timestamp;
+            _lastCheckpointLat = routePoint.lat;
+            _lastCheckpointLon = routePoint.lon;
+          });
+          _syncCheckpointTracking();
 
-        if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              isOfflineFirstCall
-                  ? 'First call saved offline. Live tracking started.'
-                  : (gallerySaveError == null
-                      ? 'First call saved and copied to gallery. Now take the last call.'
-                      : 'First call saved. Gallery copy failed.'),
+          if (!mounted) return;
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                isOfflineFirstCall
+                    ? 'First call saved offline. Live tracking started.'
+                    : (gallerySaveError == null
+                        ? 'First call saved and copied to gallery. Now take the last call.'
+                        : 'First call saved. Gallery copy failed.'),
+              ),
             ),
-          ),
-        );
-      } else {
+          );
+        } else {
           if (_firstPoint == null) {
             if (!mounted) return;
             ScaffoldMessenger.of(context).showSnackBar(
