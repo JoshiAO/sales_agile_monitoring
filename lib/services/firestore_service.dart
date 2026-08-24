@@ -113,50 +113,58 @@ class FirestoreService {
     String companyId,
     String date,
   ) async {
-    // Direct query using the company_ID field stored on each route document.
-    // New routes include company_ID; legacy routes fall back to the supervisor-lookup path.
-    final directSnapshot = await _firebaseService.firestore
-        .collection('routes')
-        .where('company_ID', isEqualTo: companyId)
-        .where('date', isEqualTo: date)
-        .get();
+    final routesMap = <String, SalesRoute>{};
 
-    if (directSnapshot.docs.isNotEmpty) {
-      return directSnapshot.docs
-          .map((doc) => SalesRoute.fromMap(doc.data(), routeId: doc.id))
-          .toList();
-    }
-
-    // Legacy fallback: fetch via supervisor IDs for routes that predate company_ID.
-    final supervisorsSnapshot = await _firebaseService.firestore
-        .collection('users')
-        .where('company_ID', isEqualTo: companyId)
-        .where('role', isEqualTo: 'supervisor')
-        .get();
-
-    final supervisorIds =
-        supervisorsSnapshot.docs.map((d) => d.id).toList();
-    if (supervisorIds.isEmpty) return [];
-
-    // Firestore `whereIn` supports up to 30 items per query.
-    final allRoutes = <SalesRoute>[];
-    for (var i = 0; i < supervisorIds.length; i += 30) {
-      final batch = supervisorIds.sublist(
-        i,
-        min(i + 30, supervisorIds.length),
-      );
-      final routeSnapshot = await _firebaseService.firestore
+    // 1. Direct query using company_ID field stored on route document
+    try {
+      final directSnapshot = await _firebaseService.firestore
           .collection('routes')
-          .where('supervisorId', whereIn: batch)
+          .where('company_ID', isEqualTo: companyId)
           .where('date', isEqualTo: date)
           .get();
-      allRoutes.addAll(
-        routeSnapshot.docs.map(
-          (doc) => SalesRoute.fromMap(doc.data(), routeId: doc.id),
-        ),
-      );
+
+      for (final doc in directSnapshot.docs) {
+        routesMap[doc.id] = SalesRoute.fromMap(doc.data(), routeId: doc.id);
+      }
+    } catch (e) {
+      debugPrint('[FirestoreService] Direct company route query failed: $e');
     }
-    return allRoutes;
+
+    // 2. Supplementary query via supervisor IDs for routes that predate or lack company_ID
+    try {
+      final supervisorsSnapshot = await _firebaseService.firestore
+          .collection('users')
+          .where('company_ID', isEqualTo: companyId)
+          .where('role', isEqualTo: 'supervisor')
+          .get();
+
+      final supervisorIds =
+          supervisorsSnapshot.docs.map((d) => d.id).toList();
+
+      if (supervisorIds.isNotEmpty) {
+        for (var i = 0; i < supervisorIds.length; i += 30) {
+          final batch = supervisorIds.sublist(
+            i,
+            min(i + 30, supervisorIds.length),
+          );
+          final routeSnapshot = await _firebaseService.firestore
+              .collection('routes')
+              .where('supervisorId', whereIn: batch)
+              .where('date', isEqualTo: date)
+              .get();
+
+          for (final doc in routeSnapshot.docs) {
+            if (!routesMap.containsKey(doc.id)) {
+              routesMap[doc.id] = SalesRoute.fromMap(doc.data(), routeId: doc.id);
+            }
+          }
+        }
+      }
+    } catch (e) {
+      debugPrint('[FirestoreService] Supervisor fallback route query failed: $e');
+    }
+
+    return routesMap.values.toList();
   }
 
   Future<List<SalesRoute>> getAllRoutesByDateRangeAndCompany({
@@ -164,35 +172,60 @@ class FirestoreService {
     required String startDate,
     required String endDate,
   }) async {
-    final supervisorsSnapshot = await _firebaseService.firestore
-        .collection('users')
-        .where('company_ID', isEqualTo: companyId)
-        .where('role', isEqualTo: 'supervisor')
-        .get();
+    final routesMap = <String, SalesRoute>{};
 
-    final supervisorIds =
-        supervisorsSnapshot.docs.map((d) => d.id).toList();
-    if (supervisorIds.isEmpty) return [];
-
-    final allRoutes = <SalesRoute>[];
-    for (var i = 0; i < supervisorIds.length; i += 30) {
-      final batch = supervisorIds.sublist(
-        i,
-        min(i + 30, supervisorIds.length),
-      );
-      final routeSnapshot = await _firebaseService.firestore
+    // 1. Direct query using company_ID
+    try {
+      final directSnapshot = await _firebaseService.firestore
           .collection('routes')
-          .where('supervisorId', whereIn: batch)
+          .where('company_ID', isEqualTo: companyId)
           .where('date', isGreaterThanOrEqualTo: startDate)
           .where('date', isLessThanOrEqualTo: endDate)
           .get();
-      allRoutes.addAll(
-        routeSnapshot.docs.map(
-          (doc) => SalesRoute.fromMap(doc.data(), routeId: doc.id),
-        ),
-      );
+
+      for (final doc in directSnapshot.docs) {
+        routesMap[doc.id] = SalesRoute.fromMap(doc.data(), routeId: doc.id);
+      }
+    } catch (e) {
+      debugPrint('[FirestoreService] Direct date range company route query failed: $e');
     }
-    return allRoutes;
+
+    // 2. Supplementary query via supervisor IDs
+    try {
+      final supervisorsSnapshot = await _firebaseService.firestore
+          .collection('users')
+          .where('company_ID', isEqualTo: companyId)
+          .where('role', isEqualTo: 'supervisor')
+          .get();
+
+      final supervisorIds =
+          supervisorsSnapshot.docs.map((d) => d.id).toList();
+
+      if (supervisorIds.isNotEmpty) {
+        for (var i = 0; i < supervisorIds.length; i += 30) {
+          final batch = supervisorIds.sublist(
+            i,
+            min(i + 30, supervisorIds.length),
+          );
+          final routeSnapshot = await _firebaseService.firestore
+              .collection('routes')
+              .where('supervisorId', whereIn: batch)
+              .where('date', isGreaterThanOrEqualTo: startDate)
+              .where('date', isLessThanOrEqualTo: endDate)
+              .get();
+
+          for (final doc in routeSnapshot.docs) {
+            if (!routesMap.containsKey(doc.id)) {
+              routesMap[doc.id] = SalesRoute.fromMap(doc.data(), routeId: doc.id);
+            }
+          }
+        }
+      }
+    } catch (e) {
+      debugPrint('[FirestoreService] Supervisor fallback date range route query failed: $e');
+    }
+
+    return routesMap.values.toList();
   }
 
   Future<AppUser?> getUser(String uid) async {
