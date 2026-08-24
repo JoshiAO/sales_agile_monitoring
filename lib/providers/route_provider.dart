@@ -187,7 +187,7 @@ class RouteProvider extends ChangeNotifier {
         for (var i = 0; i < anchors.length; i += 35) {
           final batch = anchors.sublist(
             i,
-            math.min(i + 40, anchors.length),
+            min(i + 40, anchors.length),
           );
           if (batch.length < 2) continue;
 
