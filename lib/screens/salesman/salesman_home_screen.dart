@@ -869,17 +869,21 @@ class _SalesmanHomeScreenState extends State<SalesmanHomeScreen>
             stampedResult.uploadFile,
             user.uid,
             timestamp,
-          );
+          ).timeout(const Duration(seconds: 3));
         } catch (e) {
           debugPrint('[SalesmanHomeScreen] First call storage upload failed (offline): $e');
           isOfflineFirstCall = true;
         }
       } else {
-        imageUrl = await _storageService.uploadRouteImage(
-          stampedResult.uploadFile,
-          user.uid,
-          timestamp,
-        );
+        try {
+          imageUrl = await _storageService.uploadRouteImage(
+            stampedResult.uploadFile,
+            user.uid,
+            timestamp,
+          ).timeout(const Duration(seconds: 3));
+        } catch (e) {
+          debugPrint('[SalesmanHomeScreen] Last call storage upload failed (offline): $e');
+        }
       }
 
       // Create RoutePoint
@@ -907,7 +911,7 @@ class _SalesmanHomeScreenState extends State<SalesmanHomeScreen>
         existingRoutes = await _firestoreService.getRoutesBySalesman(
           user.uid,
           _todayDate,
-        );
+        ).timeout(const Duration(seconds: 3));
       } catch (_) {}
 
       if (existingRoutes.isEmpty) {
@@ -1046,12 +1050,16 @@ class _SalesmanHomeScreenState extends State<SalesmanHomeScreen>
         // Update existing route
         final route = existingRoutes[0];
         if (isFirst) {
-          await _firestoreService.updateRoute(route.routeId, {
-            'first': routePoint.toMap(),
-            'hasFirstCall': true,
-            'firstRetakeRequested': false,
-            'firstRetakeApproved': false,
-          });
+          try {
+            await _firestoreService.updateRoute(route.routeId, {
+              'first': routePoint.toMap(),
+              'hasFirstCall': true,
+              'firstRetakeRequested': false,
+              'firstRetakeApproved': false,
+            }).timeout(const Duration(seconds: 3));
+          } catch (e) {
+            debugPrint('[SalesmanHomeScreen] updateRoute first call failed (offline): $e');
+          }
           setState(() {
             _todayRouteId = route.routeId;
             _firstPoint = routePoint;
@@ -1064,12 +1072,16 @@ class _SalesmanHomeScreenState extends State<SalesmanHomeScreen>
           });
           _syncCheckpointTracking();
         } else {
-          await _firestoreService.updateRoute(route.routeId, {
-            'last': routePoint.toMap(),
-            'hasLastCall': true,
-            'lastRetakeRequested': false,
-            'lastRetakeApproved': false,
-          });
+          try {
+            await _firestoreService.updateRoute(route.routeId, {
+              'last': routePoint.toMap(),
+              'hasLastCall': true,
+              'lastRetakeRequested': false,
+              'lastRetakeApproved': false,
+            }).timeout(const Duration(seconds: 3));
+          } catch (e) {
+            debugPrint('[SalesmanHomeScreen] updateRoute last call failed (offline): $e');
+          }
           setState(() {
             _todayRouteId = route.routeId;
             _lastPoint = routePoint;
