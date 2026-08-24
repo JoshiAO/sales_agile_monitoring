@@ -179,41 +179,48 @@ class RouteProvider extends ChangeNotifier {
         continue;
       }
 
-      // Real-time client OSRM road snapping across waypoint batches
-      final roadWaypoints = <LatLng>[];
+      // Real-time client OSRM road snapping with detour validation
+      final distanceCalc = const Distance();
+      final roadWaypoints = <LatLng>[anchors.first];
       var isApproximate = false;
 
-      try {
-        for (var i = 0; i < anchors.length; i += 35) {
-          final batch = anchors.sublist(
-            i,
-            min(i + 40, anchors.length),
-          );
-          if (batch.length < 2) continue;
+      for (var i = 0; i < anchors.length - 1; i++) {
+        final start = anchors[i];
+        final end = anchors[i + 1];
+        final straightMeters = distanceCalc.as(LengthUnit.Meter, start, end);
 
-          final osrmBatch = await _routingService.getRouteForWaypoints(batch);
-          if (osrmBatch.length >= 2) {
-            if (roadWaypoints.isEmpty) {
-              roadWaypoints.addAll(osrmBatch);
+        // If points are very close (less than 60m), direct connection is sufficient
+        if (straightMeters < 60) {
+          roadWaypoints.add(end);
+          continue;
+        }
+
+        try {
+          final osrmSegment = await _routingService.getRoute(start, end);
+          if (osrmSegment.length >= 2) {
+            double osrmMeters = 0.0;
+            for (var k = 0; k < osrmSegment.length - 1; k++) {
+              osrmMeters += distanceCalc.as(
+                LengthUnit.Meter,
+                osrmSegment[k],
+                osrmSegment[k + 1],
+              );
+            }
+
+            // Accept OSRM road snapping if path is reasonable (<= 2.5x straight distance)
+            if (osrmMeters <= straightMeters * 2.5) {
+              roadWaypoints.addAll(osrmSegment.skip(1));
             } else {
-              roadWaypoints.addAll(osrmBatch.skip(1));
+              // Reject extreme detour / U-turn glitches across water or mountains
+              roadWaypoints.add(end);
             }
           } else {
-            isApproximate = true;
-            if (roadWaypoints.isEmpty) {
-              roadWaypoints.addAll(batch);
-            } else {
-              roadWaypoints.addAll(batch.skip(1));
-            }
+            roadWaypoints.add(end);
           }
+        } catch (_) {
+          isApproximate = true;
+          roadWaypoints.add(end);
         }
-      } catch (e) {
-        developer.log(
-          '[RouteProvider] OSRM road routing fallback for ${route.routeId}: $e',
-          name: 'RouteProvider',
-        );
-        isApproximate = true;
-        roadWaypoints.addAll(anchors);
       }
 
       final finalPoints = roadWaypoints.length >= 2 ? roadWaypoints : anchors;
