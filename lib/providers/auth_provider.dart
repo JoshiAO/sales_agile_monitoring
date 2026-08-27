@@ -105,7 +105,7 @@ class AuthProvider extends ChangeNotifier {
     // hang on the splash when the device is offline.
     try {
       final fetchedUser = await _authService.getCurrentUser().timeout(
-        const Duration(seconds: 8),
+        const Duration(seconds: 4),
         onTimeout: () => throw Exception('network timeout'),
       );
       _currentUser = fetchedUser;
