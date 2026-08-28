@@ -688,9 +688,9 @@ class _SupervisorDashboardState extends State<SupervisorDashboard> {
                         // Tile Layer
                         ColorFiltered(
                           colorFilter: const ColorFilter.matrix([
-                            0.45, 0.35, 0.20, 0, 35,
-                            0.45, 0.35, 0.20, 0, 35,
-                            0.45, 0.35, 0.20, 0, 35,
+                            0.65, 0.25, 0.10, 0, -15,
+                            0.65, 0.25, 0.10, 0, -15,
+                            0.65, 0.25, 0.10, 0, -15,
                             0,    0,    0,    1, 0,
                           ]),
                           child: TileLayer(

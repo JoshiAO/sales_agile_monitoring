@@ -192,8 +192,8 @@ class RouteProvider extends ChangeNotifier {
         final end = anchors[i + 1];
         final straightMeters = distanceCalc.as(LengthUnit.Meter, start, end);
 
-        // If points are very close (less than 60m), direct connection is sufficient
-        if (straightMeters < 60) {
+        // If points are very close (less than 15m), direct connection is sufficient
+        if (straightMeters < 15) {
           roadWaypoints.add(end);
           continue;
         }
@@ -214,7 +214,6 @@ class RouteProvider extends ChangeNotifier {
             if (osrmMeters <= straightMeters * 2.5) {
               roadWaypoints.addAll(osrmSegment.skip(1));
             } else {
-              // Reject extreme detour / U-turn glitches across water or mountains
               roadWaypoints.add(end);
             }
           } else {
@@ -475,9 +474,9 @@ class RouteProvider extends ChangeNotifier {
       final current = rawAnchors[i];
       final dist = distanceCalc.as(LengthUnit.Meter, prev, current);
 
-      // If consecutive checkpoint is within 25m of previous (indoor store dwell),
+      // If consecutive checkpoint is within 50m of previous (indoor establishment dwell),
       // suppress rooftop micro-bouncing and keep entry establishment coordinate.
-      if (dist < 25 && i < rawAnchors.length - 1) {
+      if (dist < 50 && i < rawAnchors.length - 1) {
         continue;
       }
 
