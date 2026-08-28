@@ -210,8 +210,9 @@ class RouteProvider extends ChangeNotifier {
               );
             }
 
-            // Accept OSRM road snapping if path is reasonable (<= 2.5x straight distance)
-            if (osrmMeters <= straightMeters * 2.5) {
+            // Accept OSRM road snapping if path is reasonable (<= 5.0x straight distance or under 500m)
+            // Ensures routes around city blocks (like Cabanatuan Central Terminal) follow public roads!
+            if (osrmMeters <= straightMeters * 5.0 || straightMeters < 500) {
               roadWaypoints.addAll(osrmSegment.skip(1));
             } else {
               roadWaypoints.add(end);
