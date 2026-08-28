@@ -798,9 +798,9 @@ class _SuperUserDashboardState extends State<SuperUserDashboard> {
                         // Tile Layer
                         ColorFiltered(
                           colorFilter: const ColorFilter.matrix([
-                            1.06, 0,    0,    0, 10,
-                            0,    1.06, 0,    0, 10,
-                            0,    0,    1.06, 0, 10,
+                            0.45, 0.35, 0.20, 0, 35,
+                            0.45, 0.35, 0.20, 0, 35,
+                            0.45, 0.35, 0.20, 0, 35,
                             0,    0,    0,    1, 0,
                           ]),
                           child: TileLayer(

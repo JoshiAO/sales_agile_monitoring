@@ -18,7 +18,7 @@ class AppConstants {
   static const bool useOfflineTiles = false;
   static const String offlineTileUrl = 'assets/tiles/luzon/{z}/{x}/{y}.png';
   static const String offlineAttribution = 'Offline Luzon map tiles';
-  static const String osmTileUrl = 'https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}';
-  static const String osmAttribution = '© Esri, HERE, Garmin, OpenStreetMap contributors';
+  static const String osmTileUrl = 'https://tile.openstreetmap.org/{z}/{x}/{y}.png';
+  static const String osmAttribution = '© OpenStreetMap contributors';
   static const String osmUserAgentPackage = 'com.joshiao.compact_sales_monitoring';
 }
