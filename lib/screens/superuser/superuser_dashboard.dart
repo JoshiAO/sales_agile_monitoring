@@ -796,15 +796,23 @@ class _SuperUserDashboardState extends State<SuperUserDashboard> {
                       ),
                       children: [
                         // Tile Layer
-                        TileLayer(
-                          urlTemplate: AppConstants.useOfflineTiles
-                              ? AppConstants.offlineTileUrl
-                              : AppConstants.osmTileUrl,
-                          tileProvider: AppConstants.useOfflineTiles
-                              ? AssetTileProvider()
-                              : null,
-                          userAgentPackageName:
-                              AppConstants.osmUserAgentPackage,
+                        ColorFiltered(
+                          colorFilter: const ColorFilter.matrix([
+                            1.06, 0,    0,    0, 10,
+                            0,    1.06, 0,    0, 10,
+                            0,    0,    1.06, 0, 10,
+                            0,    0,    0,    1, 0,
+                          ]),
+                          child: TileLayer(
+                            urlTemplate: AppConstants.useOfflineTiles
+                                ? AppConstants.offlineTileUrl
+                                : AppConstants.osmTileUrl,
+                            tileProvider: AppConstants.useOfflineTiles
+                                ? AssetTileProvider()
+                                : null,
+                            userAgentPackageName:
+                                AppConstants.osmUserAgentPackage,
+                          ),
                         ),
                         RichAttributionWidget(
                           attributions: [

@@ -158,19 +158,22 @@ class RouteProvider extends ChangeNotifier {
         effectiveCheckpoints = sortedCps;
       }
 
-      final anchors = <LatLng>[];
+      final rawAnchors = <LatLng>[];
 
       if (route.hasFirstCall) {
-        anchors.add(LatLng(route.first.lat, route.first.lon));
+        rawAnchors.add(LatLng(route.first.lat, route.first.lon));
       }
 
       for (final checkpoint in effectiveCheckpoints) {
-        anchors.add(LatLng(checkpoint.lat, checkpoint.lon));
+        rawAnchors.add(LatLng(checkpoint.lat, checkpoint.lon));
       }
 
       if (route.hasLastCall) {
-        anchors.add(LatLng(route.last.lat, route.last.lon));
+        rawAnchors.add(LatLng(route.last.lat, route.last.lon));
       }
+
+      // Filter micro-movement GPS bounces (<25m radius) while stationary inside establishments/stores
+      final anchors = _filterIndoorJitterAnchors(rawAnchors);
 
       if (anchors.length < 2) {
         _routePolylines[route.routeId] = [
@@ -459,6 +462,29 @@ class RouteProvider extends ChangeNotifier {
     final lightness = index % 3 == 0 ? 0.47 : 0.52;
     final hsl = HSLColor.fromAHSL(1.0, hue, saturation, lightness);
     return hsl.toColor();
+  }
+
+  List<LatLng> _filterIndoorJitterAnchors(List<LatLng> rawAnchors) {
+    if (rawAnchors.length <= 2) return rawAnchors;
+
+    final distanceCalc = const Distance();
+    final filtered = <LatLng>[rawAnchors.first];
+
+    for (var i = 1; i < rawAnchors.length; i++) {
+      final prev = filtered.last;
+      final current = rawAnchors[i];
+      final dist = distanceCalc.as(LengthUnit.Meter, prev, current);
+
+      // If consecutive checkpoint is within 25m of previous (indoor store dwell),
+      // suppress rooftop micro-bouncing and keep entry establishment coordinate.
+      if (dist < 25 && i < rawAnchors.length - 1) {
+        continue;
+      }
+
+      filtered.add(current);
+    }
+
+    return filtered;
   }
 
   void clearError() {
