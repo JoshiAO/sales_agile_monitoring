@@ -57,10 +57,12 @@ class RouteProvider extends ChangeNotifier {
   bool get isLoading => _isLoading;
   String? get error => _error;
 
-  Future<void> fetchRoutesByDate(String supervisorId, String date) async {
-    _isLoading = true;
-    _error = null;
-    notifyListeners();
+  Future<void> fetchRoutesByDate(String supervisorId, String date, {bool silent = false}) async {
+    if (!silent && _routes.isEmpty) {
+      _isLoading = true;
+      _error = null;
+      notifyListeners();
+    }
 
     try {
       _routes = await _firestoreService.getRoutesByDate(supervisorId, date);
@@ -74,10 +76,12 @@ class RouteProvider extends ChangeNotifier {
     }
   }
 
-  Future<void> fetchAllRoutesByDate(String date) async {
-    _isLoading = true;
-    _error = null;
-    notifyListeners();
+  Future<void> fetchAllRoutesByDate(String date, {bool silent = false}) async {
+    if (!silent && _routes.isEmpty) {
+      _isLoading = true;
+      _error = null;
+      notifyListeners();
+    }
 
     try {
       _routes = await _firestoreService.getAllRoutesByDate(date);
@@ -93,11 +97,14 @@ class RouteProvider extends ChangeNotifier {
 
   Future<void> fetchAllRoutesByDateAndCompany(
     String companyId,
-    String date,
-  ) async {
-    _isLoading = true;
-    _error = null;
-    notifyListeners();
+    String date, {
+    bool silent = false,
+  }) async {
+    if (!silent && _routes.isEmpty) {
+      _isLoading = true;
+      _error = null;
+      notifyListeners();
+    }
 
     try {
       _routes = await _firestoreService.getAllRoutesByDateAndCompany(

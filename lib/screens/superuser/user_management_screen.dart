@@ -30,8 +30,10 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
     _loadUsers();
   }
 
-  Future<void> _loadUsers() async {
-    setState(() => _isLoading = true);
+  Future<void> _loadUsers({bool silent = false}) async {
+    if (!silent || _allUsers.isEmpty) {
+      setState(() => _isLoading = true);
+    }
     try {
       final companyId =
           context.read<AuthProvider>().currentUser?.companyId;
@@ -425,7 +427,7 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
                   Navigator.pop(dialogContext);
                 }
                 if (!mounted) return;
-                await _loadUsers();
+                await _loadUsers(silent: true);
                 if (!rootContext.mounted) return;
                 ScaffoldMessenger.of(rootContext).showSnackBar(
                   const SnackBar(content: Text('Logout request rejected.')),
@@ -463,7 +465,7 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
                   Navigator.pop(dialogContext);
                 }
                 if (!mounted) return;
-                await _loadUsers();
+                await _loadUsers(silent: true);
                 if (!rootContext.mounted) return;
                 ScaffoldMessenger.of(rootContext).showSnackBar(
                   const SnackBar(content: Text('Logout request approved.')),
@@ -637,7 +639,7 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
                     });
 
                     if (!mounted) return;
-                    await _loadUsers();
+                    await _loadUsers(silent: true);
                     if (!dialogContext.mounted) return;
                     Navigator.pop(dialogContext);
                     if (!rootContext.mounted) return;
@@ -807,7 +809,7 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
                     if (!mounted) return;
                     if (!dialogContext.mounted) return;
                     Navigator.pop(dialogContext);
-                    await _loadUsers();
+                    await _loadUsers(silent: true);
                     if (!rootContext.mounted) return;
                     ScaffoldMessenger.of(rootContext).showSnackBar(
                       const SnackBar(content: Text('User updated')),
@@ -859,7 +861,7 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
                   if (!mounted) return;
                   if (!dialogContext.mounted) return;
                   Navigator.pop(dialogContext);
-                  await _loadUsers();
+                  await _loadUsers(silent: true);
                   if (!rootContext.mounted) return;
                   ScaffoldMessenger.of(rootContext).showSnackBar(
                     const SnackBar(

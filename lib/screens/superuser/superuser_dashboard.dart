@@ -53,7 +53,7 @@ class _SuperUserDashboardState extends State<SuperUserDashboard> {
     _loadRoutes();
   }
 
-  Future<void> _loadRoutes() async {
+  Future<void> _loadRoutes({bool silent = false}) async {
     final companyId =
         context.read<AuthProvider>().currentUser?.companyId;
     final dateStr = DateFormat('yyyy-MM-dd').format(_selectedDate);
@@ -61,9 +61,10 @@ class _SuperUserDashboardState extends State<SuperUserDashboard> {
       context.read<RouteProvider>().fetchAllRoutesByDateAndCompany(
             companyId,
             dateStr,
+            silent: silent,
           );
     } else {
-      context.read<RouteProvider>().fetchAllRoutesByDate(dateStr);
+      context.read<RouteProvider>().fetchAllRoutesByDate(dateStr, silent: silent);
     }
   }
 
@@ -228,10 +229,9 @@ class _SuperUserDashboardState extends State<SuperUserDashboard> {
               builder: (dialogContext) => RouteDetailModal(
                 route: route,
                 salesman: salesmanDetails,
-                onRouteChanged: _loadRoutes,
+                onRouteChanged: () => _loadRoutes(silent: true),
               ),
             );
-            _loadRoutes();
           },
           child: Column(
             mainAxisSize: MainAxisSize.min,

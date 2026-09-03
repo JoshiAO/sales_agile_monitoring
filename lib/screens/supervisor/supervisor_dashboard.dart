@@ -48,13 +48,13 @@ class _SupervisorDashboardState extends State<SupervisorDashboard> {
     _loadRoutes();
   }
 
-  Future<void> _loadRoutes() async {
+  Future<void> _loadRoutes({bool silent = false}) async {
     final authProvider = context.read<AuthProvider>();
     final user = authProvider.currentUser;
 
     if (user != null) {
       final dateStr = DateFormat('yyyy-MM-dd').format(_selectedDate);
-      context.read<RouteProvider>().fetchRoutesByDate(user.uid, dateStr);
+      context.read<RouteProvider>().fetchRoutesByDate(user.uid, dateStr, silent: silent);
     }
   }
 
@@ -123,10 +123,9 @@ class _SupervisorDashboardState extends State<SupervisorDashboard> {
               builder: (dialogContext) => RouteDetailModal(
                 route: route,
                 salesman: salesmanDetails,
-                onRouteChanged: _loadRoutes,
+                onRouteChanged: () => _loadRoutes(silent: true),
               ),
             );
-            _loadRoutes();
           },
           child: Column(
             mainAxisSize: MainAxisSize.min,
