@@ -2,6 +2,7 @@ import 'dart:math';
 import 'package:flutter/foundation.dart';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:intl/intl.dart';
 import 'package:compact_sales_monitoring/models/agile_model.dart';
 import 'package:compact_sales_monitoring/models/company_branding_model.dart';
 import 'package:compact_sales_monitoring/models/user_model.dart';
@@ -403,9 +404,7 @@ class FirestoreService {
     String routeId,
     RouteCheckpoint checkpoint,
   ) async {
-    await _firebaseService.firestore.collection('routes').doc(routeId).update({
-      'checkpoints': FieldValue.arrayUnion([checkpoint.toMap()]),
-    });
+    await appendRouteCheckpointsBatch(routeId, [checkpoint]);
   }
 
   Future<void> appendRouteCheckpointsBatch(
@@ -413,9 +412,23 @@ class FirestoreService {
     List<RouteCheckpoint> checkpoints,
   ) async {
     if (checkpoints.isEmpty) return;
-    await _firebaseService.firestore.collection('routes').doc(routeId).update({
+
+    final docRef = _firebaseService.firestore.collection('routes').doc(routeId);
+    final docSnap = await docRef.get();
+    if (!docSnap.exists) return;
+
+    final routeDate = docSnap.data()?['date'] as String?;
+    final validCheckpoints = checkpoints.where((cp) {
+      if (routeDate == null || routeDate.isEmpty) return true;
+      final cpDateStr = DateFormat('yyyy-MM-dd').format(cp.timestamp);
+      return cpDateStr == routeDate;
+    }).toList();
+
+    if (validCheckpoints.isEmpty) return;
+
+    await docRef.update({
       'checkpoints': FieldValue.arrayUnion(
-        checkpoints.map((c) => c.toMap()).toList(),
+        validCheckpoints.map((c) => c.toMap()).toList(),
       ),
     });
   }

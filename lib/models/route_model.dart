@@ -223,6 +223,13 @@ class SalesRoute {
           ((data['checkpoints'] as List?) ?? const [])
               .whereType<Map<String, dynamic>>()
               .map(RouteCheckpoint.fromMap)
+              .where((cp) {
+                final routeDate = data['date'] as String? ?? '';
+                if (routeDate.isEmpty) return true;
+                final cpDateStr =
+                    "${cp.timestamp.year.toString().padLeft(4, '0')}-${cp.timestamp.month.toString().padLeft(2, '0')}-${cp.timestamp.day.toString().padLeft(2, '0')}";
+                return cpDateStr == routeDate;
+              })
               .toList()
             ..sort((a, b) => a.timestamp.compareTo(b.timestamp)),
       cachedPolyline: ((data['cachedPolyline'] as List?) ?? const [])
@@ -265,7 +272,12 @@ class SalesRoute {
   }
 
   List<RouteCheckpoint> get sortedCheckpoints {
-    final ordered = List<RouteCheckpoint>.from(checkpoints);
+    final ordered = checkpoints.where((cp) {
+      if (date.isEmpty) return true;
+      final cpDateStr =
+          "${cp.timestamp.year.toString().padLeft(4, '0')}-${cp.timestamp.month.toString().padLeft(2, '0')}-${cp.timestamp.day.toString().padLeft(2, '0')}";
+      return cpDateStr == date;
+    }).toList();
     ordered.sort((a, b) => a.timestamp.compareTo(b.timestamp));
     return ordered;
   }

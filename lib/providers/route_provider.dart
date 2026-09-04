@@ -180,7 +180,8 @@ class RouteProvider extends ChangeNotifier {
       }
 
       // Filter micro-movement GPS bounces (<25m radius) while stationary inside establishments/stores
-      final anchors = _filterIndoorJitterAnchors(rawAnchors);
+      // AND filter V-shaped teleport spikes (>25km jump away and back) from stale checkpoints
+      final anchors = _filterTeleportSpikes(_filterIndoorJitterAnchors(rawAnchors));
 
       if (anchors.length < 2) {
         _routePolylines[route.routeId] = [
@@ -492,6 +493,35 @@ class RouteProvider extends ChangeNotifier {
     }
 
     return filtered;
+  }
+
+  List<LatLng> _filterTeleportSpikes(List<LatLng> rawAnchors) {
+    if (rawAnchors.length <= 2) return rawAnchors;
+
+    final distanceCalc = const Distance();
+    final result = <LatLng>[rawAnchors.first];
+
+    for (var i = 1; i < rawAnchors.length - 1; i++) {
+      final prev = result.last;
+      final current = rawAnchors[i];
+      final next = rawAnchors[i + 1];
+
+      final distPrevCurrent = distanceCalc.as(LengthUnit.Meter, prev, current);
+      final distCurrentNext = distanceCalc.as(LengthUnit.Meter, current, next);
+      final distPrevNext = distanceCalc.as(LengthUnit.Meter, prev, next);
+
+      // If current point is >25km away from both prev and next, but prev and next are <15km apart,
+      // it's an isolated V-shaped teleport spike (e.g. stale checkpoint from yesterday 50km away).
+      if (distPrevCurrent > 25000 && distCurrentNext > 25000 && distPrevNext < 15000) {
+        developer.log('[RouteProvider] Filtered V-shaped teleport spike checkpoint at $current');
+        continue;
+      }
+
+      result.add(current);
+    }
+
+    result.add(rawAnchors.last);
+    return result;
   }
 
   void clearError() {

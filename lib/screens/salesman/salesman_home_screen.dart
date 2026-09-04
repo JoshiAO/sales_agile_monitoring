@@ -631,10 +631,19 @@ class _SalesmanHomeScreenState extends State<SalesmanHomeScreen>
       } else {
         final prefs = await SharedPreferences.getInstance();
         await prefs.reload();
+        await BackgroundLocationService.purgeStaleLocalCheckpoints(prefs, _todayDate);
+
         final rawPending = prefs.getString('pending_first_call_v2');
         if (rawPending != null && rawPending.isNotEmpty) {
           try {
             final pendingMap = jsonDecode(rawPending) as Map<String, dynamic>;
+            final pendingDate = pendingMap['date'] as String?;
+            if (pendingDate != null && pendingDate != _todayDate) {
+              await prefs.remove('pending_first_call_v2');
+              _resetRouteState();
+              return;
+            }
+
             final pendingRouteId = pendingMap['routeId'] as String;
             final pendingLocalPath = pendingMap['stampedLocalImagePath'] as String? ?? pendingMap['localImagePath'] as String?;
             final locationTime = DateTime.fromMillisecondsSinceEpoch(pendingMap['locationTime'] as int);

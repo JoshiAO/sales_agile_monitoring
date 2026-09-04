@@ -59,8 +59,21 @@ class BackgroundLocationService {
     final previousRouteId = prefs.getString('active_route_id');
     final previousFirstPointTime = prefs.getString('first_point_time');
     final currentFirstPointTime = firstPoint.timestamp.toIso8601String();
+    final todayDateStr = DateFormat('yyyy-MM-dd').format(firstPoint.timestamp);
 
-    if (previousRouteId != routeId || previousFirstPointTime != currentFirstPointTime) {
+    final lastCpTimeStr = prefs.getString('last_checkpoint_time');
+    bool isNewDay = false;
+    if (lastCpTimeStr != null) {
+      try {
+        final lastCpTime = DateTime.parse(lastCpTimeStr);
+        final lastCpDateStr = DateFormat('yyyy-MM-dd').format(lastCpTime);
+        if (lastCpDateStr != todayDateStr) {
+          isNewDay = true;
+        }
+      } catch (_) {}
+    }
+
+    if (previousRouteId != routeId || previousFirstPointTime != currentFirstPointTime || isNewDay) {
       await prefs.setString('active_route_id', routeId);
       await prefs.setString('first_point_time', currentFirstPointTime);
       
@@ -72,6 +85,9 @@ class BackgroundLocationService {
       await prefs.setDouble('last_checkpoint_lon', firstPoint.lon);
       await prefs.setInt('checkpoint_count', 0);
       await prefs.remove('session_checkpoints_history');
+
+      // Purge any stale local batch checkpoints from prior dates
+      await purgeStaleLocalCheckpoints(prefs, todayDateStr);
     }
 
     await service.startService();
@@ -359,18 +375,56 @@ class BackgroundLocationService {
   }
   
   static const String _batchPrefsKey = 'batched_checkpoints_v2';
-  
+
+  static Future<void> purgeStaleLocalCheckpoints([
+    SharedPreferences? providedPrefs,
+    String? targetDate,
+  ]) async {
+    final prefs = providedPrefs ?? await SharedPreferences.getInstance();
+    await prefs.reload();
+    final raw = prefs.getStringList(_batchPrefsKey) ?? [];
+    if (raw.isEmpty) return;
+
+    final todayStr = targetDate ?? DateFormat('yyyy-MM-dd').format(DateTime.now());
+    final validRaw = <String>[];
+
+    for (final entryStr in raw) {
+      try {
+        final map = jsonDecode(entryStr) as Map<String, dynamic>;
+        final tsMs = map['timestamp'] as int?;
+        if (tsMs != null) {
+          final cpDate = DateTime.fromMillisecondsSinceEpoch(tsMs);
+          final cpDateStr = DateFormat('yyyy-MM-dd').format(cpDate);
+          if (cpDateStr == todayStr) {
+            validRaw.add(entryStr);
+          } else {
+            debugPrint(
+              '[BackgroundLocationService] Purging stale offline checkpoint from $cpDateStr (target today: $todayStr)',
+            );
+          }
+        }
+      } catch (_) {}
+    }
+
+    if (validRaw.length != raw.length) {
+      await prefs.setStringList(_batchPrefsKey, validRaw);
+      await prefs.setInt('batch_pending_count', validRaw.length);
+    }
+  }
+
   static Future<void> _persistToLocalBatch(SharedPreferences prefs, String routeId, RouteCheckpoint cp) async {
     final raw = prefs.getStringList(_batchPrefsKey) ?? [];
+    final routeDateStr = DateFormat('yyyy-MM-dd').format(cp.timestamp);
     final jsonMap = {
       'routeId': routeId,
+      'routeDate': routeDateStr,
       'lat': cp.lat,
       'lon': cp.lon,
       'timestamp': cp.timestamp.millisecondsSinceEpoch,
     };
-    if (cp.batteryLevel != null) jsonMap['batteryLevel'] = cp.batteryLevel as dynamic;
-    if (cp.isMobileDataOn != null) jsonMap['isMobileDataOn'] = cp.isMobileDataOn as dynamic;
-    if (cp.isWifiOn != null) jsonMap['isWifiOn'] = cp.isWifiOn as dynamic;
+    if (cp.batteryLevel != null) jsonMap['batteryLevel'] = cp.batteryLevel!;
+    if (cp.isMobileDataOn != null) jsonMap['isMobileDataOn'] = cp.isMobileDataOn!;
+    if (cp.isWifiOn != null) jsonMap['isWifiOn'] = cp.isWifiOn!;
 
     final jsonStr = jsonEncode(jsonMap);
     raw.add(jsonStr);
@@ -466,6 +520,7 @@ class BackgroundLocationService {
     final fs = providedFs ?? FirestoreService();
     
     await prefs.reload();
+    await purgeStaleLocalCheckpoints(prefs);
     await flushPendingFirstCall(prefs, fs);
 
     final raw = prefs.getStringList(_batchPrefsKey) ?? [];
@@ -474,15 +529,25 @@ class BackgroundLocationService {
     final Map<String, List<RouteCheckpoint>> checkpointsByRoute = {};
     final Map<String, List<String>> rawStringsByRoute = {};
     final List<String> remainingRaw = [];
+    final todayDateStr = DateFormat('yyyy-MM-dd').format(DateTime.now());
 
     for (final entryStr in raw) {
       try {
         final map = jsonDecode(entryStr) as Map<String, dynamic>;
+        final ts = DateTime.fromMillisecondsSinceEpoch(map['timestamp'] as int);
+        final cpDateStr = DateFormat('yyyy-MM-dd').format(ts);
+
+        // Extra safeguard: discard mismatching dates from batch flush
+        if (cpDateStr != todayDateStr) {
+          debugPrint('[BackgroundLocationService] Discarding stale checkpoint during flush: $cpDateStr (today: $todayDateStr)');
+          continue;
+        }
+
         final routeId = map['routeId'] as String;
         final cp = RouteCheckpoint(
           lat: (map['lat'] as num).toDouble(),
           lon: (map['lon'] as num).toDouble(),
-          timestamp: DateTime.fromMillisecondsSinceEpoch(map['timestamp'] as int),
+          timestamp: ts,
           batteryLevel: map['batteryLevel'] as int?,
           isMobileDataOn: map['isMobileDataOn'] as bool?,
           isWifiOn: map['isWifiOn'] as bool?,

@@ -117,8 +117,17 @@ class _SalesmanTabsScreenState extends State<SalesmanTabsScreen> {
             );
           } else if (nextStatus == 'rejected') {
             ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                content: Text('Logout request rejected by superuser.'),
+              SnackBar(
+                content: const Text('Logout request rejected by superuser.'),
+                action: SnackBarAction(
+                  label: 'Dismiss',
+                  onPressed: () {
+                    _firestoreService
+                        .clearLogoutApproval(uid: user.uid)
+                        .catchError((_) {});
+                  },
+                ),
+                duration: const Duration(seconds: 6),
               ),
             );
           }
@@ -138,16 +147,19 @@ class _SalesmanTabsScreenState extends State<SalesmanTabsScreen> {
     late final String label;
     late final Color bg;
     late final Color fg;
+    bool isDismissible = false;
+
     switch (status) {
       case 'approved':
-        label = 'Logout: Approved';
+        label = 'Logout: Approved (Tap to Logout)';
         bg = Colors.green.shade50;
         fg = Colors.green.shade800;
         break;
       case 'rejected':
-        label = 'Logout: Rejected';
+        label = 'Logout: Rejected (Tap to Dismiss)';
         bg = Colors.red.shade50;
         fg = Colors.red.shade800;
+        isDismissible = true;
         break;
       default:
         label = 'Logout: Pending';
@@ -155,19 +167,50 @@ class _SalesmanTabsScreenState extends State<SalesmanTabsScreen> {
         fg = Colors.orange.shade800;
     }
 
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-      decoration: BoxDecoration(
-        color: bg,
-        borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: fg.withValues(alpha: 0.3)),
-      ),
-      child: Text(
-        label,
-        style: TextStyle(
-          color: fg,
-          fontSize: 12,
-          fontWeight: FontWeight.w700,
+    final user = context.read<AuthProvider>().currentUser;
+
+    return GestureDetector(
+      onTap: () async {
+        if (status == 'approved') {
+          await _handleLogoutTapped();
+        } else if (status == 'rejected' && user != null) {
+          await _firestoreService.clearLogoutApproval(uid: user.uid);
+          if (mounted) {
+            setState(() {
+              _currentLogoutRequestStatus = null;
+            });
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Logout rejection message cleared.'),
+                duration: Duration(seconds: 2),
+              ),
+            );
+          }
+        }
+      },
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        decoration: BoxDecoration(
+          color: bg,
+          borderRadius: BorderRadius.circular(999),
+          border: Border.all(color: fg.withValues(alpha: 0.3)),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              label,
+              style: TextStyle(
+                color: fg,
+                fontSize: 12,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            if (isDismissible) ...[
+              const SizedBox(width: 4),
+              Icon(Icons.close, size: 14, color: fg),
+            ],
+          ],
         ),
       ),
     );
