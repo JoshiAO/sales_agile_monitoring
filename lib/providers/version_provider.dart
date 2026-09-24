@@ -10,11 +10,44 @@ class VersionProvider with ChangeNotifier {
   String? _currentVersion;
   String? _latestVersion;
 
+  // Session-aware update deferral.
+  bool _sessionActive = false;
+  bool _updateDeferred = false;
+  String? _deferredDownloadUrl;
+  String? _deferredLatestVersion;
+
   bool get isChecking => _isChecking;
   bool get isOutdated => _isOutdated;
   String? get downloadUrl => _downloadUrl;
   String? get currentVersion => _currentVersion;
   String? get latestVersion => _latestVersion;
+
+  /// True when a version update was found but deferred because an active
+  /// call session is in progress. The salesman should be notified via a
+  /// non-blocking toast.
+  bool get updateDeferred => _updateDeferred;
+
+  /// Called by [SalesmanHomeScreen] when a call session starts (First Call
+  /// completed) or ends (Last Call completed or retake).
+  ///
+  /// When the session ends and an update was deferred, this method applies
+  /// the deferred update immediately so [AppRouter] shows [ForceUpdateScreen].
+  void setSessionActive(bool active) {
+    _sessionActive = active;
+    debugPrint('[VersionProvider] Session active: $active, updateDeferred: $_updateDeferred');
+
+    if (!active && _updateDeferred) {
+      // Session just ended — apply the previously deferred update.
+      _isOutdated = true;
+      _downloadUrl = _deferredDownloadUrl;
+      _latestVersion = _deferredLatestVersion;
+      _updateDeferred = false;
+      _deferredDownloadUrl = null;
+      _deferredLatestVersion = null;
+      debugPrint('[VersionProvider] Deferred update now active. Latest: $_latestVersion');
+      notifyListeners();
+    }
+  }
 
   Future<void> checkVersion() async {
     if (kIsWeb) {
@@ -29,12 +62,30 @@ class VersionProvider with ChangeNotifier {
 
       final config = await _firestoreService.getAppConfig();
       if (config != null) {
-        _latestVersion = config['latest_version'] as String?;
+        final fetchedLatest = config['latest_version'] as String?;
         final url = config['download_url'] as String?;
 
-        if (_latestVersion != null && _isVersionOutdated(_currentVersion!, _latestVersion!)) {
-          _isOutdated = true;
-          _downloadUrl = url;
+        if (fetchedLatest != null &&
+            _isVersionOutdated(_currentVersion!, fetchedLatest)) {
+          if (_sessionActive) {
+            // A call session is active — defer the update so we don't
+            // interrupt the salesman mid-session.
+            _updateDeferred = true;
+            _deferredDownloadUrl = url;
+            _deferredLatestVersion = fetchedLatest;
+            _isOutdated = false; // Keep the app usable during the session.
+            debugPrint(
+              '[VersionProvider] Update available ($fetchedLatest) but session is active. Deferring.',
+            );
+          } else {
+            // No active session — apply immediately.
+            _isOutdated = true;
+            _downloadUrl = url;
+            _latestVersion = fetchedLatest;
+            debugPrint('[VersionProvider] Update available. Showing ForceUpdateScreen.');
+          }
+        } else {
+          _latestVersion = fetchedLatest;
         }
       }
     } catch (e) {

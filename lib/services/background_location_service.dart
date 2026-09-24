@@ -8,20 +8,19 @@ import 'package:geolocator/geolocator.dart' as geo;
 import 'package:compact_sales_monitoring/services/firebase_service.dart';
 import 'package:compact_sales_monitoring/services/firestore_service.dart';
 import 'package:compact_sales_monitoring/services/storage_service.dart';
-import 'package:compact_sales_monitoring/services/checkpoint_queue_service.dart';
 import 'package:compact_sales_monitoring/models/route_model.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
-import 'package:flutter_background_service_android/flutter_background_service_android.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 import 'package:intl/intl.dart';
 import 'package:battery_plus/battery_plus.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 
 @pragma('vm:entry-point')
 class BackgroundLocationService {
-  static const double _checkpointMinDistanceMeters = 500.0;
   static const int _checkpointMinIntervalMinutes = 1; // Strict 1-minute checkpoints
   static const int _batchUploadIntervalMinutes = 30; // Upload batches every 30 minutes
   static const double _maxCheckpointAccuracyMeters = 250.0;
@@ -132,6 +131,32 @@ class BackgroundLocationService {
     if (activeRouteId == null) {
       service.stopSelf();
       return;
+    }
+
+    // DATE GUARD: Self-terminate if the active route belongs to a previous day.
+    // This prevents the background service from accumulating stale checkpoints
+    // when a salesman never completed Last Call on a prior session.
+    final routeStartStr = prefs.getString('route_start_time');
+    if (routeStartStr != null) {
+      try {
+        final routeStartDate = DateTime.parse(routeStartStr);
+        final startDateStr = DateFormat('yyyy-MM-dd').format(routeStartDate);
+        final todayStr = DateFormat('yyyy-MM-dd').format(DateTime.now());
+        if (startDateStr != todayStr) {
+          debugPrint(
+            '[BackgroundLocationService] Stale route from $startDateStr detected on $todayStr. Self-terminating.',
+          );
+          await prefs.remove('active_route_id');
+          service.stopSelf();
+          return;
+        }
+      } catch (_) {
+        // Unparseable date → corrupted state → stop for safety.
+        debugPrint('[BackgroundLocationService] Unparseable route_start_time. Self-terminating.');
+        await prefs.remove('active_route_id');
+        service.stopSelf();
+        return;
+      }
     }
 
     StreamSubscription<geo.Position>? locationSubscription;
@@ -245,24 +270,12 @@ class BackgroundLocationService {
       final now = DateTime.now();
 
       final lastTimeStr = prefs.getString('last_checkpoint_time');
-      final prevLat = prefs.getDouble('last_checkpoint_lat');
-      final prevLon = prefs.getDouble('last_checkpoint_lon');
 
       final lastTime = lastTimeStr != null ? DateTime.parse(lastTimeStr) : null;
 
       final timeSinceLast = lastTime == null
           ? Duration(minutes: _checkpointMinIntervalMinutes)
           : now.difference(lastTime);
-
-      double distanceSinceLast = 0.0;
-      if (prevLat != null && prevLon != null) {
-        distanceSinceLast = geo.Geolocator.distanceBetween(
-          prevLat,
-          prevLon,
-          position.latitude,
-          position.longitude,
-        );
-      }
 
       final timeThresholdMet = timeSinceLast.inSeconds >= 60;
 
@@ -324,7 +337,7 @@ class BackgroundLocationService {
       locationSubscription?.cancel();
       locationSubscription = stream.listen(
         (pos) => processLocation(pos),
-        onError: (e) {
+        onError: (Object e) {
           debugPrint('[BackgroundLocationService] Stream error: $e');
           Future.delayed(const Duration(seconds: 10), subscribeToLocation);
         },
@@ -583,6 +596,156 @@ class BackgroundLocationService {
 
     if (flushOccurred) {
       await prefs.setString('last_flush_time', DateTime.now().toIso8601String());
+    }
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Session & Data Cleanup
+  // ─────────────────────────────────────────────────────────────────────────
+
+  /// Cleans all transient tracking keys from a previous or stale session.
+  ///
+  /// Called at:
+  ///   - The start of every First Call (new session begins)
+  ///   - Date mismatch detected in _loadTodayRoute()
+  ///   - Midnight rollover
+  ///   - Stale session detected on app launch
+  ///
+  /// Never touches: auth, activation, or migration flags.
+  static Future<void> cleanupStaleSession(String todayDate) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.reload();
+
+    // Discard pending_first_call_v2 if it belongs to a different date.
+    final rawPending = prefs.getString('pending_first_call_v2');
+    if (rawPending != null && rawPending.isNotEmpty) {
+      try {
+        final map = jsonDecode(rawPending) as Map<String, dynamic>;
+        if (map['date'] != todayDate) {
+          debugPrint('[BackgroundLocationService] Removing stale pending_first_call_v2 (date: ${map['date']} ≠ $todayDate)');
+          await prefs.remove('pending_first_call_v2');
+        }
+      } catch (_) {
+        // Corrupted JSON → remove unconditionally.
+        debugPrint('[BackgroundLocationService] Removing corrupted pending_first_call_v2.');
+        await prefs.remove('pending_first_call_v2');
+      }
+    }
+
+    // Clear all tracking state keys.
+    const trackingKeys = [
+      'active_route_id',
+      'last_checkpoint_time',
+      'last_checkpoint_lat',
+      'last_checkpoint_lon',
+      'checkpoint_count',
+      'session_checkpoints_history',
+      'route_start_time',
+      'route_end_time',
+      'first_point_time',
+      'last_flush_time',
+    ];
+    for (final key in trackingKeys) {
+      await prefs.remove(key);
+    }
+
+    // Purge stale batched checkpoints (keeps only today's entries).
+    await purgeStaleLocalCheckpoints(prefs, todayDate);
+
+    // Reset batch counter.
+    await prefs.setInt('batch_pending_count', 0);
+
+    // Purge legacy checkpoint queue.
+    await prefs.remove('pending_checkpoints_v1');
+
+    // Clean up old cached image files (> 7 days) from app-private storage.
+    await _cleanupOldCallImages();
+
+    debugPrint('[BackgroundLocationService] cleanupStaleSession complete for $todayDate.');
+  }
+
+  /// Clears ALL transient app data (checkpoints, tracking state, local image
+  /// cache, and Firestore offline persistence) WITHOUT touching auth
+  /// credentials or activation state.
+  ///
+  /// Called once automatically after each app version upgrade via
+  /// _runPostUpdateCleanup() in main.dart.
+  static Future<void> cleanupAllTransientData() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.reload();
+
+    // Keys to ALWAYS preserve — never delete these.
+    const preserveKeys = <String>{
+      'cached_app_user',
+      'is_activated',
+      'activation_code',
+      'activation_device_id',
+      'has_migrated_v216',
+      'has_migrated_v219',
+      'last_app_version',
+    };
+
+    final allKeys = prefs.getKeys().toList();
+    for (final key in allKeys) {
+      if (preserveKeys.contains(key)) continue;
+      // Preserve any Flutter framework internal keys.
+      if (key.startsWith('flutter.')) continue;
+      await prefs.remove(key);
+    }
+    debugPrint('[BackgroundLocationService] cleanupAllTransientData: cleared ${allKeys.length - preserveKeys.length} prefs keys.');
+
+    // Delete the entire app-private call_images cache directory.
+    try {
+      final appDir = await getApplicationDocumentsDirectory();
+      final callImagesDir = Directory('${appDir.path}/call_images');
+      if (await callImagesDir.exists()) {
+        await callImagesDir.delete(recursive: true);
+        debugPrint('[BackgroundLocationService] cleanupAllTransientData: deleted call_images cache.');
+      }
+    } catch (e) {
+      debugPrint('[BackgroundLocationService] cleanupAllTransientData: failed to delete call_images: $e');
+    }
+
+    // Clear Firestore offline cache to prevent stale-document errors after update.
+    // Must be called before any Firestore reads in this session.
+    try {
+      await FirebaseFirestore.instance.clearPersistence();
+      debugPrint('[BackgroundLocationService] cleanupAllTransientData: Firestore persistence cleared.');
+    } catch (e) {
+      debugPrint('[BackgroundLocationService] cleanupAllTransientData: Firestore clearPersistence failed (non-fatal): $e');
+    }
+
+    debugPrint('[BackgroundLocationService] cleanupAllTransientData complete.');
+  }
+
+  /// Deletes call image files older than [retentionDays] from the app-private
+  /// `call_images/` cache. Gallery copies and Firebase Storage are never touched.
+  static Future<void> _cleanupOldCallImages({int retentionDays = 7}) async {
+    try {
+      final appDir = await getApplicationDocumentsDirectory();
+      final callImagesDir = Directory('${appDir.path}/call_images');
+      if (!await callImagesDir.exists()) return;
+
+      final cutoff = DateTime.now().subtract(Duration(days: retentionDays));
+      int deleted = 0;
+
+      await for (final entity in callImagesDir.list()) {
+        if (entity is File) {
+          try {
+            final stat = await entity.stat();
+            if (stat.modified.isBefore(cutoff)) {
+              await entity.delete();
+              deleted++;
+            }
+          } catch (_) {}
+        }
+      }
+
+      if (deleted > 0) {
+        debugPrint('[BackgroundLocationService] _cleanupOldCallImages: deleted $deleted file(s) older than ${retentionDays}d.');
+      }
+    } catch (e) {
+      debugPrint('[BackgroundLocationService] _cleanupOldCallImages error (non-fatal): $e');
     }
   }
 }

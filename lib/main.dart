@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 import 'package:compact_sales_monitoring/services/firebase_service.dart';
+import 'package:compact_sales_monitoring/services/background_location_service.dart';
 import 'package:compact_sales_monitoring/providers/auth_provider.dart';
 import 'package:compact_sales_monitoring/providers/activation_provider.dart';
 import 'package:compact_sales_monitoring/providers/company_branding_provider.dart';
@@ -10,7 +12,6 @@ import 'package:compact_sales_monitoring/providers/version_provider.dart';
 import 'package:compact_sales_monitoring/models/company_branding_model.dart';
 import 'package:compact_sales_monitoring/app_router.dart';
 import 'package:compact_sales_monitoring/screens/splash_screen.dart';
-import 'package:compact_sales_monitoring/services/background_location_service.dart';
 
 /// Selectively clears corrupted background tracking keys left by older app
 /// versions (e.g. v2.1.4, v2.1.5). Only removes background service state —
@@ -66,6 +67,43 @@ Future<void> _runV219Migration() async {
   debugPrint('[Migration] v2.1.9 migration complete.');
 }
 
+/// Runs once after each app version upgrade.
+///
+/// Compares the currently installed version against the last version stored
+/// in SharedPreferences. On a mismatch (i.e. the app just updated), it:
+///   1. Stops any leftover background tracking service.
+///   2. Clears all transient data (checkpoints, image cache, Firestore cache)
+///      while preserving auth credentials and activation state.
+///   3. Records the new version so this only runs once per upgrade.
+///
+/// This prevents stale-cache bugs that made the app buggy after auto-update.
+Future<void> _runPostUpdateCleanup() async {
+  final packageInfo = await PackageInfo.fromPlatform();
+  final currentVersion = '${packageInfo.version}+${packageInfo.buildNumber}';
+
+  final prefs = await SharedPreferences.getInstance();
+  final storedVersion = prefs.getString('last_app_version');
+
+  if (storedVersion == currentVersion) return; // Same version — skip.
+
+  debugPrint(
+    '[Migration] Version changed: $storedVersion → $currentVersion. Running post-update cleanup...',
+  );
+
+  // Stop any leftover background service from the previous version.
+  try {
+    await BackgroundLocationService.stopTracking();
+  } catch (_) {}
+
+  // Clean all transient data. Auth and activation keys are preserved.
+  await BackgroundLocationService.cleanupAllTransientData();
+
+  // Record the new version so this migration does not run again.
+  await prefs.setString('last_app_version', currentVersion);
+
+  debugPrint('[Migration] Post-update cleanup complete for $currentVersion.');
+}
+
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await FirebaseService.initializeApp();
@@ -74,6 +112,7 @@ void main() async {
   // These preserve login, activation, and Firebase Auth data.
   await _runV216Migration();
   await _runV219Migration();
+  await _runPostUpdateCleanup(); // Runs once per version upgrade; cleans transient data.
 
   // Step 2: Initialize the background service with a safety net.
   // If the native plugin has corrupted state that causes an immediate crash

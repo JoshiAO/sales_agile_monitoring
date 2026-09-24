@@ -19,7 +19,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:compact_sales_monitoring/models/route_model.dart';
 import 'package:compact_sales_monitoring/providers/auth_provider.dart';
-import 'package:compact_sales_monitoring/screens/salesman/salesman_tabs_screen.dart';
+import 'package:compact_sales_monitoring/providers/version_provider.dart';
 import 'package:compact_sales_monitoring/screens/salesman/salesman_debug_screen.dart';
 import 'package:compact_sales_monitoring/screens/salesman/camera_screen.dart';
 import 'package:compact_sales_monitoring/services/checkpoint_queue_service.dart';
@@ -28,6 +28,7 @@ import 'package:compact_sales_monitoring/services/storage_service.dart';
 import 'package:compact_sales_monitoring/services/firestore_service.dart';
 import 'package:compact_sales_monitoring/services/telemetry_service.dart';
 import 'package:compact_sales_monitoring/services/background_location_service.dart';
+import 'package:compact_sales_monitoring/services/connectivity_check_service.dart';
 import 'package:compact_sales_monitoring/screens/troubleshooting_screen.dart';
 import 'package:flutter_background_service/flutter_background_service.dart';
 
@@ -40,8 +41,6 @@ class SalesmanHomeScreen extends StatefulWidget {
 
 class _SalesmanHomeScreenState extends State<SalesmanHomeScreen>
     with WidgetsBindingObserver {
-  static const Duration _checkpointMinInterval = Duration(minutes: 30);
-  static const double _checkpointMinDistanceMeters = 500.0;
   static const double _maxCheckpointAccuracyMeters = 80.0;
   static const int _maxUploadBytes = 300 * 1024;
 
@@ -60,6 +59,7 @@ class _SalesmanHomeScreenState extends State<SalesmanHomeScreen>
   String? _firstLocalImagePath;
   String? _lastLocalImagePath;
   bool _isUploading = false;
+  bool _isConnectivityChecking = false;
   String? _loadedForDate;
   StreamSubscription<geo.Position>? _locationSubscription;
   Timer? _midnightRolloverTimer;
@@ -79,12 +79,17 @@ class _SalesmanHomeScreenState extends State<SalesmanHomeScreen>
     _midnightRolloverTimer = Timer(delay, () {
       if (!mounted) return;
 
+      // Stop the background service for the previous day's session.
+      BackgroundLocationService.stopTracking().catchError((_) {});
+      // Clean up stale session data from the old day before loading new state.
+      BackgroundLocationService.cleanupStaleSession(_todayDate).catchError((_) {});
       // Ensure pending offline checkpoints are attempted at day rollover,
       // then load fresh route state for the new date.
       BackgroundLocationService.flushPendingBatch().catchError((_) {});
       _checkpointQueue
           .flush(_firestoreService.appendRouteCheckpoint)
           .catchError((_) {});
+      _resetRouteState();
       _loadTodayRoute();
       _scheduleMidnightRollover();
     });
@@ -205,6 +210,7 @@ class _SalesmanHomeScreenState extends State<SalesmanHomeScreen>
     required String salesmanName,
     required Position position,
     required DateTime capturedAt,
+    bool isOffline = false,
   }) async {
     final bytes = await sourceFile.readAsBytes();
     final decoded = img.decodeImage(bytes);
@@ -313,6 +319,45 @@ class _SalesmanHomeScreenState extends State<SalesmanHomeScreen>
       color: img.ColorRgb8(255, 255, 255),
     );
     img.compositeImage(output, qrImage, dstX: qrX, dstY: qrY);
+
+    // OFFLINE banner — horizontal red rectangle in the top-left corner.
+    // Drawn after all other elements so it is always visible on any background.
+    if (isOffline) {
+      const offlineBannerPadH = 16;
+      const offlineBannerPadV = 10;
+      const offlineBannerW = 162;
+      const offlineBannerH = 24 + (offlineBannerPadV * 2);
+      const offlineBannerX = 12;
+      const offlineBannerY = 12;
+
+      // Semi-transparent red background.
+      img.fillRect(
+        output,
+        x1: offlineBannerX,
+        y1: offlineBannerY,
+        x2: offlineBannerX + offlineBannerW,
+        y2: offlineBannerY + offlineBannerH,
+        color: img.ColorRgba8(220, 38, 38, 230),
+      );
+      // White border for contrast on any background.
+      img.drawRect(
+        output,
+        x1: offlineBannerX,
+        y1: offlineBannerY,
+        x2: offlineBannerX + offlineBannerW,
+        y2: offlineBannerY + offlineBannerH,
+        color: img.ColorRgba8(255, 255, 255, 210),
+      );
+      // "OFFLINE" text in white.
+      img.drawString(
+        output,
+        'OFFLINE',
+        font: img.arial24,
+        x: offlineBannerX + offlineBannerPadH,
+        y: offlineBannerY + offlineBannerPadV,
+        color: img.ColorRgb8(255, 255, 255),
+      );
+    }
 
     // Place Text Details on the Right
     final textX = qrX + qrSize + 16;
@@ -440,7 +485,7 @@ class _SalesmanHomeScreenState extends State<SalesmanHomeScreen>
         ? FileImage(File(localPath)) as ImageProvider
         : NetworkImage(point.imageUrl);
 
-    showDialog(
+    showDialog<void>(
       context: context,
       builder: (dialogContext) {
         return Dialog(
@@ -483,16 +528,56 @@ class _SalesmanHomeScreenState extends State<SalesmanHomeScreen>
     );
   }
 
+  /// Detects a stale/orphaned session left by a previous day where the
+  /// salesman never completed Last Call. If the stored route_start_time
+  /// is from a different date, we stop the background service and clean
+  /// up before loading today's route — preventing app freeze.
+  Future<void> _guardAgainstStaleSession() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.reload();
+
+      final activeRouteId = prefs.getString('active_route_id');
+      final routeStartStr = prefs.getString('route_start_time');
+
+      if (activeRouteId != null && routeStartStr != null) {
+        final routeStartDate = DateTime.parse(routeStartStr);
+        final startDateStr = DateFormat('yyyy-MM-dd').format(routeStartDate);
+        if (startDateStr != _todayDate) {
+          debugPrint(
+            '[SalesmanHomeScreen] Stale session detected (started $startDateStr, today is $_todayDate). Cleaning up...',
+          );
+          await BackgroundLocationService.stopTracking();
+          await BackgroundLocationService.cleanupStaleSession(_todayDate);
+        }
+      } else if (activeRouteId != null && routeStartStr == null) {
+        // active_route_id exists but no start time — corrupted state.
+        debugPrint('[SalesmanHomeScreen] Corrupted session state detected. Cleaning up...');
+        await BackgroundLocationService.stopTracking();
+        await BackgroundLocationService.cleanupStaleSession(_todayDate);
+      }
+    } catch (e) {
+      debugPrint('[SalesmanHomeScreen] _guardAgainstStaleSession error (non-fatal): $e');
+    }
+  }
+
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _scheduleMidnightRollover();
-    BackgroundLocationService.flushPendingBatch().catchError((_) {});
-    _checkpointQueue
-        .flush(_firestoreService.appendRouteCheckpoint)
-        .catchError((_) {});
-    _loadTodayRoute();
+    // Guard first — detect and clean stale sessions before loading today's route.
+    _guardAgainstStaleSession().then((_) {
+      BackgroundLocationService.flushPendingBatch().catchError((_) {});
+      _checkpointQueue
+          .flush(_firestoreService.appendRouteCheckpoint)
+          .catchError((_) {});
+      _loadTodayRoute();
+    }).catchError((Object e) {
+      debugPrint('[SalesmanHomeScreen] initState guard error: $e');
+      BackgroundLocationService.flushPendingBatch().catchError((_) {});
+      _loadTodayRoute();
+    });
   }
 
   @override
@@ -551,7 +636,9 @@ class _SalesmanHomeScreenState extends State<SalesmanHomeScreen>
       _lastCheckpointLon = _firstPoint!.lon;
     }
 
-    final bgStatus = await Permission.locationAlways.request();
+    if (!kIsWeb) {
+      await Permission.locationAlways.request();
+    }
     
     // Check battery optimization
     if (!kIsWeb && Platform.isAndroid) {
@@ -589,9 +676,7 @@ class _SalesmanHomeScreenState extends State<SalesmanHomeScreen>
     await BackgroundLocationService.startTracking(_todayRouteId!, _firstPoint!);
   }
 
-  void _onLocationUpdate(geo.Position position) {
-    // Deprecated. Logic moved to BackgroundLocationService headless task.
-  }
+
 
   Future<void> _loadTodayRoute() async {
     final authProvider = context.read<AuthProvider>();
@@ -639,7 +724,11 @@ class _SalesmanHomeScreenState extends State<SalesmanHomeScreen>
             final pendingMap = jsonDecode(rawPending) as Map<String, dynamic>;
             final pendingDate = pendingMap['date'] as String?;
             if (pendingDate != null && pendingDate != _todayDate) {
-              await prefs.remove('pending_first_call_v2');
+              // Stale pending first call from a different date — stop background
+              // service and run full session cleanup to prevent app freeze.
+              debugPrint('[SalesmanHomeScreen] _loadTodayRoute: stale pending_first_call_v2 from $pendingDate. Running cleanup.');
+              await BackgroundLocationService.stopTracking();
+              await BackgroundLocationService.cleanupStaleSession(_todayDate);
               _resetRouteState();
               return;
             }
@@ -670,9 +759,14 @@ class _SalesmanHomeScreenState extends State<SalesmanHomeScreen>
             });
             _syncCheckpointTracking();
           } catch (_) {
+            // Corrupted pending data — clean up and reset.
+            debugPrint('[SalesmanHomeScreen] _loadTodayRoute: corrupted pending_first_call_v2. Resetting.');
+            await BackgroundLocationService.cleanupStaleSession(_todayDate);
             _resetRouteState();
           }
         } else {
+          // No pending first call — also ensure background service is stopped.
+          await BackgroundLocationService.stopTracking();
           _resetRouteState();
         }
       }
@@ -770,6 +864,96 @@ class _SalesmanHomeScreenState extends State<SalesmanHomeScreen>
     );
   }
 
+  /// Shows a connectivity check dialog before proceeding with camera capture.
+  /// Returns true if the user may proceed (connected, or offline allowed for first call).
+  /// Returns false if the user cancelled or last call cannot proceed without connection.
+  Future<bool> _showConnectivityCheckDialog({required bool isFirst}) async {
+    int retryCount = 0;
+    const maxRetries = 3;
+
+    // Perform the initial check before showing any dialog.
+    setState(() => _isConnectivityChecking = true);
+    bool connected = await ConnectivityCheckService.hasInternetConnection();
+    setState(() => _isConnectivityChecking = false);
+
+    if (connected) return true; // Online — proceed immediately.
+    if (!mounted) return false;
+
+    // Not connected — show dialog.
+    bool? result = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) {
+        return StatefulBuilder(
+          builder: (sbContext, setDialogState) {
+            final exhausted = retryCount >= maxRetries;
+
+            return AlertDialog(
+              icon: const Icon(Icons.wifi_off, color: Colors.red, size: 40),
+              title: const Text('No Internet Connection'),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    isFirst
+                        ? 'A stable internet connection is needed to upload your call data. Please check your Wi-Fi or mobile data.'
+                        : 'Internet connection is required for Last Call. Please find a stable connection and try again.',
+                  ),
+                  const SizedBox(height: 12),
+                  Text(
+                    exhausted
+                        ? 'All $maxRetries attempts failed.'
+                        : 'Attempt $retryCount of $maxRetries failed.',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: Colors.grey.shade600,
+                      fontStyle: FontStyle.italic,
+                    ),
+                  ),
+                ],
+              ),
+              actions: [
+                // Cancel / dismiss (always available so user is never fully stuck).
+                TextButton(
+                  onPressed: () => Navigator.pop(dialogContext, false),
+                  child: const Text('Cancel'),
+                ),
+                // "Continue Offline" — First Call only, appears after exhausting retries.
+                if (isFirst && exhausted)
+                  TextButton(
+                    onPressed: () => Navigator.pop(dialogContext, null), // null = offline
+                    style: TextButton.styleFrom(foregroundColor: Colors.orange.shade700),
+                    child: const Text('Continue Offline'),
+                  ),
+                // "Try Again" button — always shown, no hard limit after exhaustion for last call.
+                FilledButton.icon(
+                  icon: const Icon(Icons.refresh, size: 18),
+                  label: const Text('Try Again'),
+                  onPressed: () async {
+                    setDialogState(() => retryCount++);
+                    final ok = await ConnectivityCheckService.hasInternetConnection();
+                    if (ok) {
+                      if (dialogContext.mounted) Navigator.pop(dialogContext, true);
+                    }
+                    // If still no connection, dialog stays open with updated counter.
+                  },
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+
+    // result == true  → connected after retry
+    // result == null  → continue offline (first call only)
+    // result == false → user cancelled
+    if (result == false) return false;
+    if (result == null && isFirst) return true; // Will be marked offline in caller.
+    return result == true;
+  }
+
   Future<void> _takePhoto(bool isFirst) async {
     try {
       if (isFirst && _firstPoint != null && !_firstRetakeApproved) {
@@ -796,6 +980,38 @@ class _SalesmanHomeScreenState extends State<SalesmanHomeScreen>
         );
         return;
       }
+
+      // ── Connectivity check ───────────────────────────────────────────────
+      // Run before opening the camera so the salesman knows the upload status.
+      // For First Call, offline capture is allowed after 3 failed retries.
+      // For Last Call, connection is mandatory — we do not proceed without it.
+      if (isFirst) {
+        // On every new First Call, clean up any stale session data first.
+        await BackgroundLocationService.cleanupStaleSession(_todayDate);
+      }
+
+      bool isOfflineCapture = false;
+      setState(() => _isConnectivityChecking = true);
+      final connected = await ConnectivityCheckService.hasInternetConnection();
+      setState(() => _isConnectivityChecking = false);
+
+      if (!connected) {
+        if (!mounted) return;
+        final allowed = await _showConnectivityCheckDialog(isFirst: isFirst);
+        if (!allowed) return; // User cancelled.
+        // Check if we're proceeding offline (only possible for first call).
+        if (isFirst) {
+          final stillConnected = await ConnectivityCheckService.hasInternetConnection();
+          isOfflineCapture = !stillConnected;
+        } else {
+          // Last call must be online — verify after dialog resolves.
+          final nowConnected = await ConnectivityCheckService.hasInternetConnection();
+          if (!nowConnected) return;
+        }
+      }
+      // ─────────────────────────────────────────────────────────────────────
+
+      if (!mounted) return;
 
       final capturedImagePath = await Navigator.of(context).push<String>(
         MaterialPageRoute(builder: (_) => CameraScreen(isFirstCall: isFirst)),
@@ -825,7 +1041,7 @@ class _SalesmanHomeScreenState extends State<SalesmanHomeScreen>
       }
 
       if (!mounted) return;
-      _uploadImage(File(capturedImagePath), position, isFirst);
+      _uploadImage(File(capturedImagePath), position, isFirst, isOfflineCapture: isOfflineCapture);
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(
@@ -837,8 +1053,9 @@ class _SalesmanHomeScreenState extends State<SalesmanHomeScreen>
   Future<void> _uploadImage(
     File imageFile,
     Position position,
-    bool isFirst,
-  ) async {
+    bool isFirst, {
+    bool isOfflineCapture = false,
+  }) async {
     setState(() => _isUploading = true);
 
     try {
@@ -857,6 +1074,7 @@ class _SalesmanHomeScreenState extends State<SalesmanHomeScreen>
         salesmanName: salesmanName,
         position: position,
         capturedAt: capturedAt,
+        isOffline: isOfflineCapture,
       );
 
       final gallerySaveError = await _saveStampedImageToGallery(
@@ -1010,6 +1228,24 @@ class _SalesmanHomeScreenState extends State<SalesmanHomeScreen>
           });
           _syncCheckpointTracking();
 
+          // Signal VersionProvider that a session is now active so any pending
+          // auto-update is deferred until the salesman completes Last Call.
+          if (mounted) {
+            final versionProvider = context.read<VersionProvider>();
+            versionProvider.setSessionActive(true);
+            // If an update was found while session is active, notify the user.
+            if (versionProvider.updateDeferred) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text(
+                    'App update available — will apply after your session ends.',
+                  ),
+                  duration: Duration(seconds: 4),
+                ),
+              );
+            }
+          }
+
           if (!mounted) return;
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
@@ -1043,6 +1279,12 @@ class _SalesmanHomeScreenState extends State<SalesmanHomeScreen>
               .flush(_firestoreService.appendRouteCheckpoint)
               .catchError((_) {});
           _syncCheckpointTracking();
+
+          // Session is now complete — signal VersionProvider so any deferred
+          // update is applied and AppRouter shows the ForceUpdateScreen.
+          if (mounted) {
+            context.read<VersionProvider>().setSessionActive(false);
+          }
 
           if (!mounted) return;
           ScaffoldMessenger.of(context).showSnackBar(
@@ -1080,6 +1322,8 @@ class _SalesmanHomeScreenState extends State<SalesmanHomeScreen>
             _lastCheckpointLon = routePoint.lon;
           });
           _syncCheckpointTracking();
+          // Re-signal session active for retake path.
+          if (mounted) context.read<VersionProvider>().setSessionActive(true);
         } else {
           try {
             await _firestoreService.updateRoute(route.routeId, {
@@ -1107,6 +1351,8 @@ class _SalesmanHomeScreenState extends State<SalesmanHomeScreen>
               .flush(_firestoreService.appendRouteCheckpoint)
               .catchError((_) {});
           _syncCheckpointTracking();
+          // Session complete (retake path) — apply any deferred update.
+          if (mounted) context.read<VersionProvider>().setSessionActive(false);
         }
 
         if (!mounted) return;
@@ -1136,10 +1382,12 @@ class _SalesmanHomeScreenState extends State<SalesmanHomeScreen>
     final lastCallTaken = _lastPoint != null;
     final canTakeFirstCall =
         !_isUploading &&
+        !_isConnectivityChecking &&
         !lastCallTaken &&
         (!firstCallTaken || _firstRetakeApproved);
     final canTakeLastCall =
         !_isUploading &&
+        !_isConnectivityChecking &&
         firstCallTaken &&
         (!lastCallTaken || _lastRetakeApproved);
     final currentUser = context.watch<AuthProvider>().currentUser;
