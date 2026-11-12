@@ -52,4 +52,4 @@ Version 2.2.7 resolves two critical field issues reported by salesmen:
 - `lib/providers/version_provider.dart`, `lib/services/activation_service.dart`, `lib/app_router.dart`, `lib/main.dart`, `lib/screens/launch_validation_loading_screen.dart`: Startup timeout guards and dark-violet screen hang prevention.
 - `lib/screens/troubleshooting_screen.dart` & `lib/screens/salesman/salesman_debug_screen.dart`: Added self-service "Repair & Sync App State" button.
 - `lib/screens/salesman/salesman_tabs_screen.dart` & `lib/widgets/agile_call_form_card.dart`: Auto-refresh Agile call status on tab switch.
-- `pubspec.yaml`: Version `2.2.7+10`.
+- `pubspec.yaml`: Version `2.2.7+19`.
