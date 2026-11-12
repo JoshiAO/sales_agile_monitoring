@@ -19,6 +19,7 @@ class SalesmanTabsScreen extends StatefulWidget {
 
 class _SalesmanTabsScreenState extends State<SalesmanTabsScreen> {
   int _currentIndex = 0;
+  int _agileRefreshTrigger = 0;
   final FirestoreService _firestoreService = FirestoreService();
   StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>?
   _logoutRequestSubscription;
@@ -26,9 +27,18 @@ class _SalesmanTabsScreenState extends State<SalesmanTabsScreen> {
   String? _currentLogoutRequestStatus;
   bool _hasLoadedInitialLogoutStatus = false;
 
-  late final List<Widget> _pages = [
+  void _onTabSelected(int index) {
+    setState(() {
+      _currentIndex = index;
+      if (index == 1) {
+        _agileRefreshTrigger++;
+      }
+    });
+  }
+
+  List<Widget> get _pages => [
     const SalesmanHomeScreen(),
-    const _AgileTab(),
+    _AgileTab(refreshTrigger: _agileRefreshTrigger),
     const FeedsPage(),
   ];
 
@@ -477,8 +487,7 @@ class _SalesmanTabsScreenState extends State<SalesmanTabsScreen> {
                           Expanded(
                             child: NavigationRail(
                               selectedIndex: _currentIndex,
-                              onDestinationSelected: (index) =>
-                                  setState(() => _currentIndex = index),
+                              onDestinationSelected: _onTabSelected,
                               leading: _buildMenuHeader(isExpandedRail),
                               extended: isExpandedRail,
                               labelType: NavigationRailLabelType.none,
@@ -537,7 +546,7 @@ class _SalesmanTabsScreenState extends State<SalesmanTabsScreen> {
       ),
       bottomNavigationBar: BottomNavigationBar(
         currentIndex: _currentIndex,
-        onTap: (index) => setState(() => _currentIndex = index),
+        onTap: _onTabSelected,
         items: const [
           BottomNavigationBarItem(
             icon: Icon(Icons.co_present_outlined),
@@ -567,7 +576,9 @@ class _SalesmanTabsScreenState extends State<SalesmanTabsScreen> {
 }
 
 class _AgileTab extends StatelessWidget {
-  const _AgileTab();
+  final int refreshTrigger;
+
+  const _AgileTab({this.refreshTrigger = 0});
 
   @override
   Widget build(BuildContext context) {
@@ -582,7 +593,7 @@ class _AgileTab extends StatelessWidget {
               constraints: BoxConstraints(maxWidth: maxContentWidth),
               child: SizedBox(
                 height: constraints.maxHeight,
-                child: const AgileCallFormCard(),
+                child: AgileCallFormCard(refreshTrigger: refreshTrigger),
               ),
             ),
           );

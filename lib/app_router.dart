@@ -198,12 +198,15 @@ class _AppRouterState extends State<AppRouter> {
             // Show the wave curtain during:
             //  - launch validation   (isInitializing)
             //  - activation check    (isChecking)
+            //  - version check       (isChecking)
             //  - login / logout      (isLoading, only when already activated)
             if (activationProvider.isActivated ||
                 activationProvider.isChecking ||
+                versionProvider.isChecking ||
                 authProvider.isInitializing)
               AuthWaveRevealLayer(
                 isAuthLoading: activationProvider.isChecking ||
+                    versionProvider.isChecking ||
                     authProvider.isInitializing ||
                     (authProvider.isLoading && activationProvider.isActivated),
                 logoUrl: logoUrl,

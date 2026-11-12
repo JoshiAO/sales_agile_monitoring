@@ -4,6 +4,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:intl/intl.dart';
 import 'dart:convert';
 import 'package:flutter_background_service/flutter_background_service.dart';
+import '../../services/background_location_service.dart';
 
 class SalesmanDebugScreen extends StatefulWidget {
   const SalesmanDebugScreen({super.key});
@@ -15,6 +16,7 @@ class SalesmanDebugScreen extends StatefulWidget {
 class _SalesmanDebugScreenState extends State<SalesmanDebugScreen> {
   Timer? _timer;
   SharedPreferences? _prefs;
+  bool _isRepairing = false;
   
   String _activeTime = '00:00:00';
   int _checkpointCount = 0;
@@ -269,6 +271,65 @@ class _SalesmanDebugScreenState extends State<SalesmanDebugScreen> {
                   );
                   FlutterBackgroundService().invoke('manual_checkpoint');
                 },
+              ),
+            ),
+            const SizedBox(height: 12),
+            SizedBox(
+              width: double.infinity,
+              height: 52,
+              child: OutlinedButton.icon(
+                icon: _isRepairing
+                    ? const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.sync_rounded),
+                label: Text(
+                  _isRepairing
+                      ? 'Syncing & Repairing...'
+                      : 'Repair & Sync App State',
+                ),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: const Color(0xFF6750A4),
+                  side: const BorderSide(color: Color(0xFF6750A4), width: 1.5),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                ),
+                onPressed: _isRepairing
+                    ? null
+                    : () async {
+                        setState(() => _isRepairing = true);
+                        final messenger = ScaffoldMessenger.of(context);
+                        try {
+                          final result =
+                              await BackgroundLocationService.repairAndSyncAppState();
+                          if (!mounted) return;
+                          _refreshData();
+                          final online = result['online'] == true;
+                          final remaining =
+                              result['remainingCheckpoints'] as int? ?? 0;
+                          messenger.showSnackBar(
+                            SnackBar(
+                              content: Text(
+                                online
+                                    ? (remaining == 0
+                                        ? 'Pending data synced & tracking state repaired!'
+                                        : 'Repaired. $remaining checkpoint(s) remain queued.')
+                                    : 'Offline: tracking state repaired; pending data preserved.',
+                              ),
+                            ),
+                          );
+                        } catch (e) {
+                          if (!mounted) return;
+                          messenger.showSnackBar(
+                            SnackBar(content: Text('Repair failed: $e')),
+                          );
+                        } finally {
+                          if (mounted) setState(() => _isRepairing = false);
+                        }
+                      },
               ),
             ),
             if (_pendingCheckpoints.isNotEmpty) ...[

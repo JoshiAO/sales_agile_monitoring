@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'dart:typed_data';
 import 'dart:developer' as developer;
@@ -23,20 +24,39 @@ class StorageService {
     required File file,
     required String folder,
     String? filename,
+    Duration timeout = const Duration(seconds: 25),
+    int maxAttempts = 2,
   }) async {
-    try {
-      final fileName = _sanitizeFileName(filename ?? uuid.v4());
-      final ref = _firebaseService.storage.ref('$folder/$fileName');
+    final fileName = _sanitizeFileName(filename ?? uuid.v4());
+    final ref = _firebaseService.storage.ref('$folder/$fileName');
 
-      await ref.putFile(file);
-      final downloadUrl = await _getDownloadUrlWithRetry(ref);
+    Object? lastError;
+    for (var attempt = 1; attempt <= maxAttempts; attempt++) {
+      final uploadTask = ref.putFile(file);
+      try {
+        await uploadTask.timeout(
+          timeout,
+          onTimeout: () {
+            uploadTask.cancel().catchError((_) => false);
+            throw TimeoutException('Storage upload timed out after ${timeout.inSeconds}s');
+          },
+        );
+        final downloadUrl = await _getDownloadUrlWithRetry(ref).timeout(
+          const Duration(seconds: 10),
+        );
+        return downloadUrl;
+      } on FirebaseException catch (e) {
+        lastError = Exception('Upload error [${e.code}]: ${e.message}');
+      } catch (e) {
+        lastError = Exception('Upload error: $e');
+      }
 
-      return downloadUrl;
-    } on FirebaseException catch (e) {
-      throw Exception('Upload error [${e.code}]: ${e.message}');
-    } catch (e) {
-      throw Exception('Upload error: $e');
+      if (attempt < maxAttempts) {
+        await Future<void>.delayed(Duration(milliseconds: 600 * attempt));
+      }
     }
+
+    throw lastError ?? Exception('Upload failed after $maxAttempts attempts');
   }
 
   Future<String> uploadImageBytes({

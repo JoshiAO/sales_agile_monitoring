@@ -55,9 +55,9 @@ class ActivationService {
 
     try {
       final callable = _functions.httpsCallable('validateCompanyCode');
-      final result = await callable.call(<String, dynamic>{
+      final result = await callable.call<dynamic>(<String, dynamic>{
         'companyCode': normalizedCode,
-      });
+      }).timeout(const Duration(seconds: 12));
 
       final data = (result.data as Map?) ?? <String, dynamic>{};
       final isValid = data['valid'] == true;
@@ -90,9 +90,9 @@ class ActivationService {
 
     try {
       final callable = _functions.httpsCallable('refreshActivationLease');
-      final result = await callable.call(<String, dynamic>{
+      final result = await callable.call<dynamic>(<String, dynamic>{
         'leaseKey': leaseKey,
-      });
+      }).timeout(const Duration(seconds: 6));
 
       final data = (result.data as Map?) ?? <String, dynamic>{};
       final isValid = data['valid'] == true;

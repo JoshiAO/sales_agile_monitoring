@@ -1,8 +1,50 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../services/background_location_service.dart';
 
-class TroubleshootingScreen extends StatelessWidget {
+class TroubleshootingScreen extends StatefulWidget {
   const TroubleshootingScreen({super.key});
+
+  @override
+  State<TroubleshootingScreen> createState() => _TroubleshootingScreenState();
+}
+
+class _TroubleshootingScreenState extends State<TroubleshootingScreen> {
+  bool _isRepairing = false;
+  int _refreshTick = 0;
+
+  Future<void> _handleRepairAndSync() async {
+    if (_isRepairing) return;
+    setState(() => _isRepairing = true);
+    try {
+      final result = await BackgroundLocationService.repairAndSyncAppState();
+      if (!mounted) return;
+      final online = result['online'] == true;
+      final remaining = result['remainingCheckpoints'] as int? ?? 0;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            online
+                ? (remaining == 0
+                    ? 'App state repaired & all pending data synced! Login and activation were preserved.'
+                    : 'App state repaired. $remaining checkpoint(s) remain queued and will sync automatically.')
+                : 'Offline: local tracking state repaired. Pending data was preserved and will upload when online.',
+          ),
+          duration: const Duration(seconds: 4),
+        ),
+      );
+      setState(() => _refreshTick++);
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Repair failed: $e')),
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _isRepairing = false);
+      }
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -13,6 +55,66 @@ class TroubleshootingScreen extends StatelessWidget {
       body: ListView(
         padding: const EdgeInsets.all(16.0),
         children: [
+          Card(
+            elevation: 0,
+            color: const Color(0xFF6750A4).withValues(alpha: 0.08),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(16),
+              side: BorderSide(
+                color: const Color(0xFF6750A4).withValues(alpha: 0.25),
+              ),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.all(16.0),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Row(
+                    children: [
+                      Icon(Icons.build_circle_outlined, color: Color(0xFF6750A4)),
+                      SizedBox(width: 8),
+                      Text(
+                        'Self-Service App Repair',
+                        style: TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                          color: Color(0xFF381E72),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  const Text(
+                    'If the app feels stuck from a previous day or your calls/checkpoints have not synced yet, tap below to upload pending data and reset local tracking cache. Your account login and company activation are preserved.',
+                    style: TextStyle(fontSize: 14),
+                  ),
+                  const SizedBox(height: 14),
+                  SizedBox(
+                    width: double.infinity,
+                    child: FilledButton.icon(
+                      onPressed: _isRepairing ? null : _handleRepairAndSync,
+                      icon: _isRepairing
+                          ? const SizedBox(
+                              width: 18,
+                              height: 18,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: Colors.white,
+                              ),
+                            )
+                          : const Icon(Icons.sync_rounded),
+                      label: Text(
+                        _isRepairing
+                            ? 'Syncing & Repairing...'
+                            : 'Repair & Sync App State',
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 24),
           const Text(
             'Keep Route Tracking Active',
             style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
@@ -57,9 +159,10 @@ class TroubleshootingScreen extends StatelessWidget {
           const SizedBox(height: 32),
           const Divider(),
           const SizedBox(height: 16),
-          const Text(
+          Text(
             'Diagnostics',
-            style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.blue),
+            key: ValueKey(_refreshTick),
+            style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.blue),
           ),
           const SizedBox(height: 8),
           FutureBuilder<int>(

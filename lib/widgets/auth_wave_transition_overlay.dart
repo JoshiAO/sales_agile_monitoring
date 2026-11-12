@@ -63,7 +63,7 @@ class _AuthWaveRevealLayerState extends State<AuthWaveRevealLayer>
   void didChangeDependencies() {
     super.didChangeDependencies();
     // Avoid first-frame decode stutter when logo appears in the transition.
-    precacheImage(_logoImage, context);
+    precacheImage(_logoImage, context, onError: (_, _) {});
   }
 
   @override
@@ -71,7 +71,7 @@ class _AuthWaveRevealLayerState extends State<AuthWaveRevealLayer>
     super.didUpdateWidget(old);
     if (old.logoUrl != widget.logoUrl) {
       _logoImage = _resolveLogoImage();
-      precacheImage(_logoImage, context);
+      precacheImage(_logoImage, context, onError: (_, _) {});
     }
     if (!old.isAuthLoading && widget.isAuthLoading) {
       _show();
@@ -236,6 +236,10 @@ class _AuthWaveRevealLayerState extends State<AuthWaveRevealLayer>
                             image: _logoImage,
                             fit: BoxFit.cover,
                             filterQuality: FilterQuality.low,
+                            errorBuilder: (_, _, _) => Image.asset(
+                              'assets/images/JoshiAO.jpg',
+                              fit: BoxFit.cover,
+                            ),
                           ),
                         ),
                       ),

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -249,9 +250,11 @@ class _MainAppHomeState extends State<MainAppHome>
   bool _splashContentFinished = false;
   bool _transitionStarted = false;
   late AnimationController _transitionController;
+  Timer? _splashWatchdogTimer;
 
   late final ActivationProvider _activationProvider;
   late final AuthProvider _authProvider;
+  late final VersionProvider _versionProvider;
 
   @override
   void initState() {
@@ -271,13 +274,23 @@ class _MainAppHomeState extends State<MainAppHome>
 
     _activationProvider = context.read<ActivationProvider>();
     _authProvider = context.read<AuthProvider>();
+    _versionProvider = context.read<VersionProvider>();
 
     _activationProvider.addListener(_tryStartTransition);
     _authProvider.addListener(_tryStartTransition);
+    _versionProvider.addListener(_tryStartTransition);
+
+    // Safety net: never stay trapped on the splash screen longer than 6.5s.
+    _splashWatchdogTimer = Timer(const Duration(milliseconds: 6500), () {
+      if (!mounted || _transitionStarted) return;
+      _splashContentFinished = true;
+      _transitionStarted = true;
+      _transitionController.forward(from: 0);
+    });
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _activationProvider.initialize();
-      context.read<VersionProvider>().checkVersion();
+      _versionProvider.checkVersion();
     });
   }
 
@@ -291,21 +304,26 @@ class _MainAppHomeState extends State<MainAppHome>
 
     final activationProvider = context.read<ActivationProvider>();
     final authProvider = context.read<AuthProvider>();
+    final versionProvider = context.read<VersionProvider>();
 
     final canExitSplash =
         !activationProvider.isChecking &&
+        !versionProvider.isChecking &&
         (!authProvider.isInitializing || authProvider.requiresLaunchRetry);
 
     if (!canExitSplash) return;
 
     _transitionStarted = true;
+    _splashWatchdogTimer?.cancel();
     _transitionController.forward(from: 0);
   }
 
   @override
   void dispose() {
+    _splashWatchdogTimer?.cancel();
     _activationProvider.removeListener(_tryStartTransition);
     _authProvider.removeListener(_tryStartTransition);
+    _versionProvider.removeListener(_tryStartTransition);
     _transitionController.dispose();
     super.dispose();
   }

@@ -8,7 +8,12 @@ import 'package:compact_sales_monitoring/services/firestore_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class AgileCallFormCard extends StatefulWidget {
-  const AgileCallFormCard({super.key});
+  final int refreshTrigger;
+
+  const AgileCallFormCard({
+    super.key,
+    this.refreshTrigger = 0,
+  });
 
   @override
   State<AgileCallFormCard> createState() => _AgileCallFormCardState();
@@ -24,7 +29,7 @@ class _AgileCallFormCardState extends State<AgileCallFormCard> {
   int _totalCalls = 0;
   int _productiveCalls = 0;
   final TextEditingController _sttController = TextEditingController();
-  late final String _date;
+  String get _date => DateFormat('yyyy-MM-dd').format(DateTime.now());
 
   bool _isFirstCallCompleted = false;
   bool _isFirstCallPendingUpload = false;
@@ -37,8 +42,15 @@ class _AgileCallFormCardState extends State<AgileCallFormCard> {
   @override
   void initState() {
     super.initState();
-    _date = DateFormat('yyyy-MM-dd').format(DateTime.now());
     _loadAgileState();
+  }
+
+  @override
+  void didUpdateWidget(covariant AgileCallFormCard oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.refreshTrigger != oldWidget.refreshTrigger) {
+      _loadAgileState();
+    }
   }
 
   @override
@@ -59,11 +71,15 @@ class _AgileCallFormCardState extends State<AgileCallFormCard> {
 
     try {
       final results = await Future.wait([
-        _firestoreService.getRoutesBySalesman(currentUser.uid, _date),
-        _firestoreService.getAgileSubmissionForSalesmanByDate(
-          salesmanId: currentUser.uid,
-          date: _date,
-        ),
+        _firestoreService
+            .getRoutesBySalesman(currentUser.uid, _date)
+            .timeout(const Duration(seconds: 12)),
+        _firestoreService
+            .getAgileSubmissionForSalesmanByDate(
+              salesmanId: currentUser.uid,
+              date: _date,
+            )
+            .timeout(const Duration(seconds: 12)),
       ]);
 
       final routes = results[0] as List<SalesRoute>;
@@ -71,7 +87,8 @@ class _AgileCallFormCardState extends State<AgileCallFormCard> {
 
       final prefs = await SharedPreferences.getInstance();
       await prefs.reload();
-      final isFirstPending = prefs.containsKey('pending_first_call_v2');
+      final isFirstPending =
+          (prefs.getString('pending_first_call_v2') ?? '').isNotEmpty;
 
       final firstCallCompleted = routes.any((route) => route.hasFirstCall == true);
       final lastCallCompleted = routes.any((route) => route.hasLastCall == true);
@@ -229,15 +246,17 @@ class _AgileCallFormCardState extends State<AgileCallFormCard> {
     setState(() => _isSubmitting = true);
     try {
       final sttValue = double.parse(_sttController.text.trim());
-      await _firestoreService.submitAgileSubmission(
-        supervisorId: supervisorId,
-        salesmanId: currentUser.uid,
-        date: _date,
-        totalCalls: _totalCalls,
-        productiveCalls: _productiveCalls,
-        sttActual: sttValue,
-        lastCallCompleted: _isLastCallCompleted,
-      );
+      await _firestoreService
+          .submitAgileSubmission(
+            supervisorId: supervisorId,
+            salesmanId: currentUser.uid,
+            date: _date,
+            totalCalls: _totalCalls,
+            productiveCalls: _productiveCalls,
+            sttActual: sttValue,
+            lastCallCompleted: _isLastCallCompleted,
+          )
+          .timeout(const Duration(seconds: 12));
 
       if (!mounted) return;
 

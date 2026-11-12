@@ -159,7 +159,7 @@ class _ModularSplashScreenState extends State<ModularSplashScreen>
               SafeArea(
                 child: Center(
                   child: Transform.translate(
-                    offset: Offset(0, 0),
+                    offset: const Offset(0, 0),
                     child: child,
                   ),
                 ),
@@ -213,6 +213,10 @@ class _ModularSplashScreenState extends State<ModularSplashScreen>
                           child: Image(
                             image: _resolveLogoImage(),
                             fit: BoxFit.cover,
+                            errorBuilder: (_, _, _) => Image.asset(
+                              widget.config.logoAssetPath,
+                              fit: BoxFit.cover,
+                            ),
                           ),
                         ),
                         FadeTransition(
@@ -225,6 +229,10 @@ class _ModularSplashScreenState extends State<ModularSplashScreen>
                             child: Image(
                               image: _resolveLogoImage(),
                               fit: BoxFit.cover,
+                              errorBuilder: (_, _, _) => Image.asset(
+                                widget.config.logoAssetPath,
+                                fit: BoxFit.cover,
+                              ),
                             ),
                           ),
                         ),

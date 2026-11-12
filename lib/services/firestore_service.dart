@@ -305,17 +305,17 @@ class FirestoreService {
       'last': last.toMap(),
       'hasFirstCall': hasFirstCall,
       'hasLastCall': hasLastCall,
-      'checkpoints': checkpoints
-          .map((checkpoint) => checkpoint.toMap())
-          .toList(),
+      'checkpoints': FieldValue.arrayUnion(
+        checkpoints.map((checkpoint) => checkpoint.toMap()).toList(),
+      ),
       'distance': distance,
-      if (companyId != null) 'company_ID': companyId,
+      'company_ID': ?companyId,
       'firstRetakeRequested': false,
       'firstRetakeApproved': false,
       'lastRetakeRequested': false,
       'lastRetakeApproved': false,
       'createdAt': FieldValue.serverTimestamp(),
-    });
+    }, SetOptions(merge: true));
 
     return routeId;
   }
@@ -409,28 +409,32 @@ class FirestoreService {
 
   Future<void> appendRouteCheckpointsBatch(
     String routeId,
-    List<RouteCheckpoint> checkpoints,
-  ) async {
+    List<RouteCheckpoint> checkpoints, {
+    String? expectedRouteDate,
+  }) async {
     if (checkpoints.isEmpty) return;
 
-    final docRef = _firebaseService.firestore.collection('routes').doc(routeId);
-    final docSnap = await docRef.get();
-    if (!docSnap.exists) return;
-
-    final routeDate = docSnap.data()?['date'] as String?;
     final validCheckpoints = checkpoints.where((cp) {
-      if (routeDate == null || routeDate.isEmpty) return true;
+      if (expectedRouteDate == null || expectedRouteDate.isEmpty) return true;
       final cpDateStr = DateFormat('yyyy-MM-dd').format(cp.timestamp);
-      return cpDateStr == routeDate;
+      return cpDateStr == expectedRouteDate;
     }).toList();
 
     if (validCheckpoints.isEmpty) return;
 
+    final docRef = _firebaseService.firestore.collection('routes').doc(routeId);
+
+    // Perform a direct .update() without a preceding .get():
+    // 1. Saves 1 Firestore Read per batch upload (keeping the project well within
+    //    the Firebase Spark Free Tier quota for 50+ salesmen).
+    // 2. Natively throws FirebaseException(code: 'not-found') if the route doc
+    //    has not been created yet (e.g., pending_first_call_v2 still waiting),
+    //    so flushPendingBatch() keeps the checkpoints safely queued.
     await docRef.update({
       'checkpoints': FieldValue.arrayUnion(
         validCheckpoints.map((c) => c.toMap()).toList(),
       ),
-    });
+    }).timeout(const Duration(seconds: 12));
   }
 
   /// Writes a heartbeat timestamp to the route document.

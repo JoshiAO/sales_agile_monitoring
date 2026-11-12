@@ -60,7 +60,9 @@ class VersionProvider with ChangeNotifier {
       final packageInfo = await PackageInfo.fromPlatform();
       _currentVersion = packageInfo.version;
 
-      final config = await _firestoreService.getAppConfig();
+      final config = await _firestoreService.getAppConfig().timeout(
+        const Duration(seconds: 5),
+      );
       if (config != null) {
         final fetchedLatest = config['latest_version'] as String?;
         final url = config['download_url'] as String?;

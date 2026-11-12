@@ -76,19 +76,21 @@ class _SalesmanHomeScreenState extends State<SalesmanHomeScreen>
     final nextMidnight = DateTime(now.year, now.month, now.day + 1);
     final delay = nextMidnight.difference(now);
 
-    _midnightRolloverTimer = Timer(delay, () {
+    _midnightRolloverTimer = Timer(delay, () async {
       if (!mounted) return;
 
-      // Stop the background service for the previous day's session.
-      BackgroundLocationService.stopTracking().catchError((_) {});
-      // Clean up stale session data from the old day before loading new state.
-      BackgroundLocationService.cleanupStaleSession(_todayDate).catchError((_) {});
-      // Ensure pending offline checkpoints are attempted at day rollover,
-      // then load fresh route state for the new date.
-      BackgroundLocationService.flushPendingBatch().catchError((_) {});
-      _checkpointQueue
+      // 1. Flush any pending offline call/checkpoints from the day that just
+      //    ended to their own historical route document BEFORE stopping/cleaning.
+      await BackgroundLocationService.flushPendingBatch().catchError((_) {});
+      await _checkpointQueue
           .flush(_firestoreService.appendRouteCheckpoint)
           .catchError((_) {});
+      // 2. Stop the background service for the previous day's session.
+      await BackgroundLocationService.stopTracking().catchError((_) {});
+      // 3. Clean up stale session state before loading the new day.
+      await BackgroundLocationService.cleanupStaleSession(_todayDate).catchError((_) {});
+
+      if (!mounted) return;
       _resetRouteState();
       _loadTodayRoute();
       _scheduleMidnightRollover();
@@ -545,14 +547,16 @@ class _SalesmanHomeScreenState extends State<SalesmanHomeScreen>
         final startDateStr = DateFormat('yyyy-MM-dd').format(routeStartDate);
         if (startDateStr != _todayDate) {
           debugPrint(
-            '[SalesmanHomeScreen] Stale session detected (started $startDateStr, today is $_todayDate). Cleaning up...',
+            '[SalesmanHomeScreen] Stale session detected (started $startDateStr, today is $_todayDate). Flushing & cleaning up...',
           );
+          await BackgroundLocationService.flushPendingBatch();
           await BackgroundLocationService.stopTracking();
           await BackgroundLocationService.cleanupStaleSession(_todayDate);
         }
       } else if (activeRouteId != null && routeStartStr == null) {
         // active_route_id exists but no start time — corrupted state.
-        debugPrint('[SalesmanHomeScreen] Corrupted session state detected. Cleaning up...');
+        debugPrint('[SalesmanHomeScreen] Corrupted session state detected. Flushing & cleaning up...');
+        await BackgroundLocationService.flushPendingBatch();
         await BackgroundLocationService.stopTracking();
         await BackgroundLocationService.cleanupStaleSession(_todayDate);
       }
@@ -568,14 +572,14 @@ class _SalesmanHomeScreenState extends State<SalesmanHomeScreen>
     _scheduleMidnightRollover();
     // Guard first — detect and clean stale sessions before loading today's route.
     _guardAgainstStaleSession().then((_) {
-      BackgroundLocationService.flushPendingBatch().catchError((_) {});
+      BackgroundLocationService.flushPendingBatchIfDue().catchError((_) {});
       _checkpointQueue
           .flush(_firestoreService.appendRouteCheckpoint)
           .catchError((_) {});
       _loadTodayRoute();
     }).catchError((Object e) {
       debugPrint('[SalesmanHomeScreen] initState guard error: $e');
-      BackgroundLocationService.flushPendingBatch().catchError((_) {});
+      BackgroundLocationService.flushPendingBatchIfDue().catchError((_) {});
       _loadTodayRoute();
     });
   }
@@ -583,10 +587,9 @@ class _SalesmanHomeScreenState extends State<SalesmanHomeScreen>
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
-      // Flush any offline-queued checkpoints each time the app comes to the
-      // foreground — covers the case where data returned while the app was
-      // backgrounded or while the salesman was stationary (no GPS events).
-      BackgroundLocationService.flushPendingBatch().catchError((_) {});
+      // Throttled flush on resume: only writes to Firestore if pending_first_call_v2
+      // is waiting, a previous flush failed, prior-day points exist, or >=15m elapsed.
+      BackgroundLocationService.flushPendingBatchIfDue().catchError((_) {});
       _checkpointQueue
           .flush(_firestoreService.appendRouteCheckpoint)
           .catchError((_) {});
@@ -678,17 +681,49 @@ class _SalesmanHomeScreenState extends State<SalesmanHomeScreen>
 
 
 
+  static const String _activeFirstCallCacheKey = 'active_first_call_cache_v1';
+
+  Future<void> _saveActiveFirstCallCache({
+    required String routeId,
+    required RoutePoint firstPoint,
+    String? localImagePath,
+  }) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(
+        _activeFirstCallCacheKey,
+        jsonEncode({
+          'routeId': routeId,
+          'date': _todayDate,
+          'firstPoint': firstPoint.toMap(),
+          'localImagePath': localImagePath,
+        }),
+      );
+    } catch (e) {
+      debugPrint('[SalesmanHomeScreen] Failed to save active first call cache: $e');
+    }
+  }
+
+  Future<void> _clearActiveFirstCallCache() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove(_activeFirstCallCacheKey);
+    } catch (_) {}
+  }
+
   Future<void> _loadTodayRoute() async {
     final authProvider = context.read<AuthProvider>();
     final user = authProvider.currentUser;
 
     if (user != null) {
       List<SalesRoute> routes = [];
+      bool onlineQuerySucceeded = false;
       try {
         routes = await _firestoreService.getRoutesBySalesman(
           user.uid,
           _todayDate,
-        ).timeout(const Duration(seconds: 3));
+        ).timeout(const Duration(seconds: 12));
+        onlineQuerySucceeded = true;
       } catch (e) {
         debugPrint('[SalesmanHomeScreen] Unable to load online route (offline): $e');
       }
@@ -701,6 +736,16 @@ class _SalesmanHomeScreenState extends State<SalesmanHomeScreen>
         final lastLocalPath = route.hasLastCall
             ? await _resolveLocalImagePath(route.last.timestamp)
             : null;
+        if (route.hasFirstCall && !route.hasLastCall) {
+          await _saveActiveFirstCallCache(
+            routeId: route.routeId,
+            firstPoint: route.first,
+            localImagePath: firstLocalPath,
+          );
+        } else if (route.hasLastCall) {
+          await _clearActiveFirstCallCache();
+        }
+        if (!mounted) return;
         setState(() {
           _todayRouteId = route.routeId;
           _firstPoint = route.hasFirstCall ? route.first : null;
@@ -713,10 +758,14 @@ class _SalesmanHomeScreenState extends State<SalesmanHomeScreen>
           _lastRetakeApproved = route.lastRetakeApproved;
         });
         _syncCheckpointTracking();
+        if (mounted) {
+          context.read<VersionProvider>().setSessionActive(
+            route.hasFirstCall && !route.hasLastCall,
+          );
+        }
       } else {
         final prefs = await SharedPreferences.getInstance();
         await prefs.reload();
-        await BackgroundLocationService.purgeStaleLocalCheckpoints(prefs, _todayDate);
 
         final rawPending = prefs.getString('pending_first_call_v2');
         if (rawPending != null && rawPending.isNotEmpty) {
@@ -724,26 +773,38 @@ class _SalesmanHomeScreenState extends State<SalesmanHomeScreen>
             final pendingMap = jsonDecode(rawPending) as Map<String, dynamic>;
             final pendingDate = pendingMap['date'] as String?;
             if (pendingDate != null && pendingDate != _todayDate) {
-              // Stale pending first call from a different date — stop background
-              // service and run full session cleanup to prevent app freeze.
-              debugPrint('[SalesmanHomeScreen] _loadTodayRoute: stale pending_first_call_v2 from $pendingDate. Running cleanup.');
+              // Prior-day pending first call — attempt to flush it and its
+              // checkpoints to their historical route before cleaning up.
+              debugPrint(
+                '[SalesmanHomeScreen] _loadTodayRoute: prior-day pending_first_call_v2 from $pendingDate. Flushing before cleanup.',
+              );
+              await BackgroundLocationService.flushPendingBatch();
               await BackgroundLocationService.stopTracking();
               await BackgroundLocationService.cleanupStaleSession(_todayDate);
+              await _clearActiveFirstCallCache();
               _resetRouteState();
+              _loadedForDate = _todayDate;
               return;
             }
 
+            await BackgroundLocationService.purgeStaleLocalCheckpoints(prefs, _todayDate);
+
             final pendingRouteId = pendingMap['routeId'] as String;
-            final pendingLocalPath = pendingMap['stampedLocalImagePath'] as String? ?? pendingMap['localImagePath'] as String?;
-            final locationTime = DateTime.fromMillisecondsSinceEpoch(pendingMap['locationTime'] as int);
+            final pendingLocalPath =
+                pendingMap['stampedLocalImagePath'] as String? ??
+                pendingMap['localImagePath'] as String?;
+            final locationTime = DateTime.fromMillisecondsSinceEpoch(
+              pendingMap['locationTime'] as int,
+            );
 
             final routePoint = RoutePoint(
               lat: (pendingMap['lat'] as num).toDouble(),
               lon: (pendingMap['lon'] as num).toDouble(),
-              imageUrl: '',
+              imageUrl: (pendingMap['uploadedImageUrl'] as String?) ?? '',
               timestamp: locationTime,
             );
 
+            if (!mounted) return;
             setState(() {
               _todayRouteId = pendingRouteId;
               _firstPoint = routePoint;
@@ -758,16 +819,71 @@ class _SalesmanHomeScreenState extends State<SalesmanHomeScreen>
               _lastCheckpointLon = routePoint.lon;
             });
             _syncCheckpointTracking();
+            if (mounted) {
+              context.read<VersionProvider>().setSessionActive(true);
+            }
           } catch (_) {
             // Corrupted pending data — clean up and reset.
             debugPrint('[SalesmanHomeScreen] _loadTodayRoute: corrupted pending_first_call_v2. Resetting.');
             await BackgroundLocationService.cleanupStaleSession(_todayDate);
+            await _clearActiveFirstCallCache();
             _resetRouteState();
           }
         } else {
-          // No pending first call — also ensure background service is stopped.
+          // No pending offline first call in SharedPreferences.
+          // If the online query failed (e.g. network timeout mid-day), preserve
+          // any active today session rather than wiping it and stopping tracking.
+          if (!onlineQuerySucceeded) {
+            if (_todayRouteId != null &&
+                _loadedForDate == _todayDate &&
+                _firstPoint != null) {
+              debugPrint(
+                '[SalesmanHomeScreen] _loadTodayRoute: offline query failed mid-day; preserving in-memory session $_todayRouteId.',
+              );
+              _syncCheckpointTracking();
+              return;
+            }
+
+            final rawCachedFirst = prefs.getString(_activeFirstCallCacheKey);
+            if (rawCachedFirst != null && rawCachedFirst.isNotEmpty) {
+              try {
+                final cacheMap = jsonDecode(rawCachedFirst) as Map<String, dynamic>;
+                if (cacheMap['date'] == _todayDate) {
+                  final cachedRouteId = cacheMap['routeId'] as String;
+                  final cachedPoint = RoutePoint.fromMap(
+                    Map<String, dynamic>.from(cacheMap['firstPoint'] as Map),
+                  );
+                  final cachedLocalPath = cacheMap['localImagePath'] as String?;
+                  debugPrint(
+                    '[SalesmanHomeScreen] _loadTodayRoute: offline query failed; restored today session $cachedRouteId from local cache.',
+                  );
+                  if (!mounted) return;
+                  setState(() {
+                    _todayRouteId = cachedRouteId;
+                    _firstPoint = cachedPoint;
+                    _lastPoint = null;
+                    _firstLocalImagePath = cachedLocalPath;
+                  });
+                  _syncCheckpointTracking();
+                  if (mounted) {
+                    context.read<VersionProvider>().setSessionActive(true);
+                  }
+                  _loadedForDate = _todayDate;
+                  return;
+                }
+              } catch (e) {
+                debugPrint('[SalesmanHomeScreen] Failed to restore active first call cache: $e');
+              }
+            }
+          }
+
+          await BackgroundLocationService.purgeStaleLocalCheckpoints(prefs, _todayDate);
+          await _clearActiveFirstCallCache();
           await BackgroundLocationService.stopTracking();
           _resetRouteState();
+          if (mounted) {
+            context.read<VersionProvider>().setSessionActive(false);
+          }
         }
       }
     }
@@ -864,23 +980,33 @@ class _SalesmanHomeScreenState extends State<SalesmanHomeScreen>
     );
   }
 
-  /// Shows a connectivity check dialog before proceeding with camera capture.
-  /// Returns true if the user may proceed (connected, or offline allowed for first call).
-  /// Returns false if the user cancelled or last call cannot proceed without connection.
-  Future<bool> _showConnectivityCheckDialog({required bool isFirst}) async {
+  /// Performs a single real internet connectivity check before proceeding with
+  /// camera capture, showing a retry dialog if offline.
+  /// Returns `(allowed: true, isOffline: false)` when online,
+  /// `(allowed: true, isOffline: true)` when user chooses "Continue Offline" (First Call only),
+  /// or `(allowed: false, isOffline: false)` when cancelled.
+  Future<({bool allowed, bool isOffline})> _showConnectivityCheckDialog({
+    required bool isFirst,
+  }) async {
     int retryCount = 0;
     const maxRetries = 3;
 
-    // Perform the initial check before showing any dialog.
-    setState(() => _isConnectivityChecking = true);
-    bool connected = await ConnectivityCheckService.hasInternetConnection();
-    setState(() => _isConnectivityChecking = false);
+    // Perform the single initial check before showing any dialog.
+    if (mounted) setState(() => _isConnectivityChecking = true);
+    final connected = await ConnectivityCheckService.hasInternetConnection();
+    if (mounted) setState(() => _isConnectivityChecking = false);
 
-    if (connected) return true; // Online — proceed immediately.
-    if (!mounted) return false;
+    if (connected) {
+      return (allowed: true, isOffline: false);
+    }
+    if (!mounted) {
+      return (allowed: false, isOffline: false);
+    }
+
+    bool isRetryingInDialog = false;
 
     // Not connected — show dialog.
-    bool? result = await showDialog<bool>(
+    final bool? result = await showDialog<bool>(
       context: context,
       barrierDismissible: false,
       builder: (dialogContext) {
@@ -897,14 +1023,16 @@ class _SalesmanHomeScreenState extends State<SalesmanHomeScreen>
                 children: [
                   Text(
                     isFirst
-                        ? 'A stable internet connection is needed to upload your call data. Please check your Wi-Fi or mobile data.'
-                        : 'Internet connection is required for Last Call. Please find a stable connection and try again.',
+                        ? 'A working internet connection is needed to upload your call data. Please check your Wi-Fi or mobile data balance.'
+                        : 'An active internet connection is required to record your Last Call on the server. Please check your signal or mobile data and try again.',
                   ),
                   const SizedBox(height: 12),
                   Text(
-                    exhausted
-                        ? 'All $maxRetries attempts failed.'
-                        : 'Attempt $retryCount of $maxRetries failed.',
+                    retryCount == 0
+                        ? 'Initial connection test failed.'
+                        : (exhausted
+                            ? 'All $maxRetries retry attempts failed.'
+                            : 'Retry $retryCount of $maxRetries failed.'),
                     style: TextStyle(
                       fontSize: 12,
                       color: Colors.grey.shade600,
@@ -914,30 +1042,56 @@ class _SalesmanHomeScreenState extends State<SalesmanHomeScreen>
                 ],
               ),
               actions: [
-                // Cancel / dismiss (always available so user is never fully stuck).
                 TextButton(
-                  onPressed: () => Navigator.pop(dialogContext, false),
+                  onPressed: isRetryingInDialog
+                      ? null
+                      : () => Navigator.pop(dialogContext, false),
                   child: const Text('Cancel'),
                 ),
                 // "Continue Offline" — First Call only, appears after exhausting retries.
                 if (isFirst && exhausted)
                   TextButton(
-                    onPressed: () => Navigator.pop(dialogContext, null), // null = offline
-                    style: TextButton.styleFrom(foregroundColor: Colors.orange.shade700),
+                    onPressed: isRetryingInDialog
+                        ? null
+                        : () => Navigator.pop(dialogContext, null), // null = offline
+                    style: TextButton.styleFrom(
+                      foregroundColor: Colors.orange.shade700,
+                    ),
                     child: const Text('Continue Offline'),
                   ),
-                // "Try Again" button — always shown, no hard limit after exhaustion for last call.
                 FilledButton.icon(
-                  icon: const Icon(Icons.refresh, size: 18),
-                  label: const Text('Try Again'),
-                  onPressed: () async {
-                    setDialogState(() => retryCount++);
-                    final ok = await ConnectivityCheckService.hasInternetConnection();
-                    if (ok) {
-                      if (dialogContext.mounted) Navigator.pop(dialogContext, true);
-                    }
-                    // If still no connection, dialog stays open with updated counter.
-                  },
+                  icon: isRetryingInDialog
+                      ? const SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: Colors.white,
+                          ),
+                        )
+                      : const Icon(Icons.refresh, size: 18),
+                  label: Text(isRetryingInDialog ? 'Checking...' : 'Try Again'),
+                  onPressed: isRetryingInDialog
+                      ? null
+                      : () async {
+                          setDialogState(() {
+                            isRetryingInDialog = true;
+                          });
+                          final ok =
+                              await ConnectivityCheckService.hasInternetConnection();
+                          if (ok) {
+                            if (dialogContext.mounted) {
+                              Navigator.pop(dialogContext, true);
+                            }
+                            return;
+                          }
+                          if (dialogContext.mounted) {
+                            setDialogState(() {
+                              retryCount++;
+                              isRetryingInDialog = false;
+                            });
+                          }
+                        },
                 ),
               ],
             );
@@ -949,9 +1103,46 @@ class _SalesmanHomeScreenState extends State<SalesmanHomeScreen>
     // result == true  → connected after retry
     // result == null  → continue offline (first call only)
     // result == false → user cancelled
-    if (result == false) return false;
-    if (result == null && isFirst) return true; // Will be marked offline in caller.
-    return result == true;
+    if (result == true) {
+      return (allowed: true, isOffline: false);
+    }
+    if (result == null && isFirst) {
+      return (allowed: true, isOffline: true);
+    }
+    return (allowed: false, isOffline: false);
+  }
+
+  /// Shows a modal dialog when uploading a Last Call (or First Call Retake) fails,
+  /// allowing the salesman to retry the server upload using the already-captured
+  /// and gallery-saved photo without retaking the selfie.
+  Future<bool> _promptUploadRetryDialog({
+    required String title,
+    required String message,
+  }) async {
+    if (!mounted) return false;
+    final retry = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) {
+        return AlertDialog(
+          icon: const Icon(Icons.cloud_off, color: Colors.orange, size: 40),
+          title: Text(title),
+          content: Text(message),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton.icon(
+              icon: const Icon(Icons.cloud_upload, size: 18),
+              label: const Text('Retry Upload'),
+              onPressed: () => Navigator.pop(dialogContext, true),
+            ),
+          ],
+        );
+      },
+    );
+    return retry == true;
   }
 
   Future<void> _takePhoto(bool isFirst) async {
@@ -981,34 +1172,15 @@ class _SalesmanHomeScreenState extends State<SalesmanHomeScreen>
         return;
       }
 
-      // ── Connectivity check ───────────────────────────────────────────────
-      // Run before opening the camera so the salesman knows the upload status.
-      // For First Call, offline capture is allowed after 3 failed retries.
-      // For Last Call, connection is mandatory — we do not proceed without it.
-      if (isFirst) {
-        // On every new First Call, clean up any stale session data first.
-        await BackgroundLocationService.cleanupStaleSession(_todayDate);
+      // ── Stale session guard & single unified connectivity check ───────────
+      if (isFirst && _firstPoint == null) {
+        // Ensure any prior-day orphaned session is flushed and cleaned up first.
+        await _guardAgainstStaleSession();
       }
 
-      bool isOfflineCapture = false;
-      setState(() => _isConnectivityChecking = true);
-      final connected = await ConnectivityCheckService.hasInternetConnection();
-      setState(() => _isConnectivityChecking = false);
-
-      if (!connected) {
-        if (!mounted) return;
-        final allowed = await _showConnectivityCheckDialog(isFirst: isFirst);
-        if (!allowed) return; // User cancelled.
-        // Check if we're proceeding offline (only possible for first call).
-        if (isFirst) {
-          final stillConnected = await ConnectivityCheckService.hasInternetConnection();
-          isOfflineCapture = !stillConnected;
-        } else {
-          // Last call must be online — verify after dialog resolves.
-          final nowConnected = await ConnectivityCheckService.hasInternetConnection();
-          if (!nowConnected) return;
-        }
-      }
+      final connectivity = await _showConnectivityCheckDialog(isFirst: isFirst);
+      if (!connectivity.allowed) return;
+      final bool isOfflineCapture = connectivity.isOffline;
       // ─────────────────────────────────────────────────────────────────────
 
       if (!mounted) return;
@@ -1041,7 +1213,12 @@ class _SalesmanHomeScreenState extends State<SalesmanHomeScreen>
       }
 
       if (!mounted) return;
-      _uploadImage(File(capturedImagePath), position, isFirst, isOfflineCapture: isOfflineCapture);
+      await _uploadImage(
+        File(capturedImagePath),
+        position,
+        isFirst,
+        isOfflineCapture: isOfflineCapture,
+      );
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(
@@ -1064,12 +1241,14 @@ class _SalesmanHomeScreenState extends State<SalesmanHomeScreen>
 
       if (user == null) return;
 
+      // Use capturedAt consistently across the stamped image overlay, gallery
+      // filename, and Firestore RoutePoint.timestamp so _resolveLocalImagePath
+      // always matches the saved gallery image.
       final capturedAt = DateTime.now();
-      final locationTime = position.timestamp;
       final timestamp = capturedAt.toIso8601String();
       final salesmanName = user.email.split('@').first;
 
-      final stampedResult = await _createStampedCallImage(
+      var stampedResult = await _createStampedCallImage(
         sourceFile: imageFile,
         salesmanName: salesmanName,
         position: position,
@@ -1083,136 +1262,86 @@ class _SalesmanHomeScreenState extends State<SalesmanHomeScreen>
         isFirst: isFirst,
       );
 
-      // Fetch Device Telemetry and Data Usage
+      // Fetch Device Telemetry and Data Usage once per capture
       final telemetry = await TelemetryService.getDeviceTelemetry();
       final dataUsage = await TelemetryService.getDataUsage();
 
-      String imageUrl = '';
-      bool isOfflineFirstCall = false;
+      final mobileDataEntries = (dataUsage['mobile'] as List<dynamic>?)
+          ?.map((e) => DataUsageEntry.fromMap(e as Map<String, dynamic>))
+          .toList();
+      final wifiDataEntries = (dataUsage['wifi'] as List<dynamic>?)
+          ?.map((e) => DataUsageEntry.fromMap(e as Map<String, dynamic>))
+          .toList();
 
-      if (isFirst) {
-        try {
-          imageUrl = await _storageService.uploadRouteImage(
-            stampedResult.uploadFile,
-            user.uid,
-            timestamp,
-          ).timeout(const Duration(seconds: 3));
-        } catch (e) {
-          debugPrint('[SalesmanHomeScreen] First call storage upload failed (offline): $e');
-          isOfflineFirstCall = true;
-        }
-      } else {
-        try {
-          imageUrl = await _storageService.uploadRouteImage(
-            stampedResult.uploadFile,
-            user.uid,
-            timestamp,
-          ).timeout(const Duration(seconds: 3));
-        } catch (e) {
-          debugPrint('[SalesmanHomeScreen] Last call storage upload failed (offline): $e');
-        }
+      RoutePoint buildRoutePoint(String uploadedUrl) {
+        return RoutePoint(
+          lat: position.latitude,
+          lon: position.longitude,
+          imageUrl: uploadedUrl,
+          timestamp: capturedAt,
+          productName: telemetry['productName'] as String?,
+          modelName: telemetry['modelName'] as String?,
+          serialNumber: telemetry['serialNumber'] as String?,
+          uuid: telemetry['uuid'] as String?,
+          batteryLevel: telemetry['batteryLevel'] as int?,
+          appVersion: telemetry['appVersion'] as String?,
+          mobileDataUsage: mobileDataEntries,
+          wifiDataUsage: wifiDataEntries,
+        );
       }
 
-      // Create RoutePoint
-      final routePoint = RoutePoint(
-        lat: position.latitude,
-        lon: position.longitude,
-        imageUrl: imageUrl,
-        timestamp: locationTime,
-        productName: telemetry['productName'] as String?,
-        modelName: telemetry['modelName'] as String?,
-        serialNumber: telemetry['serialNumber'] as String?,
-        uuid: telemetry['uuid'] as String?,
-        batteryLevel: telemetry['batteryLevel'] as int?,
-        appVersion: telemetry['appVersion'] as String?,
-        mobileDataUsage: (dataUsage['mobile'] as List<dynamic>?)
-            ?.map((e) => DataUsageEntry.fromMap(e as Map<String, dynamic>))
-            .toList(),
-        wifiDataUsage: (dataUsage['wifi'] as List<dynamic>?)
-            ?.map((e) => DataUsageEntry.fromMap(e as Map<String, dynamic>))
-            .toList(),
-      );
+      Map<String, dynamic> buildPendingCallData({
+        required String routeId,
+        required _StampedImageResult stamped,
+        String? uploadedImageUrl,
+      }) {
+        return {
+          'routeId': routeId,
+          'salesmanId': user.uid,
+          'supervisorId': user.supervisorId ?? '',
+          'companyId': user.companyId,
+          'date': _todayDate,
+          'localImagePath': stamped.uploadFile.path,
+          'stampedLocalImagePath': stamped.localFile.path,
+          if (uploadedImageUrl != null && uploadedImageUrl.isNotEmpty)
+            'uploadedImageUrl': uploadedImageUrl,
+          'timestamp': timestamp,
+          'locationTime': capturedAt.millisecondsSinceEpoch,
+          'lat': position.latitude,
+          'lon': position.longitude,
+          'productName': telemetry['productName'],
+          'modelName': telemetry['modelName'],
+          'serialNumber': telemetry['serialNumber'],
+          'uuid': telemetry['uuid'],
+          'batteryLevel': telemetry['batteryLevel'],
+          'appVersion': telemetry['appVersion'],
+          'mobileDataUsage': mobileDataEntries?.map((e) => e.toMap()).toList(),
+          'wifiDataUsage': wifiDataEntries?.map((e) => e.toMap()).toList(),
+        };
+      }
 
-      List<SalesRoute> existingRoutes = [];
-      try {
-        existingRoutes = await _firestoreService.getRoutesBySalesman(
-          user.uid,
-          _todayDate,
-        ).timeout(const Duration(seconds: 3));
-      } catch (_) {}
+      String imageUrl = '';
 
-      if (existingRoutes.isEmpty) {
-        if (isFirst) {
+      if (isFirst) {
+        final bool isRetakeAttempt = _firstRetakeApproved && _todayRouteId != null;
+
+        if (isOfflineCapture && !isRetakeAttempt) {
+          // User explicitly chose "Continue Offline" for a new First Call.
           final generatedRouteId = const Uuid().v4();
-          if (isOfflineFirstCall) {
-            final pendingCallData = {
-              'routeId': generatedRouteId,
-              'salesmanId': user.uid,
-              'supervisorId': user.supervisorId ?? '',
-              'companyId': user.companyId,
-              'date': _todayDate,
-              'localImagePath': stampedResult.uploadFile.path,
-              'stampedLocalImagePath': stampedResult.localFile.path,
-              'timestamp': timestamp,
-              'locationTime': locationTime.millisecondsSinceEpoch,
-              'lat': position.latitude,
-              'lon': position.longitude,
-              'productName': telemetry['productName'],
-              'modelName': telemetry['modelName'],
-              'serialNumber': telemetry['serialNumber'],
-              'uuid': telemetry['uuid'],
-              'batteryLevel': telemetry['batteryLevel'],
-              'appVersion': telemetry['appVersion'],
-              'mobileDataUsage': (dataUsage['mobile'] as List<dynamic>?)
-                  ?.map((e) => DataUsageEntry.fromMap(e as Map<String, dynamic>).toMap())
-                  .toList(),
-              'wifiDataUsage': (dataUsage['wifi'] as List<dynamic>?)
-                  ?.map((e) => DataUsageEntry.fromMap(e as Map<String, dynamic>).toMap())
-                  .toList(),
-            };
+          final pendingCallData = buildPendingCallData(
+            routeId: generatedRouteId,
+            stamped: stampedResult,
+          );
+          final prefs = await SharedPreferences.getInstance();
+          await prefs.setString('pending_first_call_v2', jsonEncode(pendingCallData));
+          final routePoint = buildRoutePoint('');
+          await _saveActiveFirstCallCache(
+            routeId: generatedRouteId,
+            firstPoint: routePoint,
+            localImagePath: stampedResult.localFile.path,
+          );
 
-            final prefs = await SharedPreferences.getInstance();
-            await prefs.setString('pending_first_call_v2', jsonEncode(pendingCallData));
-          } else {
-            try {
-              await _firestoreService.createRoute(
-                salesmanId: user.uid,
-                supervisorId: user.supervisorId ?? '',
-                date: _todayDate,
-                first: routePoint,
-                last: routePoint,
-                hasFirstCall: true,
-                hasLastCall: false,
-                companyId: user.companyId,
-                customRouteId: generatedRouteId,
-              ).timeout(const Duration(seconds: 3));
-            } catch (e) {
-              debugPrint('[SalesmanHomeScreen] Firestore createRoute failed (offline): $e');
-              isOfflineFirstCall = true;
-              final pendingCallData = {
-                'routeId': generatedRouteId,
-                'salesmanId': user.uid,
-                'supervisorId': user.supervisorId ?? '',
-                'companyId': user.companyId,
-                'date': _todayDate,
-                'localImagePath': stampedResult.uploadFile.path,
-                'stampedLocalImagePath': stampedResult.localFile.path,
-                'timestamp': timestamp,
-                'locationTime': locationTime.millisecondsSinceEpoch,
-                'lat': position.latitude,
-                'lon': position.longitude,
-                'productName': telemetry['productName'],
-                'modelName': telemetry['modelName'],
-                'serialNumber': telemetry['serialNumber'],
-                'uuid': telemetry['uuid'],
-                'batteryLevel': telemetry['batteryLevel'],
-                'appVersion': telemetry['appVersion'],
-              };
-              final prefs = await SharedPreferences.getInstance();
-              await prefs.setString('pending_first_call_v2', jsonEncode(pendingCallData));
-            }
-          }
-
+          if (!mounted) return;
           setState(() {
             _todayRouteId = generatedRouteId;
             _firstPoint = routePoint;
@@ -1228,13 +1357,88 @@ class _SalesmanHomeScreenState extends State<SalesmanHomeScreen>
           });
           _syncCheckpointTracking();
 
-          // Signal VersionProvider that a session is now active so any pending
-          // auto-update is deferred until the salesman completes Last Call.
-          if (mounted) {
+          final versionProvider = context.read<VersionProvider>();
+          versionProvider.setSessionActive(true);
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('First call saved offline. Live tracking started.'),
+            ),
+          );
+          return;
+        }
+
+        // Online First Call (or First Call Retake)
+        while (true) {
+          try {
+            if (imageUrl.isEmpty) {
+              // StorageService.uploadImage handles a 25s timeout with 2 attempts.
+              imageUrl = await _storageService.uploadRouteImage(
+                stampedResult.uploadFile,
+                user.uid,
+                timestamp,
+              );
+            }
+
+            final routePoint = buildRoutePoint(imageUrl);
+            final existingRoutes = await _firestoreService
+                .getRoutesBySalesman(user.uid, _todayDate)
+                .timeout(const Duration(seconds: 12));
+
+            String committedRouteId;
+            if (existingRoutes.isEmpty) {
+              committedRouteId = const Uuid().v4();
+              await _firestoreService
+                  .createRoute(
+                    salesmanId: user.uid,
+                    supervisorId: user.supervisorId ?? '',
+                    date: _todayDate,
+                    first: routePoint,
+                    last: routePoint,
+                    hasFirstCall: true,
+                    hasLastCall: false,
+                    companyId: user.companyId,
+                    customRouteId: committedRouteId,
+                  )
+                  .timeout(const Duration(seconds: 12));
+            } else {
+              committedRouteId = existingRoutes.first.routeId;
+              await _firestoreService
+                  .updateRoute(committedRouteId, {
+                    'first': routePoint.toMap(),
+                    'hasFirstCall': true,
+                    'firstRetakeRequested': false,
+                    'firstRetakeApproved': false,
+                  })
+                  .timeout(const Duration(seconds: 12));
+            }
+
+            await _saveActiveFirstCallCache(
+              routeId: committedRouteId,
+              firstPoint: routePoint,
+              localImagePath: stampedResult.localFile.path,
+            );
+
+            if (!mounted) return;
+            setState(() {
+              _todayRouteId = committedRouteId;
+              _firstPoint = routePoint;
+              if (existingRoutes.isEmpty) _lastPoint = null;
+              _firstLocalImagePath = stampedResult.localFile.path;
+              _firstRetakeRequested = false;
+              _firstRetakeApproved = false;
+              if (existingRoutes.isEmpty) {
+                _lastRetakeRequested = false;
+                _lastRetakeApproved = false;
+              }
+              _lastCheckpointTime = routePoint.timestamp;
+              _lastCheckpointLat = routePoint.lat;
+              _lastCheckpointLon = routePoint.lon;
+            });
+            _syncCheckpointTracking();
+
             final versionProvider = context.read<VersionProvider>();
             versionProvider.setSessionActive(true);
-            // If an update was found while session is active, notify the user.
-            if (versionProvider.updateDeferred) {
+            if (versionProvider.updateDeferred && existingRoutes.isEmpty) {
               ScaffoldMessenger.of(context).showSnackBar(
                 const SnackBar(
                   content: Text(
@@ -1244,127 +1448,240 @@ class _SalesmanHomeScreenState extends State<SalesmanHomeScreen>
                 ),
               );
             }
-          }
 
-          if (!mounted) return;
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(
-                isOfflineFirstCall
-                    ? 'First call saved offline. Live tracking started.'
-                    : (gallerySaveError == null
-                        ? 'First call saved and copied to gallery. Now take the last call.'
-                        : 'First call saved. Gallery copy failed.'),
-              ),
-            ),
-          );
-        } else {
-          if (_firstPoint == null) {
-            if (!mounted) return;
             ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text('Please take the first call first')),
+              SnackBar(
+                content: Text(
+                  existingRoutes.isEmpty
+                      ? (gallerySaveError == null
+                          ? 'First call saved and copied to gallery. Now take the last call.'
+                          : 'First call saved. Gallery copy failed.')
+                      : (gallerySaveError == null
+                          ? 'First call updated and copied to gallery.'
+                          : 'First call updated. Gallery copy failed.'),
+                ),
+              ),
+            );
+            return;
+          } catch (e) {
+            debugPrint('[SalesmanHomeScreen] Online First Call upload failed: $e');
+            if (isRetakeAttempt) {
+              final retry = await _promptUploadRetryDialog(
+                title: 'First Call Retake Upload Failed',
+                message:
+                    'Your photo is saved to your gallery, but updating the First Call on the server failed.\n\nPlease check your internet connection and tap "Retry Upload".',
+              );
+              if (retry) continue;
+              if (!mounted) return;
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text(
+                    'First Call retake was not uploaded yet. Please retry when your signal stabilizes.',
+                  ),
+                ),
+              );
+              return;
+            }
+
+            // New First Call failed mid-upload — fall back to offline First Call
+            // queue so the salesman can start their route immediately and
+            // BackgroundLocationService will flush it automatically.
+            if (!isOfflineCapture) {
+              try {
+                stampedResult = await _createStampedCallImage(
+                  sourceFile: imageFile,
+                  salesmanName: salesmanName,
+                  position: position,
+                  capturedAt: capturedAt,
+                  isOffline: true,
+                );
+              } catch (_) {}
+            }
+            final generatedRouteId = const Uuid().v4();
+            final pendingCallData = buildPendingCallData(
+              routeId: generatedRouteId,
+              stamped: stampedResult,
+              uploadedImageUrl: imageUrl,
+            );
+            final prefs = await SharedPreferences.getInstance();
+            await prefs.setString('pending_first_call_v2', jsonEncode(pendingCallData));
+            final routePoint = buildRoutePoint(imageUrl);
+            await _saveActiveFirstCallCache(
+              routeId: generatedRouteId,
+              firstPoint: routePoint,
+              localImagePath: stampedResult.localFile.path,
+            );
+
+            if (!mounted) return;
+            setState(() {
+              _todayRouteId = generatedRouteId;
+              _firstPoint = routePoint;
+              _lastPoint = null;
+              _firstLocalImagePath = stampedResult.localFile.path;
+              _firstRetakeRequested = false;
+              _firstRetakeApproved = false;
+              _lastRetakeRequested = false;
+              _lastRetakeApproved = false;
+              _lastCheckpointTime = routePoint.timestamp;
+              _lastCheckpointLat = routePoint.lat;
+              _lastCheckpointLon = routePoint.lon;
+            });
+            _syncCheckpointTracking();
+
+            context.read<VersionProvider>().setSessionActive(true);
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text(
+                  'Connection slow — First Call queued offline and will sync automatically. Live tracking started.',
+                ),
+              ),
             );
             return;
           }
-
-          setState(() {
-            _lastPoint = routePoint;
-            _lastLocalImagePath = stampedResult.localFile.path;
-          });
-          // Flush any checkpoints queued while data was off before we stop
-          // tracking (syncCheckpointTracking cancels the stream once lastPoint
-          // is set, so this is the last reliable upload window).
-          await BackgroundLocationService.flushPendingBatch();
-          _checkpointQueue
-              .flush(_firestoreService.appendRouteCheckpoint)
-              .catchError((_) {});
-          _syncCheckpointTracking();
-
-          // Session is now complete — signal VersionProvider so any deferred
-          // update is applied and AppRouter shows the ForceUpdateScreen.
-          if (mounted) {
-            context.read<VersionProvider>().setSessionActive(false);
-          }
-
-          if (!mounted) return;
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(
-                gallerySaveError == null
-                    ? 'Route saved successfully and copied to gallery.'
-                    : 'Route saved successfully. Gallery copy failed.',
-              ),
-            ),
-          );
         }
       } else {
-        // Update existing route
-        final route = existingRoutes[0];
-        if (isFirst) {
-          try {
-            await _firestoreService.updateRoute(route.routeId, {
-              'first': routePoint.toMap(),
-              'hasFirstCall': true,
-              'firstRetakeRequested': false,
-              'firstRetakeApproved': false,
-            }).timeout(const Duration(seconds: 3));
-          } catch (e) {
-            debugPrint('[SalesmanHomeScreen] updateRoute first call failed (offline): $e');
-          }
-          setState(() {
-            _todayRouteId = route.routeId;
-            _firstPoint = routePoint;
-            _firstLocalImagePath = stampedResult.localFile.path;
-            _firstRetakeRequested = false;
-            _firstRetakeApproved = false;
-            _lastCheckpointTime = routePoint.timestamp;
-            _lastCheckpointLat = routePoint.lat;
-            _lastCheckpointLon = routePoint.lon;
-          });
-          _syncCheckpointTracking();
-          // Re-signal session active for retake path.
-          if (mounted) context.read<VersionProvider>().setSessionActive(true);
-        } else {
-          try {
-            await _firestoreService.updateRoute(route.routeId, {
-              'last': routePoint.toMap(),
-              'hasLastCall': true,
-              'lastRetakeRequested': false,
-              'lastRetakeApproved': false,
-            }).timeout(const Duration(seconds: 3));
-          } catch (e) {
-            debugPrint('[SalesmanHomeScreen] updateRoute last call failed (offline): $e');
-          }
-          setState(() {
-            _todayRouteId = route.routeId;
-            _lastPoint = routePoint;
-            _lastLocalImagePath = stampedResult.localFile.path;
-            _lastRetakeRequested = false;
-            _lastRetakeApproved = false;
-            _lastCheckpointTime = null;
-            _lastCheckpointLat = null;
-            _lastCheckpointLon = null;
-          });
-          // Flush queued offline checkpoints before stream is cancelled.
-          await BackgroundLocationService.flushPendingBatch();
-          _checkpointQueue
-              .flush(_firestoreService.appendRouteCheckpoint)
-              .catchError((_) {});
-          _syncCheckpointTracking();
-          // Session complete (retake path) — apply any deferred update.
-          if (mounted) context.read<VersionProvider>().setSessionActive(false);
+        // ── LAST CALL (or Last Call Retake) ──────────────────────────────────
+        if (_firstPoint == null) {
+          if (!mounted) return;
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Please take the first call first')),
+          );
+          return;
         }
 
-        if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              gallerySaveError == null
-                  ? '${isFirst ? 'First' : 'Last'} call updated and copied to gallery.'
-                  : '${isFirst ? 'First' : 'Last'} call updated. Gallery copy failed.',
-            ),
-          ),
-        );
+        while (true) {
+          try {
+            // 1. Ensure any pending offline First Call is flushed to Firestore first.
+            await BackgroundLocationService.flushPendingFirstCall();
+            final prefs = await SharedPreferences.getInstance();
+            await prefs.reload();
+            final rawPendingFirst = prefs.getString('pending_first_call_v2');
+            if (rawPendingFirst != null && rawPendingFirst.isNotEmpty) {
+              Map<String, dynamic>? pendingMap;
+              try {
+                pendingMap = jsonDecode(rawPendingFirst) as Map<String, dynamic>;
+              } catch (_) {}
+              if (pendingMap != null && pendingMap['date'] == _todayDate) {
+                throw Exception(
+                  'Pending First Call has not finished uploading yet.',
+                );
+              }
+            }
+
+            // 2. Upload Last Call stamped image to Firebase Storage (25s timeout, 2 attempts).
+            // Reuses imageUrl if a previous attempt already uploaded the file to Storage.
+            if (imageUrl.isEmpty) {
+              imageUrl = await _storageService.uploadRouteImage(
+                stampedResult.uploadFile,
+                user.uid,
+                timestamp,
+              );
+            }
+
+            final routePoint = buildRoutePoint(imageUrl);
+
+            // 3. Query today's route in Firestore (12s timeout) and commit Last Call.
+            final existingRoutes = await _firestoreService
+                .getRoutesBySalesman(user.uid, _todayDate)
+                .timeout(const Duration(seconds: 12));
+
+            String committedRouteId;
+            final bool isRetakeUpdate =
+                existingRoutes.isNotEmpty && existingRoutes.first.hasLastCall;
+
+            if (existingRoutes.isNotEmpty) {
+              committedRouteId = existingRoutes.first.routeId;
+              await _firestoreService
+                  .updateRoute(committedRouteId, {
+                    'last': routePoint.toMap(),
+                    'hasLastCall': true,
+                    'lastRetakeRequested': false,
+                    'lastRetakeApproved': false,
+                  })
+                  .timeout(const Duration(seconds: 12));
+            } else {
+              // Fallback: if no route doc was returned (e.g. edge case where doc
+              // was not created earlier), create/merge the full route document
+              // with both First and Last Call so Last Call is NEVER dropped.
+              committedRouteId = _todayRouteId ?? const Uuid().v4();
+              await _firestoreService
+                  .createRoute(
+                    salesmanId: user.uid,
+                    supervisorId: user.supervisorId ?? '',
+                    date: _todayDate,
+                    first: _firstPoint!,
+                    last: routePoint,
+                    hasFirstCall: true,
+                    hasLastCall: true,
+                    companyId: user.companyId,
+                    customRouteId: committedRouteId,
+                  )
+                  .timeout(const Duration(seconds: 12));
+            }
+
+            // 4. Verified Firestore write succeeded! Now flush remaining checkpoints
+            // and mark the session complete.
+            await _clearActiveFirstCallCache();
+
+            if (!mounted) return;
+            setState(() {
+              _todayRouteId = committedRouteId;
+              _lastPoint = routePoint;
+              _lastLocalImagePath = stampedResult.localFile.path;
+              _lastRetakeRequested = false;
+              _lastRetakeApproved = false;
+              _lastCheckpointTime = null;
+              _lastCheckpointLat = null;
+              _lastCheckpointLon = null;
+            });
+
+            await BackgroundLocationService.flushPendingBatch();
+            _checkpointQueue
+                .flush(_firestoreService.appendRouteCheckpoint)
+                .catchError((_) {});
+            _syncCheckpointTracking();
+
+            if (mounted) {
+              context.read<VersionProvider>().setSessionActive(false);
+            }
+
+            if (!mounted) return;
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text(
+                  isRetakeUpdate
+                      ? (gallerySaveError == null
+                          ? 'Last call updated and copied to gallery.'
+                          : 'Last call updated. Gallery copy failed.')
+                      : (gallerySaveError == null
+                          ? 'Route saved successfully and copied to gallery.'
+                          : 'Route saved successfully. Gallery copy failed.'),
+                ),
+              ),
+            );
+            return;
+          } catch (e) {
+            debugPrint('[SalesmanHomeScreen] Last call upload/commit failed: $e');
+            final retry = await _promptUploadRetryDialog(
+              title: 'Last Call Upload Failed',
+              message:
+                  'Your Last Call photo is saved to your gallery, but uploading the call data to the server failed.\n\nPlease check your internet connection and tap "Retry Upload". You do not need to retake the photo.',
+            );
+            if (retry) {
+              continue;
+            }
+            if (!mounted) return;
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text(
+                  'Last Call is NOT uploaded to the server yet. Please tap Last Call again when your connection is stable.',
+                ),
+                duration: Duration(seconds: 5),
+              ),
+            );
+            return;
+          }
+        }
       }
     } catch (e) {
       if (!mounted) return;
@@ -1372,7 +1689,9 @@ class _SalesmanHomeScreenState extends State<SalesmanHomeScreen>
         context,
       ).showSnackBar(SnackBar(content: Text('Upload error: $e')));
     } finally {
-      setState(() => _isUploading = false);
+      if (mounted) {
+        setState(() => _isUploading = false);
+      }
     }
   }
 
@@ -1415,7 +1734,9 @@ class _SalesmanHomeScreenState extends State<SalesmanHomeScreen>
             onPressed: () {
               Navigator.push(
                 context,
-                MaterialPageRoute(builder: (_) => const TroubleshootingScreen()),
+                MaterialPageRoute<void>(
+                  builder: (_) => const TroubleshootingScreen(),
+                ),
               );
             },
           ),
@@ -1426,7 +1747,7 @@ class _SalesmanHomeScreenState extends State<SalesmanHomeScreen>
               onPressed: () {
                 Navigator.push(
                   context,
-                  MaterialPageRoute(
+                  MaterialPageRoute<void>(
                     builder: (_) => const SalesmanDebugScreen(),
                   ),
                 );
