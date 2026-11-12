@@ -5,10 +5,20 @@ import 'package:url_launcher/url_launcher_string.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:compact_sales_monitoring/models/route_model.dart';
 import 'package:compact_sales_monitoring/models/user_model.dart';
+import 'package:compact_sales_monitoring/services/calls_grid_export_service.dart';
 import 'package:compact_sales_monitoring/services/firestore_service.dart';
 
 enum CallsFilter { allWithCalls, allSalesmen, completedFirstAndLast, onlyFirstCall }
-enum CallsSort { firstCallAsc, firstCallDesc, lastCallAsc, lastCallDesc }
+enum CallsSort {
+  firstCallAsc,
+  firstCallDesc,
+  lastCallAsc,
+  lastCallDesc,
+  salesmanEmailAsc,
+  salesmanEmailDesc,
+  salesmanNameAsc,
+  salesmanNameDesc,
+}
 
 class SuperuserCallsViewScreen extends StatefulWidget {
   final AppUser supervisor;
@@ -26,6 +36,7 @@ class SuperuserCallsViewScreen extends StatefulWidget {
 
 class _SuperuserCallsViewScreenState extends State<SuperuserCallsViewScreen> {
   final FirestoreService _firestoreService = FirestoreService();
+  final CallsGridExportService _gridExportService = CallsGridExportService();
   late Future<_CallsViewData> _dataFuture;
   Future<_WeeklyCallsViewData>? _weeklyDataFuture;
   List<AppUser>? _cachedTeam;
@@ -35,6 +46,7 @@ class _SuperuserCallsViewScreenState extends State<SuperuserCallsViewScreen> {
 
   // View mode toggle (card-based vs tabular grid view, shown on web)
   bool _isTabularView = false;
+  bool _isExporting = false;
   late DateTime _selectedMonth; // First day of selected month
   late int _selectedWeek; // 1-based Sunday..Saturday calendar row in month
 
@@ -231,6 +243,95 @@ class _SuperuserCallsViewScreenState extends State<SuperuserCallsViewScreen> {
     }
   }
 
+  String _filterLabel(CallsFilter filter) {
+    switch (filter) {
+      case CallsFilter.allWithCalls:
+        return 'All With Calls';
+      case CallsFilter.allSalesmen:
+        return 'All Salesmen';
+      case CallsFilter.completedFirstAndLast:
+        return 'Completed First & Last';
+      case CallsFilter.onlyFirstCall:
+        return 'Only First Call';
+    }
+  }
+
+  String _sortLabel(CallsSort sort) {
+    switch (sort) {
+      case CallsSort.firstCallAsc:
+        return 'First Call (Ascending)';
+      case CallsSort.firstCallDesc:
+        return 'First Call (Descending)';
+      case CallsSort.lastCallAsc:
+        return 'Last Call (Ascending)';
+      case CallsSort.lastCallDesc:
+        return 'Last Call (Descending)';
+      case CallsSort.salesmanEmailAsc:
+        return 'Salesman Email (A - Z)';
+      case CallsSort.salesmanEmailDesc:
+        return 'Salesman Email (Z - A)';
+      case CallsSort.salesmanNameAsc:
+        return 'Salesman Name (A - Z)';
+      case CallsSort.salesmanNameDesc:
+        return 'Salesman Name (Z - A)';
+    }
+  }
+
+  void _toggleSortByEmail() {
+    setState(() {
+      _sort = _sort == CallsSort.salesmanEmailAsc
+          ? CallsSort.salesmanEmailDesc
+          : CallsSort.salesmanEmailAsc;
+    });
+  }
+
+  void _toggleSortByName() {
+    setState(() {
+      _sort = _sort == CallsSort.salesmanNameAsc
+          ? CallsSort.salesmanNameDesc
+          : CallsSort.salesmanNameAsc;
+    });
+  }
+
+  Future<void> _exportWeeklyGridToExcel(
+    _WeeklyCallsViewData data,
+    List<AppUser> orderedSalesmen,
+  ) async {
+    if (_isExporting) return;
+    setState(() => _isExporting = true);
+    try {
+      final result = await _gridExportService.exportWeeklyCallsGrid(
+        supervisorName: _displayName(widget.supervisor),
+        selectedMonth: _selectedMonth,
+        selectedWeek: _selectedWeek,
+        weekDays: data.weekDays,
+        orderedSalesmen: orderedSalesmen,
+        routesBySalesmanByDate: data.routesBySalesmanByDate,
+        filterLabel: _filterLabel(_filter),
+        sortLabel: _sortLabel(_sort),
+      );
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Exported ${result.rowCount} row(s) to ${result.fileName}',
+          ),
+          duration: const Duration(seconds: 4),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Export failed: $e'),
+          backgroundColor: Colors.red.shade700,
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _isExporting = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final supervisorName = _displayName(widget.supervisor);
@@ -241,33 +342,9 @@ class _SuperuserCallsViewScreenState extends State<SuperuserCallsViewScreen> {
         title: Text('Calls View: $supervisorName'),
         actions: [
           if (showGridSwitch) ...[
-            Padding(
-              padding: const EdgeInsets.symmetric(vertical: 8),
-              child: SegmentedButton<bool>(
-                segments: const [
-                  ButtonSegment<bool>(
-                    value: false,
-                    label: Text('Cards'),
-                    icon: Icon(Icons.view_module_outlined, size: 18),
-                  ),
-                  ButtonSegment<bool>(
-                    value: true,
-                    label: Text('Grid'),
-                    icon: Icon(Icons.table_chart_outlined, size: 18),
-                  ),
-                ],
-                selected: {_isTabularView},
-                showSelectedIcon: false,
-                style: const ButtonStyle(
-                  visualDensity: VisualDensity.compact,
-                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                ),
-                onSelectionChanged: (selection) {
-                  if (selection.isNotEmpty) {
-                    _toggleViewMode(selection.first);
-                  }
-                },
-              ),
+            _ViewModeToggle(
+              isTabularView: _isTabularView,
+              onChanged: _toggleViewMode,
             ),
             const SizedBox(width: 8),
           ],
@@ -283,7 +360,10 @@ class _SuperuserCallsViewScreenState extends State<SuperuserCallsViewScreen> {
     );
   }
 
-  Widget _buildControlsBar({required bool includeDateRangeControls}) {
+  Widget _buildControlsBar({
+    required bool includeDateRangeControls,
+    VoidCallback? onExportPressed,
+  }) {
     final months = _monthOptions();
     final totalWeeks = _weeksInMonth(_selectedMonth);
     final dateRangeFmt = DateFormat('MMM d');
@@ -294,30 +374,26 @@ class _SuperuserCallsViewScreenState extends State<SuperuserCallsViewScreen> {
       crossAxisAlignment: WrapCrossAlignment.center,
       children: [
         DropdownMenu<CallsFilter>(
+          key: ValueKey('filter_${_filter.name}'),
           label: const Text('Filter'),
           initialSelection: _filter,
           onSelected: (val) {
             if (val != null) setState(() => _filter = val);
           },
-          dropdownMenuEntries: const [
-            DropdownMenuEntry(value: CallsFilter.allWithCalls, label: 'All With Calls'),
-            DropdownMenuEntry(value: CallsFilter.allSalesmen, label: 'All Salesmen'),
-            DropdownMenuEntry(value: CallsFilter.completedFirstAndLast, label: 'Completed First & Last'),
-            DropdownMenuEntry(value: CallsFilter.onlyFirstCall, label: 'Only First Call'),
-          ],
+          dropdownMenuEntries: CallsFilter.values
+              .map((f) => DropdownMenuEntry(value: f, label: _filterLabel(f)))
+              .toList(),
         ),
         DropdownMenu<CallsSort>(
+          key: ValueKey('sort_${_sort.name}'),
           label: const Text('Sort By'),
           initialSelection: _sort,
           onSelected: (val) {
             if (val != null) setState(() => _sort = val);
           },
-          dropdownMenuEntries: const [
-            DropdownMenuEntry(value: CallsSort.firstCallAsc, label: 'First Call (Ascending)'),
-            DropdownMenuEntry(value: CallsSort.firstCallDesc, label: 'First Call (Descending)'),
-            DropdownMenuEntry(value: CallsSort.lastCallAsc, label: 'Last Call (Ascending)'),
-            DropdownMenuEntry(value: CallsSort.lastCallDesc, label: 'Last Call (Descending)'),
-          ],
+          dropdownMenuEntries: CallsSort.values
+              .map((s) => DropdownMenuEntry(value: s, label: _sortLabel(s)))
+              .toList(),
         ),
         if (includeDateRangeControls) ...[
           DropdownMenu<DateTime>(
@@ -343,6 +419,20 @@ class _SuperuserCallsViewScreenState extends State<SuperuserCallsViewScreen> {
               final label = 'Week $w (${dateRangeFmt.format(days.first)} - ${dateRangeFmt.format(days.last)})';
               return DropdownMenuEntry<int>(value: w, label: label);
             }),
+          ),
+          FilledButton.icon(
+            onPressed: _isExporting ? null : onExportPressed,
+            icon: _isExporting
+                ? const SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: Colors.white,
+                    ),
+                  )
+                : const Icon(Icons.download_rounded, size: 18),
+            label: Text(_isExporting ? 'Exporting...' : 'Export Excel'),
           ),
         ],
       ],
@@ -400,24 +490,42 @@ class _SuperuserCallsViewScreenState extends State<SuperuserCallsViewScreen> {
 
         // Sort withCalls
         withCalls.sort((a, b) {
-          final routeA = data.routesBySalesman[a.uid]!;
-          final routeB = data.routesBySalesman[b.uid]!;
+          switch (_sort) {
+            case CallsSort.salesmanEmailAsc:
+              return a.email.toLowerCase().compareTo(b.email.toLowerCase());
+            case CallsSort.salesmanEmailDesc:
+              return b.email.toLowerCase().compareTo(a.email.toLowerCase());
+            case CallsSort.salesmanNameAsc:
+              return _displayName(a).toLowerCase().compareTo(_displayName(b).toLowerCase());
+            case CallsSort.salesmanNameDesc:
+              return _displayName(b).toLowerCase().compareTo(_displayName(a).toLowerCase());
+            case CallsSort.firstCallAsc:
+            case CallsSort.firstCallDesc:
+            case CallsSort.lastCallAsc:
+            case CallsSort.lastCallDesc:
+              final routeA = data.routesBySalesman[a.uid]!;
+              final routeB = data.routesBySalesman[b.uid]!;
 
-          DateTime timeA;
-          DateTime timeB;
+              final DateTime timeA;
+              final DateTime timeB;
 
-          if (_sort == CallsSort.firstCallAsc || _sort == CallsSort.firstCallDesc) {
-            timeA = routeA.first.timestamp;
-            timeB = routeB.first.timestamp;
-          } else {
-            timeA = routeA.hasLastCall ? routeA.last.timestamp : DateTime.fromMillisecondsSinceEpoch(0);
-            timeB = routeB.hasLastCall ? routeB.last.timestamp : DateTime.fromMillisecondsSinceEpoch(0);
-          }
+              if (_sort == CallsSort.firstCallAsc || _sort == CallsSort.firstCallDesc) {
+                timeA = routeA.first.timestamp;
+                timeB = routeB.first.timestamp;
+              } else {
+                timeA = routeA.hasLastCall
+                    ? routeA.last.timestamp
+                    : DateTime.fromMillisecondsSinceEpoch(0);
+                timeB = routeB.hasLastCall
+                    ? routeB.last.timestamp
+                    : DateTime.fromMillisecondsSinceEpoch(0);
+              }
 
-          if (_sort == CallsSort.firstCallAsc || _sort == CallsSort.lastCallAsc) {
-            return timeA.compareTo(timeB);
-          } else {
-            return timeB.compareTo(timeA);
+              if (_sort == CallsSort.firstCallAsc || _sort == CallsSort.lastCallAsc) {
+                return timeA.compareTo(timeB);
+              } else {
+                return timeB.compareTo(timeA);
+              }
           }
         });
 
@@ -580,18 +688,34 @@ class _SuperuserCallsViewScreenState extends State<SuperuserCallsViewScreen> {
         }
 
         filteredTeam.sort((a, b) {
-          final timeA = sortKeyForSalesman(a);
-          final timeB = sortKeyForSalesman(b);
-          if (timeA == null && timeB == null) {
-            return _displayName(a).compareTo(_displayName(b));
-          }
-          if (timeA == null) return 1;
-          if (timeB == null) return -1;
+          switch (_sort) {
+            case CallsSort.salesmanEmailAsc:
+              return a.email.toLowerCase().compareTo(b.email.toLowerCase());
+            case CallsSort.salesmanEmailDesc:
+              return b.email.toLowerCase().compareTo(a.email.toLowerCase());
+            case CallsSort.salesmanNameAsc:
+              return _displayName(a).toLowerCase().compareTo(_displayName(b).toLowerCase());
+            case CallsSort.salesmanNameDesc:
+              return _displayName(b).toLowerCase().compareTo(_displayName(a).toLowerCase());
+            case CallsSort.firstCallAsc:
+            case CallsSort.firstCallDesc:
+            case CallsSort.lastCallAsc:
+            case CallsSort.lastCallDesc:
+              final timeA = sortKeyForSalesman(a);
+              final timeB = sortKeyForSalesman(b);
+              if (timeA == null && timeB == null) {
+                return _displayName(a).toLowerCase().compareTo(_displayName(b).toLowerCase());
+              }
+              if (timeA == null) return 1;
+              if (timeB == null) return -1;
 
-          final cmp = (_sort == CallsSort.firstCallAsc || _sort == CallsSort.lastCallAsc)
-              ? timeA.compareTo(timeB)
-              : timeB.compareTo(timeA);
-          return cmp != 0 ? cmp : _displayName(a).compareTo(_displayName(b));
+              final cmp = (_sort == CallsSort.firstCallAsc || _sort == CallsSort.lastCallAsc)
+                  ? timeA.compareTo(timeB)
+                  : timeB.compareTo(timeA);
+              return cmp != 0
+                  ? cmp
+                  : _displayName(a).toLowerCase().compareTo(_displayName(b).toLowerCase());
+          }
         });
 
         final headerRangeStr =
@@ -602,7 +726,12 @@ class _SuperuserCallsViewScreenState extends State<SuperuserCallsViewScreen> {
           child: ListView(
             padding: const EdgeInsets.all(16),
             children: [
-              _buildControlsBar(includeDateRangeControls: true),
+              _buildControlsBar(
+                includeDateRangeControls: true,
+                onExportPressed: filteredTeam.isEmpty
+                    ? null
+                    : () => _exportWeeklyGridToExcel(data, filteredTeam),
+              ),
               const SizedBox(height: 16),
               _WeeklyLegendBar(
                 weekSummary: 'Week $_selectedWeek ($headerRangeStr) • ${filteredTeam.length} salesman(s)',
@@ -641,6 +770,9 @@ class _SuperuserCallsViewScreenState extends State<SuperuserCallsViewScreen> {
                   salesmen: filteredTeam,
                   weekDays: data.weekDays,
                   routesBySalesmanByDate: data.routesBySalesmanByDate,
+                  activeSort: _sort,
+                  onSortByEmail: _toggleSortByEmail,
+                  onSortByName: _toggleSortByName,
                   onCellTap: _showDayCallDetailDialog,
                 ),
             ],
@@ -928,6 +1060,163 @@ class _CallsGridColors {
   static const futureBg = Color(0xFFE5E7EB); // Neutral Cool Slate Gray
 }
 
+class _ViewModeToggle extends StatelessWidget {
+  final bool isTabularView;
+  final ValueChanged<bool> onChanged;
+
+  const _ViewModeToggle({
+    required this.isTabularView,
+    required this.onChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final borderColor = colorScheme.outline.withValues(alpha: 0.6);
+
+    Widget buildSegment({
+      required bool selected,
+      required IconData icon,
+      required String label,
+      required VoidCallback onTap,
+      required BorderRadius borderRadius,
+    }) {
+      return InkWell(
+        onTap: onTap,
+        borderRadius: borderRadius,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 160),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
+          decoration: BoxDecoration(
+            color: selected ? colorScheme.primaryContainer : Colors.transparent,
+            borderRadius: borderRadius,
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                icon,
+                size: 17,
+                color: selected
+                    ? colorScheme.onPrimaryContainer
+                    : colorScheme.onSurfaceVariant,
+              ),
+              const SizedBox(width: 6),
+              Text(
+                label,
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+                  color: selected
+                      ? colorScheme.onPrimaryContainer
+                      : colorScheme.onSurfaceVariant,
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    return Container(
+      decoration: BoxDecoration(
+        color: colorScheme.surface.withValues(alpha: 0.7),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: borderColor),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          buildSegment(
+            selected: !isTabularView,
+            icon: Icons.grid_view_rounded,
+            label: 'Cards',
+            onTap: () => onChanged(false),
+            borderRadius: const BorderRadius.horizontal(left: Radius.circular(19)),
+          ),
+          Container(width: 1, height: 24, color: borderColor),
+          buildSegment(
+            selected: isTabularView,
+            icon: Icons.table_chart_rounded,
+            label: 'Grid',
+            onTap: () => onChanged(true),
+            borderRadius: const BorderRadius.horizontal(right: Radius.circular(19)),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Vector check (✓) or cross (✕) icon drawn with CustomPaint so it never
+/// depends on font subsetting/caches on web.
+class _CallStatusGlyph extends StatelessWidget {
+  final bool isCheck;
+  final Color color;
+  final double size;
+
+  const _CallStatusGlyph({
+    required this.isCheck,
+    required this.color,
+    this.size = 15,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return CustomPaint(
+      size: Size.square(size),
+      painter: _CallStatusGlyphPainter(isCheck: isCheck, color: color),
+    );
+  }
+}
+
+class _CallStatusGlyphPainter extends CustomPainter {
+  final bool isCheck;
+  final Color color;
+
+  const _CallStatusGlyphPainter({
+    required this.isCheck,
+    required this.color,
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = color
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = size.width * 0.17
+      ..strokeCap = StrokeCap.round
+      ..strokeJoin = StrokeJoin.round;
+
+    final w = size.width;
+    final h = size.height;
+
+    if (isCheck) {
+      final path = Path()
+        ..moveTo(w * 0.16, h * 0.54)
+        ..lineTo(w * 0.40, h * 0.78)
+        ..lineTo(w * 0.85, h * 0.24);
+      canvas.drawPath(path, paint);
+    } else {
+      canvas.drawLine(
+        Offset(w * 0.24, h * 0.24),
+        Offset(w * 0.76, h * 0.76),
+        paint,
+      );
+      canvas.drawLine(
+        Offset(w * 0.76, h * 0.24),
+        Offset(w * 0.24, h * 0.76),
+        paint,
+      );
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _CallStatusGlyphPainter oldDelegate) {
+    return oldDelegate.isCheck != isCheck || oldDelegate.color != color;
+  }
+}
+
 class _WeeklyLegendBar extends StatelessWidget {
   final String weekSummary;
   final int zeroCallCount;
@@ -986,18 +1275,20 @@ class _WeeklyLegendBar extends StatelessWidget {
               children: [
                 _LegendItem(
                   color: _CallsGridColors.completedBg,
-                  icon: Icons.check_rounded,
-                  iconColor: _CallsGridColors.completedIcon,
+                  isCheck: true,
+                  glyphColor: _CallsGridColors.completedIcon,
                   label: 'Completed (F & L)',
                 ),
                 _LegendItem(
                   color: _CallsGridColors.partialBg,
-                  icon: Icons.check_rounded,
-                  iconColor: _CallsGridColors.partialIcon,
+                  isCheck: true,
+                  glyphColor: _CallsGridColors.completedIcon,
                   label: '1 Call Only',
                 ),
                 _LegendItem(
                   color: _CallsGridColors.missedBg,
+                  isCheck: false,
+                  glyphColor: _CallsGridColors.missedIcon,
                   label: 'No Calls',
                 ),
                 _LegendItem(
@@ -1015,14 +1306,14 @@ class _WeeklyLegendBar extends StatelessWidget {
 
 class _LegendItem extends StatelessWidget {
   final Color color;
-  final IconData? icon;
-  final Color? iconColor;
+  final bool? isCheck;
+  final Color? glyphColor;
   final String label;
 
   const _LegendItem({
     required this.color,
-    this.icon,
-    this.iconColor,
+    this.isCheck,
+    this.glyphColor,
     required this.label,
   });
 
@@ -1034,13 +1325,18 @@ class _LegendItem extends StatelessWidget {
         Container(
           width: 18,
           height: 18,
+          alignment: Alignment.center,
           decoration: BoxDecoration(
             color: color,
             borderRadius: BorderRadius.circular(4),
             border: Border.all(color: Colors.grey.shade400, width: 0.8),
           ),
-          child: icon != null
-              ? Icon(icon, size: 13, color: iconColor)
+          child: isCheck != null && glyphColor != null
+              ? _CallStatusGlyph(
+                  isCheck: isCheck!,
+                  color: glyphColor!,
+                  size: 12,
+                )
               : null,
         ),
         const SizedBox(width: 5),
@@ -1061,12 +1357,18 @@ class _WeeklyCallsTable extends StatefulWidget {
   final List<AppUser> salesmen;
   final List<DateTime> weekDays;
   final Map<String, Map<String, SalesRoute>> routesBySalesmanByDate;
+  final CallsSort activeSort;
+  final VoidCallback onSortByEmail;
+  final VoidCallback onSortByName;
   final void Function(AppUser salesman, DateTime day, SalesRoute route) onCellTap;
 
   const _WeeklyCallsTable({
     required this.salesmen,
     required this.weekDays,
     required this.routesBySalesmanByDate,
+    required this.activeSort,
+    required this.onSortByEmail,
+    required this.onSortByName,
     required this.onCellTap,
   });
 
@@ -1142,11 +1444,20 @@ class _WeeklyCallsTableState extends State<_WeeklyCallsTable> {
                               width: emailWidth,
                               label: 'Salesman Email',
                               borderColor: borderColor,
+                              isSortedAsc: widget.activeSort == CallsSort.salesmanEmailAsc
+                                  ? true
+                                  : (widget.activeSort == CallsSort.salesmanEmailDesc ? false : null),
+                              onTap: widget.onSortByEmail,
                             ),
                             _HeaderTitleCell(
                               width: nameWidth,
                               label: 'Salesman Name',
                               borderColor: borderColor,
+                              showLeftBorder: true,
+                              isSortedAsc: widget.activeSort == CallsSort.salesmanNameAsc
+                                  ? true
+                                  : (widget.activeSort == CallsSort.salesmanNameDesc ? false : null),
+                              onTap: widget.onSortByName,
                             ),
                             ...widget.weekDays.map((day) {
                               final dateOnly = DateTime(day.year, day.month, day.day);
@@ -1314,19 +1625,14 @@ class _WeeklyCallsTableState extends State<_WeeklyCallsTable> {
                               final hasLast = !isFuture && route != null && route.hasLastCall;
 
                               late final Color cellBg;
-                              late final Color iconColor;
                               if (isFuture) {
                                 cellBg = _CallsGridColors.futureBg;
-                                iconColor = Colors.grey.shade500;
                               } else if (hasFirst && hasLast) {
                                 cellBg = _CallsGridColors.completedBg;
-                                iconColor = _CallsGridColors.completedIcon;
                               } else if (hasFirst || hasLast) {
                                 cellBg = _CallsGridColors.partialBg;
-                                iconColor = _CallsGridColors.partialIcon;
                               } else {
                                 cellBg = _CallsGridColors.missedBg;
-                                iconColor = _CallsGridColors.missedIcon;
                               }
 
                               final tooltipMessage = isFuture
@@ -1351,9 +1657,15 @@ class _WeeklyCallsTableState extends State<_WeeklyCallsTable> {
                                   children: [
                                     Expanded(
                                       child: Center(
-                                        child: hasFirst
-                                            ? Icon(Icons.check_rounded, size: 19, color: iconColor)
-                                            : const SizedBox.shrink(),
+                                        child: isFuture
+                                            ? const SizedBox.shrink()
+                                            : _CallStatusGlyph(
+                                                isCheck: hasFirst,
+                                                color: hasFirst
+                                                    ? _CallsGridColors.completedIcon
+                                                    : _CallsGridColors.missedIcon,
+                                                size: 14,
+                                              ),
                                       ),
                                     ),
                                     Container(
@@ -1362,9 +1674,15 @@ class _WeeklyCallsTableState extends State<_WeeklyCallsTable> {
                                     ),
                                     Expanded(
                                       child: Center(
-                                        child: hasLast
-                                            ? Icon(Icons.check_rounded, size: 19, color: iconColor)
-                                            : const SizedBox.shrink(),
+                                        child: isFuture
+                                            ? const SizedBox.shrink()
+                                            : _CallStatusGlyph(
+                                                isCheck: hasLast,
+                                                color: hasLast
+                                                    ? _CallsGridColors.completedIcon
+                                                    : _CallsGridColors.missedIcon,
+                                                size: 14,
+                                              ),
                                       ),
                                     ),
                                   ],
@@ -1400,33 +1718,71 @@ class _HeaderTitleCell extends StatelessWidget {
   final double width;
   final String label;
   final Color borderColor;
+  final bool showLeftBorder;
+  final bool? isSortedAsc;
+  final VoidCallback onTap;
 
   const _HeaderTitleCell({
     required this.width,
     required this.label,
     required this.borderColor,
+    this.showLeftBorder = false,
+    required this.isSortedAsc,
+    required this.onTap,
   });
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      width: width,
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
-      alignment: Alignment.center,
-      decoration: BoxDecoration(
-        border: Border(
-          left: label == 'Salesman Name'
-              ? BorderSide(color: borderColor, width: 1)
-              : BorderSide.none,
-          bottom: BorderSide(color: borderColor, width: 1.2),
-        ),
-      ),
-      child: Text(
-        label,
-        textAlign: TextAlign.center,
-        style: const TextStyle(
-          fontWeight: FontWeight.w700,
-          fontSize: 13.5,
+    final colorScheme = Theme.of(context).colorScheme;
+    final isActive = isSortedAsc != null;
+
+    return Tooltip(
+      message: 'Click to sort by $label',
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: onTap,
+          mouseCursor: SystemMouseCursors.click,
+          child: Container(
+            width: width,
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              border: Border(
+                left: showLeftBorder
+                    ? BorderSide(color: borderColor, width: 1)
+                    : BorderSide.none,
+                bottom: BorderSide(color: borderColor, width: 1.2),
+              ),
+            ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Flexible(
+                  child: Text(
+                    label,
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      fontWeight: FontWeight.w700,
+                      fontSize: 13.5,
+                      color: isActive ? colorScheme.primary : Colors.black87,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 6),
+                Icon(
+                  isSortedAsc == null
+                      ? Icons.unfold_more_rounded
+                      : (isSortedAsc!
+                          ? Icons.arrow_upward_rounded
+                          : Icons.arrow_downward_rounded),
+                  size: 16,
+                  color: isActive ? colorScheme.primary : Colors.grey.shade600,
+                ),
+              ],
+            ),
+          ),
         ),
       ),
     );
