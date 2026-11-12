@@ -74,54 +74,135 @@ class _SalesmanDebugScreenState extends State<SalesmanDebugScreen> {
     _lastLat = _prefs!.getDouble('last_checkpoint_lat');
     _lastLon = _prefs!.getDouble('last_checkpoint_lon');
 
-    final rawBatch = _prefs!.getStringList('session_checkpoints_history') ?? [];
-    final checkpoints = rawBatch.map((e) {
+    final rawPending = _prefs!.getStringList('batched_checkpoints_v2') ?? [];
+    final pendingByTimestamp = <int, Map<String, dynamic>>{};
+    for (final raw in rawPending) {
       try {
-        return jsonDecode(e) as Map<String, dynamic>;
-      } catch (_) {
-        return <String, dynamic>{};
-      }
-    }).where((e) => e.isNotEmpty).toList().reversed.toList();
+        final map = jsonDecode(raw) as Map<String, dynamic>;
+        final ts = map['timestamp'] as int?;
+        if (ts != null) {
+          pendingByTimestamp[ts] = map;
+        }
+      } catch (_) {}
+    }
+    _pendingTimestamps = pendingByTimestamp.keys.toSet();
 
+    // Merge session_checkpoints_history and batched_checkpoints_v2 deduplicated
+    // by timestamp so no checkpoint is ever missing from the history list.
+    final rawBatch = _prefs!.getStringList('session_checkpoints_history') ?? [];
+    final mergedCheckpointsByTs = <int, Map<String, dynamic>>{};
+    for (final raw in rawBatch) {
+      try {
+        final map = jsonDecode(raw) as Map<String, dynamic>;
+        final ts = map['timestamp'] as int?;
+        if (ts != null) {
+          mergedCheckpointsByTs[ts] = map;
+        }
+      } catch (_) {}
+    }
+    for (final entry in pendingByTimestamp.entries) {
+      mergedCheckpointsByTs.putIfAbsent(entry.key, () => entry.value);
+    }
+
+    final sortedMiddleCheckpoints = mergedCheckpointsByTs.values.toList()
+      ..sort(
+        (a, b) => ((a['timestamp'] as int?) ?? 0)
+            .compareTo((b['timestamp'] as int?) ?? 0),
+      );
+
+    final fullTimeline = <Map<String, dynamic>>[];
+
+    // 1. First Call (at the start of the timeline)
     final rawPendingFirstCall = _prefs!.getString('pending_first_call_v2');
+    bool addedFirstCall = false;
     if (rawPendingFirstCall != null && rawPendingFirstCall.isNotEmpty) {
       try {
         final map = jsonDecode(rawPendingFirstCall) as Map<String, dynamic>;
-        checkpoints.insert(0, {
+        fullTimeline.add({
           'isFirstCall': true,
           'isPending': true,
           'lat': map['lat'],
           'lon': map['lon'],
           'timestamp': map['locationTime'],
         });
+        addedFirstCall = true;
       } catch (_) {}
-    } else {
+    }
+
+    if (!addedFirstCall) {
       final firstTimeStr = _prefs!.getString('first_point_time');
       if (firstTimeStr != null) {
         try {
           final firstTime = DateTime.parse(firstTimeStr);
-          checkpoints.add({
+          final firstLat = _prefs!.getDouble('first_point_lat') ??
+              _prefs!.getDouble('last_checkpoint_lat');
+          final firstLon = _prefs!.getDouble('first_point_lon') ??
+              _prefs!.getDouble('last_checkpoint_lon');
+          fullTimeline.add({
             'isFirstCall': true,
             'isPending': false,
-            'lat': _prefs!.getDouble('last_checkpoint_lat'),
-            'lon': _prefs!.getDouble('last_checkpoint_lon'),
+            'lat': firstLat,
+            'lon': firstLon,
             'timestamp': firstTime.millisecondsSinceEpoch,
           });
+          addedFirstCall = true;
         } catch (_) {}
       }
     }
 
-    _pendingCheckpoints = checkpoints;
-
-    final rawPending = _prefs!.getStringList('batched_checkpoints_v2') ?? [];
-    _pendingTimestamps = rawPending.map((e) {
-      try {
-        final map = jsonDecode(e) as Map<String, dynamic>;
-        return map['timestamp'] as int?;
-      } catch (_) {
-        return null;
+    if (!addedFirstCall) {
+      final rawCachedFirst = _prefs!.getString('active_first_call_cache_v1');
+      if (rawCachedFirst != null && rawCachedFirst.isNotEmpty) {
+        try {
+          final cacheMap = jsonDecode(rawCachedFirst) as Map<String, dynamic>;
+          final fp = cacheMap['firstPoint'] as Map<String, dynamic>?;
+          if (fp != null) {
+            final tsValue = fp['timestamp'];
+            int? tsMs;
+            if (tsValue is int) {
+              tsMs = tsValue;
+            } else if (tsValue is String) {
+              tsMs = DateTime.tryParse(tsValue)?.millisecondsSinceEpoch;
+            }
+            fullTimeline.add({
+              'isFirstCall': true,
+              'isPending': false,
+              'lat': fp['lat'],
+              'lon': fp['lon'],
+              'timestamp': tsMs,
+            });
+            addedFirstCall = true;
+          }
+        } catch (_) {}
       }
-    }).where((e) => e != null).cast<int>().toSet();
+    }
+
+    // 2. All Intermediate Route Checkpoints (Checkpoint #1 .. #N)
+    for (int i = 0; i < sortedMiddleCheckpoints.length; i++) {
+      final cp = Map<String, dynamic>.from(sortedMiddleCheckpoints[i]);
+      cp['checkpointNumber'] = i + 1;
+      fullTimeline.add(cp);
+    }
+
+    // 3. Last Call (at the end of the timeline, if completed)
+    final lastTimeStr = _prefs!.getString('last_point_time');
+    if (lastTimeStr != null) {
+      try {
+        final lastTime = DateTime.parse(lastTimeStr);
+        fullTimeline.add({
+          'isLastCall': true,
+          'isPending': false,
+          'lat': _prefs!.getDouble('last_point_lat'),
+          'lon': _prefs!.getDouble('last_point_lon'),
+          'timestamp': lastTime.millisecondsSinceEpoch,
+        });
+      } catch (_) {}
+    }
+
+    _pendingCheckpoints = fullTimeline;
+    if (_checkpointCount < sortedMiddleCheckpoints.length) {
+      _checkpointCount = sortedMiddleCheckpoints.length;
+    }
 
     if (mounted) {
       setState(() {});
@@ -335,12 +416,14 @@ class _SalesmanDebugScreenState extends State<SalesmanDebugScreen> {
             if (_pendingCheckpoints.isNotEmpty) ...[
               const SizedBox(height: 32),
               const Text(
-                'Checkpoint History',
+                'Checkpoint History (First Call to Last Call)',
                 style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
               ),
               const SizedBox(height: 12),
               ..._pendingCheckpoints.map((cp) {
                 final isFirstCall = cp['isFirstCall'] == true;
+                final isLastCall = cp['isLastCall'] == true;
+                final checkpointNum = cp['checkpointNumber'] as int?;
                 final lat = cp['lat'] as num?;
                 final lon = cp['lon'] as num?;
                 final ts = cp['timestamp'] as int?;
@@ -348,11 +431,20 @@ class _SalesmanDebugScreenState extends State<SalesmanDebugScreen> {
                     ? DateFormat('hh:mm:ss a').format(DateTime.fromMillisecondsSinceEpoch(ts))
                     : 'Unknown';
 
-                if (isFirstCall) {
+                if (isFirstCall || isLastCall) {
                   final isPending = cp['isPending'] == true;
-                  final statusColor = isPending ? Colors.orange.shade800 : Colors.purple.shade700;
-                  final statusText = isPending ? 'First Call (Pending)' : 'First Call (Uploaded)';
-                  final statusIcon = isPending ? Icons.add_a_photo_outlined : Icons.camera_alt_rounded;
+                  final statusColor = isFirstCall
+                      ? (isPending ? Colors.orange.shade800 : Colors.purple.shade700)
+                      : Colors.teal.shade700;
+                  final statusBg = isFirstCall
+                      ? (isPending ? Colors.orange.shade50 : Colors.purple.shade50)
+                      : Colors.teal.shade50;
+                  final statusText = isFirstCall
+                      ? (isPending ? 'First Call (Pending)' : 'First Call (Uploaded)')
+                      : 'Last Call (Uploaded)';
+                  final statusIcon = isFirstCall
+                      ? (isPending ? Icons.add_a_photo_outlined : Icons.camera_alt_rounded)
+                      : Icons.flag_circle_rounded;
 
                   return Card(
                     elevation: 1,
@@ -361,12 +453,12 @@ class _SalesmanDebugScreenState extends State<SalesmanDebugScreen> {
                       borderRadius: BorderRadius.circular(12),
                       side: BorderSide(color: statusColor, width: 1.5),
                     ),
-                    color: isPending ? Colors.orange.shade50 : Colors.purple.shade50,
+                    color: statusBg,
                     child: ListTile(
                       leading: Container(
                         padding: const EdgeInsets.all(8),
                         decoration: BoxDecoration(
-                          color: statusColor.withOpacity(0.15),
+                          color: statusColor.withValues(alpha: 0.15),
                           shape: BoxShape.circle,
                         ),
                         child: Icon(statusIcon, color: statusColor, size: 20),
@@ -394,19 +486,22 @@ class _SalesmanDebugScreenState extends State<SalesmanDebugScreen> {
                 final statusColor = isPending ? Colors.red : Colors.green;
                 final statusText = isPending ? 'Pending' : 'Uploaded';
                 final statusIcon = isPending ? Icons.cloud_upload : Icons.cloud_done;
+                final cpTitle = checkpointNum != null
+                    ? 'Checkpoint #$checkpointNum • $time'
+                    : time;
 
                 return Card(
                   elevation: 0,
                   margin: const EdgeInsets.only(bottom: 8),
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(12),
-                    side: BorderSide(color: statusColor.withOpacity(0.3)),
+                    side: BorderSide(color: statusColor.withValues(alpha: 0.3)),
                   ),
                   child: ListTile(
                     leading: Container(
                       padding: const EdgeInsets.all(8),
                       decoration: BoxDecoration(
-                        color: statusColor.withOpacity(0.1),
+                        color: statusColor.withValues(alpha: 0.1),
                         shape: BoxShape.circle,
                       ),
                       child: Icon(statusIcon, color: statusColor, size: 20),
@@ -414,7 +509,7 @@ class _SalesmanDebugScreenState extends State<SalesmanDebugScreen> {
                     title: Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        Text(time, style: const TextStyle(fontWeight: FontWeight.w600)),
+                        Text(cpTitle, style: const TextStyle(fontWeight: FontWeight.w600)),
                         Text(
                           statusText,
                           style: TextStyle(
@@ -425,7 +520,7 @@ class _SalesmanDebugScreenState extends State<SalesmanDebugScreen> {
                         ),
                       ],
                     ),
-                    subtitle: Text('Lat: ${lat?.toStringAsFixed(5)}, Lon: ${lon?.toStringAsFixed(5)}'),
+                    subtitle: Text('Lat: ${lat?.toStringAsFixed(5) ?? 'N/A'}, Lon: ${lon?.toStringAsFixed(5) ?? 'N/A'}'),
                   ),
                 );
               }),

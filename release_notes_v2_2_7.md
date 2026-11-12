@@ -37,8 +37,9 @@ Version 2.2.7 resolves two critical field issues reported by salesmen:
   - Prior-day unuploaded calls/checkpoints (within 7 days) are flushed to their historical route before cleaning up local session state.
 - **Self-Service "Repair & Sync App State"**: Added to `TroubleshootingScreen`, `SalesmanDebugScreen`, and `LaunchValidationLoadingScreen` (after 4s) so salesmen can sync pending data and reset stuck tracking state in one tap without needing IT to clear Android app data.
 
-### 5. Top-Left Red "OFFLINE" Watermark & Auto-Refresh Agile Tab
+### 5. Top-Left Red "OFFLINE" Watermark, Live Tracker Timeline & Auto-Refresh Agile Tab
 - **Offline Watermark**: Offline First Call photos are stamped with a top-left `"OFFLINE"` badge and synced automatically when connectivity returns.
+- **Full Route Timeline in Live Tracker Dashboard (`SalesmanDebugScreen`)**: Displays the complete chronological timeline from **First Call → Checkpoint #1..#N → Last Call** (with First/Last Call coordinates preserved and uploaded/pending status badges).
 - **Agile Tab Auto-Refresh**: Switching to the `Agile` tab automatically refreshes First/Last Call completion status.
 
 ---
@@ -47,9 +48,9 @@ Version 2.2.7 resolves two critical field issues reported by salesmen:
 - `lib/services/connectivity_check_service.dart`: Upgraded to HTTP `204 No Content` multi-endpoint validation.
 - `lib/services/storage_service.dart`: 25s upload timeout, task cancellation on timeout, and 2-attempt retry.
 - `lib/services/firestore_service.dart`: Idempotent `createRoute` with `SetOptions(merge: true)` and single-write `appendRouteCheckpointsBatch` with 12s timeout.
-- `lib/services/background_location_service.dart`: 20-minute batch interval, throttled resume flush, cross-isolate flush lock, prior-day route recovery, fixed watchdog reset, and `repairAndSyncAppState()`.
-- `lib/screens/salesman/salesman_home_screen.dart`: Verified Last Call commit + Retry Upload modal, 12s Firestore timeouts, mid-day offline route state preservation, and dynamic midnight rollover timer.
+- `lib/services/background_location_service.dart`: 20-minute batch interval, throttled resume flush, cross-isolate flush lock, prior-day route recovery, fixed watchdog reset, `first_point_lat`/`first_point_lon` persistence, and `repairAndSyncAppState()`.
+- `lib/screens/salesman/salesman_home_screen.dart`: Verified Last Call commit + Retry Upload modal, 12s Firestore timeouts, mid-day offline route state preservation, Live Tracker preference sync, and dynamic midnight rollover timer.
 - `lib/providers/version_provider.dart`, `lib/services/activation_service.dart`, `lib/app_router.dart`, `lib/main.dart`, `lib/screens/launch_validation_loading_screen.dart`: Startup timeout guards and dark-violet screen hang prevention.
-- `lib/screens/troubleshooting_screen.dart` & `lib/screens/salesman/salesman_debug_screen.dart`: Added self-service "Repair & Sync App State" button.
+- `lib/screens/troubleshooting_screen.dart` & `lib/screens/salesman/salesman_debug_screen.dart`: Added self-service "Repair & Sync App State" button and full First Call → Last Call chronological checkpoint timeline.
 - `lib/screens/salesman/salesman_tabs_screen.dart` & `lib/widgets/agile_call_form_card.dart`: Auto-refresh Agile call status on tab switch.
 - `pubspec.yaml`: Version `2.2.7+19`.

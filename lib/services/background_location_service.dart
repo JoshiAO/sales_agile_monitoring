@@ -87,6 +87,11 @@ class BackgroundLocationService {
         isNewDay) {
       await prefs.setString('active_route_id', routeId);
       await prefs.setString('first_point_time', currentFirstPointTime);
+      await prefs.setDouble('first_point_lat', firstPoint.lat);
+      await prefs.setDouble('first_point_lon', firstPoint.lon);
+      await prefs.remove('last_point_time');
+      await prefs.remove('last_point_lat');
+      await prefs.remove('last_point_lon');
 
       // Set initial checkpoint base
       await prefs.setString('route_start_time', currentFirstPointTime);
@@ -99,6 +104,10 @@ class BackgroundLocationService {
 
       // Purge any corrupted or expired (>7d) local batch checkpoints
       await purgeStaleLocalCheckpoints(prefs, todayDateStr);
+    } else {
+      // Ensure First Call coordinates are always persisted for Live Tracker Dashboard
+      await prefs.setDouble('first_point_lat', firstPoint.lat);
+      await prefs.setDouble('first_point_lon', firstPoint.lon);
     }
 
     await service.startService();
@@ -917,6 +926,11 @@ class BackgroundLocationService {
       'route_start_time',
       'route_end_time',
       'first_point_time',
+      'first_point_lat',
+      'first_point_lon',
+      'last_point_time',
+      'last_point_lat',
+      'last_point_lon',
       'last_flush_time',
       _lastFlushFailedKey,
       _flushLockKey,

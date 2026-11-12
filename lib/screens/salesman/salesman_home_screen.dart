@@ -620,12 +620,103 @@ class _SalesmanHomeScreenState extends State<SalesmanHomeScreen>
     super.dispose();
   }
 
-  Future<void> _syncCheckpointTracking() async {
+  Future<void> _syncLiveDashboardPrefs({
+    List<RouteCheckpoint>? remoteCheckpoints,
+  }) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      if (_firstPoint != null) {
+        final firstIso = _firstPoint!.timestamp.toIso8601String();
+        await prefs.setString('first_point_time', firstIso);
+        await prefs.setDouble('first_point_lat', _firstPoint!.lat);
+        await prefs.setDouble('first_point_lon', _firstPoint!.lon);
+        await prefs.setString('route_start_time', firstIso);
+        if (prefs.getDouble('last_checkpoint_lat') == null) {
+          await prefs.setDouble('last_checkpoint_lat', _firstPoint!.lat);
+          await prefs.setDouble('last_checkpoint_lon', _firstPoint!.lon);
+        }
+      } else {
+        await prefs.remove('first_point_time');
+        await prefs.remove('first_point_lat');
+        await prefs.remove('first_point_lon');
+        await prefs.remove('route_start_time');
+      }
+
+      if (_lastPoint != null) {
+        final lastIso = _lastPoint!.timestamp.toIso8601String();
+        await prefs.setString('last_point_time', lastIso);
+        await prefs.setDouble('last_point_lat', _lastPoint!.lat);
+        await prefs.setDouble('last_point_lon', _lastPoint!.lon);
+        await prefs.setString('route_end_time', lastIso);
+      } else {
+        await prefs.remove('last_point_time');
+        await prefs.remove('last_point_lat');
+        await prefs.remove('last_point_lon');
+        if (_firstPoint != null) {
+          await prefs.remove('route_end_time');
+        }
+      }
+
+      if (remoteCheckpoints != null && remoteCheckpoints.isNotEmpty) {
+        final existingRaw =
+            prefs.getStringList('session_checkpoints_history') ?? [];
+        final byTimestamp = <int, Map<String, dynamic>>{};
+
+        for (final raw in existingRaw) {
+          try {
+            final map = jsonDecode(raw) as Map<String, dynamic>;
+            final ts = map['timestamp'] as int?;
+            if (ts != null) {
+              byTimestamp[ts] = map;
+            }
+          } catch (_) {}
+        }
+
+        for (final cp in remoteCheckpoints) {
+          final ts = cp.timestamp.millisecondsSinceEpoch;
+          byTimestamp.putIfAbsent(ts, () => {
+                'routeId': _todayRouteId ?? '',
+                'lat': cp.lat,
+                'lon': cp.lon,
+                'timestamp': ts,
+              });
+        }
+
+        final sortedEntries = byTimestamp.values.toList()
+          ..sort(
+            (a, b) => ((a['timestamp'] as int?) ?? 0)
+                .compareTo((b['timestamp'] as int?) ?? 0),
+          );
+        await prefs.setStringList(
+          'session_checkpoints_history',
+          sortedEntries.map(jsonEncode).toList(),
+        );
+        await prefs.setInt('checkpoint_count', sortedEntries.length);
+      }
+    } catch (e) {
+      debugPrint('[SalesmanHomeScreen] _syncLiveDashboardPrefs error: $e');
+    }
+  }
+
+  Future<void> _syncCheckpointTracking({
+    List<RouteCheckpoint>? remoteCheckpoints,
+  }) async {
+    await _syncLiveDashboardPrefs(remoteCheckpoints: remoteCheckpoints);
+
     final shouldTrack =
         _todayRouteId != null && _firstPoint != null && _lastPoint == null;
 
     if (!shouldTrack) {
       await BackgroundLocationService.stopTracking();
+      if (_lastPoint != null) {
+        try {
+          final prefs = await SharedPreferences.getInstance();
+          await prefs.setString(
+            'route_end_time',
+            _lastPoint!.timestamp.toIso8601String(),
+          );
+        } catch (_) {}
+      }
       _lastCheckpointTime = null;
       _lastCheckpointLat = null;
       _lastCheckpointLon = null;
@@ -757,7 +848,7 @@ class _SalesmanHomeScreenState extends State<SalesmanHomeScreen>
           _lastRetakeRequested = route.lastRetakeRequested;
           _lastRetakeApproved = route.lastRetakeApproved;
         });
-        _syncCheckpointTracking();
+        _syncCheckpointTracking(remoteCheckpoints: route.checkpoints);
         if (mounted) {
           context.read<VersionProvider>().setSessionActive(
             route.hasFirstCall && !route.hasLastCall,
