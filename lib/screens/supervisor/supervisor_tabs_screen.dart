@@ -20,15 +20,39 @@ class _SupervisorTabsScreenState extends State<SupervisorTabsScreen> {
   int _currentIndex = 0;
   DateTime _lastRefreshAt = DateTime.now();
   int _refreshTick = 0;
+  final Set<int> _visitedTabs = {0};
+  String? _streamSupervisorId;
+  Stream<int>? _newUploadsStream;
+
+  String _todayDateStr() {
+    final now = DateTime.now();
+    return '${now.year.toString().padLeft(4, '0')}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}';
+  }
+
+  Widget _buildTabPage(int index) {
+    switch (index) {
+      case 0:
+        return SupervisorHomeScreen(key: ValueKey('sp-home-$_refreshTick'));
+      case 1:
+        return SupervisorDashboard(key: ValueKey('sp-map-$_refreshTick'));
+      case 2:
+        return SupervisorAgilePage(key: ValueKey('sp-agile-$_refreshTick'));
+      case 3:
+        return const FeedsPage();
+      case 4:
+        return AnnouncementPage(key: ValueKey('sp-announcement-$_refreshTick'));
+      default:
+        return const SizedBox.shrink();
+    }
+  }
 
   List<Widget> _buildPages() {
-    return [
-      SupervisorHomeScreen(key: ValueKey('sp-home-$_refreshTick')),
-      SupervisorDashboard(key: ValueKey('sp-map-$_refreshTick')),
-      SupervisorAgilePage(key: ValueKey('sp-agile-$_refreshTick')),
-      const FeedsPage(),
-      AnnouncementPage(key: ValueKey('sp-announcement-$_refreshTick')),
-    ];
+    return List<Widget>.generate(
+      5,
+      (index) => _visitedTabs.contains(index)
+          ? _buildTabPage(index)
+          : const SizedBox.shrink(),
+    );
   }
 
   Widget _buildMenuHeader(bool isExpandedRail) {
@@ -97,16 +121,22 @@ class _SupervisorTabsScreenState extends State<SupervisorTabsScreen> {
     );
   }
 
-  Stream<int> _newUploadsCountStream(String? supervisorId) {
+  Stream<int> _ensureNewUploadsCountStream(String? supervisorId) {
+    if (_newUploadsStream != null && _streamSupervisorId == supervisorId) {
+      return _newUploadsStream!;
+    }
+    _streamSupervisorId = supervisorId;
     final baseline = _lastRefreshAt;
+    final todayStr = _todayDateStr();
     Query<Map<String, dynamic>> query = FirebaseFirestore.instance
-        .collection('agile_submissions');
+        .collection('agile_submissions')
+        .where('date', isEqualTo: todayStr);
 
     if (supervisorId != null && supervisorId.isNotEmpty) {
       query = query.where('supervisorId', isEqualTo: supervisorId);
     }
 
-    return query.snapshots().map((snapshot) {
+    _newUploadsStream = query.snapshots().map((snapshot) {
       var count = 0;
       for (final doc in snapshot.docs) {
         final data = doc.data();
@@ -118,12 +148,24 @@ class _SupervisorTabsScreenState extends State<SupervisorTabsScreen> {
       }
       return count;
     });
+    return _newUploadsStream!;
+  }
+
+  void _selectTab(int index) {
+    setState(() {
+      _currentIndex = index;
+      _visitedTabs.add(index);
+    });
   }
 
   Future<void> _handleRefresh() async {
     setState(() {
       _lastRefreshAt = DateTime.now();
       _refreshTick++;
+      _visitedTabs
+        ..clear()
+        ..add(_currentIndex);
+      _newUploadsStream = null;
     });
   }
 
@@ -221,8 +263,7 @@ class _SupervisorTabsScreenState extends State<SupervisorTabsScreen> {
                       Expanded(
                         child: NavigationRail(
                           selectedIndex: _currentIndex,
-                          onDestinationSelected: (index) =>
-                              setState(() => _currentIndex = index),
+                          onDestinationSelected: _selectTab,
                           leading: _buildMenuHeader(isExpandedRail),
                           extended: isExpandedRail,
                           labelType: NavigationRailLabelType.none,
@@ -258,7 +299,7 @@ class _SupervisorTabsScreenState extends State<SupervisorTabsScreen> {
                         ),
                       ),
                       StreamBuilder<int>(
-                        stream: _newUploadsCountStream(supervisorId),
+                        stream: _ensureNewUploadsCountStream(supervisorId),
                         initialData: 0,
                         builder: (context, snapshot) {
                           return _buildRefreshButton(
@@ -286,7 +327,7 @@ class _SupervisorTabsScreenState extends State<SupervisorTabsScreen> {
       body: IndexedStack(index: _currentIndex, children: pages),
       bottomNavigationBar: BottomNavigationBar(
         currentIndex: _currentIndex,
-        onTap: (index) => setState(() => _currentIndex = index),
+        onTap: _selectTab,
         items: const [
           BottomNavigationBarItem(
             icon: Icon(Icons.home_outlined),

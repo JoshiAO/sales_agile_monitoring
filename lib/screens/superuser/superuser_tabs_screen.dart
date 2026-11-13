@@ -22,6 +22,21 @@ class _SuperuserTabsScreenState extends State<SuperuserTabsScreen> {
   int _currentIndex = 0;
   DateTime _lastRefreshAt = DateTime.now();
   int _refreshTick = 0;
+  final Set<int> _visitedTabs = {0};
+  late Stream<int> _pendingLogoutStream;
+  late Stream<int> _newUploadsStream;
+
+  @override
+  void initState() {
+    super.initState();
+    _pendingLogoutStream = _createPendingLogoutRequestsCountStream();
+    _newUploadsStream = _createNewUploadsCountStream();
+  }
+
+  String _todayDateStr() {
+    final now = DateTime.now();
+    return '${now.year.toString().padLeft(4, '0')}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}';
+  }
 
   Widget _badgeIcon(IconData icon, int count) {
     if (count <= 0) {
@@ -58,7 +73,7 @@ class _SuperuserTabsScreenState extends State<SuperuserTabsScreen> {
     );
   }
 
-  Stream<int> _pendingLogoutRequestsCountStream() {
+  Stream<int> _createPendingLogoutRequestsCountStream() {
     return FirebaseFirestore.instance
         .collection('users')
         .where('role', isEqualTo: 'salesman')
@@ -67,16 +82,34 @@ class _SuperuserTabsScreenState extends State<SuperuserTabsScreen> {
         .map((snapshot) => snapshot.docs.length);
   }
 
+  Widget _buildTabPage(int index) {
+    switch (index) {
+      case 0:
+        return SuperuserHomeScreen(key: ValueKey('su-home-$_refreshTick'));
+      case 1:
+        return SuperUserDashboard(key: ValueKey('su-map-$_refreshTick'));
+      case 2:
+        return SuperuserAgilePage(key: ValueKey('su-agile-$_refreshTick'));
+      case 3:
+        return const FeedsPage();
+      case 4:
+        return AnnouncementPage(key: ValueKey('su-announcement-$_refreshTick'));
+      case 5:
+        return UserManagementScreen(key: ValueKey('su-users-$_refreshTick'));
+      case 6:
+        return const AppVersionSettingsScreen(key: ValueKey('su-appversion'));
+      default:
+        return const SizedBox.shrink();
+    }
+  }
+
   List<Widget> _buildPages() {
-    return [
-      SuperuserHomeScreen(key: ValueKey('su-home-$_refreshTick')),
-      SuperUserDashboard(key: ValueKey('su-map-$_refreshTick')),
-      SuperuserAgilePage(key: ValueKey('su-agile-$_refreshTick')),
-      const FeedsPage(),
-      AnnouncementPage(key: ValueKey('su-announcement-$_refreshTick')),
-      UserManagementScreen(key: ValueKey('su-users-$_refreshTick')),
-      const AppVersionSettingsScreen(key: ValueKey('su-appversion')),
-    ];
+    return List<Widget>.generate(
+      7,
+      (index) => _visitedTabs.contains(index)
+          ? _buildTabPage(index)
+          : const SizedBox.shrink(),
+    );
   }
 
   Widget _buildMenuHeader(bool isExpandedRail) {
@@ -145,10 +178,12 @@ class _SuperuserTabsScreenState extends State<SuperuserTabsScreen> {
     );
   }
 
-  Stream<int> _newUploadsCountStream() {
+  Stream<int> _createNewUploadsCountStream() {
     final baseline = _lastRefreshAt;
+    final todayStr = _todayDateStr();
     return FirebaseFirestore.instance
         .collection('agile_submissions')
+        .where('date', isEqualTo: todayStr)
         .snapshots()
         .map((snapshot) {
           var count = 0;
@@ -164,10 +199,21 @@ class _SuperuserTabsScreenState extends State<SuperuserTabsScreen> {
         });
   }
 
+  void _selectTab(int index) {
+    setState(() {
+      _currentIndex = index;
+      _visitedTabs.add(index);
+    });
+  }
+
   Future<void> _handleRefresh() async {
     setState(() {
       _lastRefreshAt = DateTime.now();
       _refreshTick++;
+      _visitedTabs
+        ..clear()
+        ..add(_currentIndex);
+      _newUploadsStream = _createNewUploadsCountStream();
     });
   }
 
@@ -249,11 +295,10 @@ class _SuperuserTabsScreenState extends State<SuperuserTabsScreen> {
   @override
   Widget build(BuildContext context) {
     final pages = _buildPages();
-    final pendingStream = _pendingLogoutRequestsCountStream();
 
     if (kIsWeb) {
       return StreamBuilder<int>(
-        stream: pendingStream,
+        stream: _pendingLogoutStream,
         initialData: 0,
         builder: (context, pendingSnapshot) {
           final pendingCount = pendingSnapshot.data ?? 0;
@@ -270,8 +315,7 @@ class _SuperuserTabsScreenState extends State<SuperuserTabsScreen> {
                           Expanded(
                             child: NavigationRail(
                               selectedIndex: _currentIndex,
-                              onDestinationSelected: (index) =>
-                                  setState(() => _currentIndex = index),
+                              onDestinationSelected: _selectTab,
                               leading: _buildMenuHeader(isExpandedRail),
                               extended: isExpandedRail,
                               labelType: NavigationRailLabelType.none,
@@ -323,7 +367,7 @@ class _SuperuserTabsScreenState extends State<SuperuserTabsScreen> {
                             ),
                           ),
                           StreamBuilder<int>(
-                            stream: _newUploadsCountStream(),
+                            stream: _newUploadsStream,
                             initialData: 0,
                             builder: (context, snapshot) {
                               return _buildRefreshButton(
@@ -350,7 +394,7 @@ class _SuperuserTabsScreenState extends State<SuperuserTabsScreen> {
     }
 
     return StreamBuilder<int>(
-      stream: pendingStream,
+      stream: _pendingLogoutStream,
       initialData: 0,
       builder: (context, pendingSnapshot) {
         final pendingCount = pendingSnapshot.data ?? 0;
@@ -363,7 +407,7 @@ class _SuperuserTabsScreenState extends State<SuperuserTabsScreen> {
             unselectedItemColor: Colors.grey.shade700,
             selectedLabelStyle: const TextStyle(fontWeight: FontWeight.w600),
             currentIndex: _currentIndex,
-            onTap: (index) => setState(() => _currentIndex = index),
+            onTap: _selectTab,
             items: [
               const BottomNavigationBarItem(
                 icon: Icon(Icons.home_outlined),

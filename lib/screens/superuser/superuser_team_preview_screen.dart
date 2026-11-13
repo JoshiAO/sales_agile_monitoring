@@ -38,21 +38,29 @@ class _SuperuserTeamPreviewScreenState
 
   Future<_TeamPreviewData> _loadPreviewData() async {
     final dateStr = DateFormat('yyyy-MM-dd').format(widget.selectedDate);
-    final results = await Future.wait([
-      _firestoreService.getSupervisorTeam(widget.supervisor.uid),
-      _firestoreService.getRoutesByDate(widget.supervisor.uid, dateStr),
-      _firestoreService.getAgileSubmissionsForSupervisorByDate(
-        supervisorId: widget.supervisor.uid,
-        date: dateStr,
-      ),
-    ]);
-
-    final team = (results[0] as List<AppUser>).toList()
+    final team = (await _firestoreService.getSupervisorTeam(
+      widget.supervisor.uid,
+    )).toList()
       ..sort(
         (left, right) => _displayName(left).compareTo(_displayName(right)),
       );
-    final routes = results[1] as List<SalesRoute>;
-    final submissionsBySalesman = results[2] as Map<String, AgileSubmission>;
+    final salesmanIds = team.map((u) => u.uid).toList();
+
+    final results = await Future.wait([
+      _firestoreService.getRoutesByDate(
+        widget.supervisor.uid,
+        dateStr,
+        salesmanIds: salesmanIds,
+      ),
+      _firestoreService.getAgileSubmissionsForSupervisorByDate(
+        supervisorId: widget.supervisor.uid,
+        date: dateStr,
+        salesmanIds: salesmanIds,
+      ),
+    ]);
+
+    final routes = results[0] as List<SalesRoute>;
+    final submissionsBySalesman = results[1] as Map<String, AgileSubmission>;
 
     final routesBySalesman = <String, SalesRoute>{};
     for (final route in routes) {

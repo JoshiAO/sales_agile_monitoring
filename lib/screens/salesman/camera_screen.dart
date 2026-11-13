@@ -242,7 +242,9 @@ class _CameraScreenState extends State<CameraScreen> {
       );
     }
 
-    final format = InputImageFormatValue.fromRawValue(image.format.raw);
+    final rawFormat = image.format.raw;
+    final int? rawValue = rawFormat is int ? rawFormat : int.tryParse(rawFormat.toString());
+    final format = rawValue != null ? InputImageFormatValue.fromRawValue(rawValue) : null;
     if (format == null || image.planes.isEmpty) return null;
     return _InputImageBytes(
       bytes: image.planes.first.bytes,

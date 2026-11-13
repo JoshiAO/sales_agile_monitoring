@@ -20,15 +20,44 @@ class _ManagerTabsScreenState extends State<ManagerTabsScreen> {
   int _currentIndex = 0;
   DateTime _lastRefreshAt = DateTime.now();
   int _refreshTick = 0;
+  final Set<int> _visitedTabs = {0};
+  late Stream<int> _newUploadsStream;
+
+  @override
+  void initState() {
+    super.initState();
+    _newUploadsStream = _createNewUploadsCountStream();
+  }
+
+  String _todayDateStr() {
+    final now = DateTime.now();
+    return '${now.year.toString().padLeft(4, '0')}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}';
+  }
+
+  Widget _buildTabPage(int index) {
+    switch (index) {
+      case 0:
+        return SuperuserHomeScreen(key: ValueKey('mgr-home-$_refreshTick'));
+      case 1:
+        return SuperUserDashboard(key: ValueKey('mgr-map-$_refreshTick'));
+      case 2:
+        return SuperuserAgilePage(key: ValueKey('mgr-agile-$_refreshTick'));
+      case 3:
+        return const FeedsPage();
+      case 4:
+        return AnnouncementPage(key: ValueKey('mgr-announcement-$_refreshTick'));
+      default:
+        return const SizedBox.shrink();
+    }
+  }
 
   List<Widget> _buildPages() {
-    return [
-      SuperuserHomeScreen(key: ValueKey('mgr-home-$_refreshTick')),
-      SuperUserDashboard(key: ValueKey('mgr-map-$_refreshTick')),
-      SuperuserAgilePage(key: ValueKey('mgr-agile-$_refreshTick')),
-      const FeedsPage(),
-      AnnouncementPage(key: ValueKey('mgr-announcement-$_refreshTick')),
-    ];
+    return List<Widget>.generate(
+      5,
+      (index) => _visitedTabs.contains(index)
+          ? _buildTabPage(index)
+          : const SizedBox.shrink(),
+    );
   }
 
   Widget _buildMenuHeader(bool isExpandedRail) {
@@ -97,10 +126,12 @@ class _ManagerTabsScreenState extends State<ManagerTabsScreen> {
     );
   }
 
-  Stream<int> _newUploadsCountStream() {
+  Stream<int> _createNewUploadsCountStream() {
     final baseline = _lastRefreshAt;
+    final todayStr = _todayDateStr();
     return FirebaseFirestore.instance
         .collection('agile_submissions')
+        .where('date', isEqualTo: todayStr)
         .snapshots()
         .map((snapshot) {
           var count = 0;
@@ -116,10 +147,21 @@ class _ManagerTabsScreenState extends State<ManagerTabsScreen> {
         });
   }
 
+  void _selectTab(int index) {
+    setState(() {
+      _currentIndex = index;
+      _visitedTabs.add(index);
+    });
+  }
+
   Future<void> _handleRefresh() async {
     setState(() {
       _lastRefreshAt = DateTime.now();
       _refreshTick++;
+      _visitedTabs
+        ..clear()
+        ..add(_currentIndex);
+      _newUploadsStream = _createNewUploadsCountStream();
     });
   }
 
@@ -216,8 +258,7 @@ class _ManagerTabsScreenState extends State<ManagerTabsScreen> {
                       Expanded(
                         child: NavigationRail(
                           selectedIndex: _currentIndex,
-                          onDestinationSelected: (index) =>
-                              setState(() => _currentIndex = index),
+                          onDestinationSelected: _selectTab,
                           leading: _buildMenuHeader(isExpandedRail),
                           extended: isExpandedRail,
                           labelType: NavigationRailLabelType.none,
@@ -253,7 +294,7 @@ class _ManagerTabsScreenState extends State<ManagerTabsScreen> {
                         ),
                       ),
                       StreamBuilder<int>(
-                        stream: _newUploadsCountStream(),
+                        stream: _newUploadsStream,
                         initialData: 0,
                         builder: (context, snapshot) {
                           return _buildRefreshButton(
@@ -286,7 +327,7 @@ class _ManagerTabsScreenState extends State<ManagerTabsScreen> {
         unselectedItemColor: Colors.grey.shade700,
         selectedLabelStyle: const TextStyle(fontWeight: FontWeight.w600),
         currentIndex: _currentIndex,
-        onTap: (index) => setState(() => _currentIndex = index),
+        onTap: _selectTab,
         items: const [
           BottomNavigationBarItem(
             icon: Icon(Icons.home_outlined),

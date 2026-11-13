@@ -32,6 +32,7 @@ class _SuperUserDashboardState extends State<SuperUserDashboard> {
   final ArchiveService _archiveService = ArchiveService();
   late MapController _mapController;
   final Map<String, AppUser> _salesmenCache = {};
+  final Map<String, Future<AppUser?>> _salesmenFutureCache = {};
   bool _isArchiving = false;
   bool _showLegend = false;
   bool _showRouteStatusPanel = true;
@@ -68,16 +69,17 @@ class _SuperUserDashboardState extends State<SuperUserDashboard> {
     }
   }
 
-  Future<AppUser?> _getSalesmanDetails(String salesmanId) async {
+  Future<AppUser?> _getSalesmanDetails(String salesmanId) {
     if (_salesmenCache.containsKey(salesmanId)) {
-      return _salesmenCache[salesmanId];
+      return Future.value(_salesmenCache[salesmanId]);
     }
-
-    final user = await _firestoreService.getUser(salesmanId);
-    if (user != null) {
-      _salesmenCache[salesmanId] = user;
-    }
-    return user;
+    return _salesmenFutureCache.putIfAbsent(salesmanId, () async {
+      final user = await _firestoreService.getUser(salesmanId);
+      if (user != null) {
+        _salesmenCache[salesmanId] = user;
+      }
+      return user;
+    });
   }
 
   void _onDateChanged(DateTime newDate) {
@@ -702,7 +704,10 @@ class _SuperUserDashboardState extends State<SuperUserDashboard> {
         actions: [
           Consumer<RouteProvider>(
             builder: (context, routeProvider, _) => IconButton(
-              onPressed: routeProvider.isLoading ? null : _realignRoutesToRoads,
+              onPressed:
+                  (routeProvider.isLoading || routeProvider.isAligningRoads)
+                  ? null
+                  : _realignRoutesToRoads,
               tooltip: 'Re-align all routes to roads',
               icon: const Icon(Icons.alt_route),
             ),
@@ -784,13 +789,18 @@ class _SuperUserDashboardState extends State<SuperUserDashboard> {
                         onPositionChanged: (position, hasGesture) {
                           final zoom = position.zoom;
                           if (zoom != null && zoom != _currentZoom && mounted) {
-                            setState(() {
-                              _currentZoom = zoom;
-                              if (_currentZoom < _checkpointZoomThreshold) {
-                                _selectedCheckpointId = null;
-                                _selectedCurrentLocationRouteId = null;
-                              }
-                            });
+                            final wasAbove =
+                                _currentZoom >= _checkpointZoomThreshold;
+                            final isAbove = zoom >= _checkpointZoomThreshold;
+                            _currentZoom = zoom;
+                            if (wasAbove != isAbove) {
+                              setState(() {
+                                if (!isAbove) {
+                                  _selectedCheckpointId = null;
+                                  _selectedCurrentLocationRouteId = null;
+                                }
+                              });
+                            }
                           }
                         },
                       ),
@@ -1007,6 +1017,48 @@ class _SuperUserDashboardState extends State<SuperUserDashboard> {
                       ],
                     ),
                     _buildRouteStatusPanel(routeProvider),
+                    if (routeProvider.isAligningRoads)
+                      Positioned(
+                        top: 12,
+                        left: 0,
+                        right: 0,
+                        child: IgnorePointer(
+                          child: Center(
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 12,
+                                vertical: 6,
+                              ),
+                              decoration: BoxDecoration(
+                                color: Colors.black.withValues(alpha: 0.78),
+                                borderRadius: BorderRadius.circular(999),
+                              ),
+                              child: const Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  SizedBox(
+                                    width: 12,
+                                    height: 12,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                      color: Colors.white,
+                                    ),
+                                  ),
+                                  SizedBox(width: 8),
+                                  Text(
+                                    'Aligning routes to roads...',
+                                    style: TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
                     Positioned(
                       top: 12,
                       right: 12,

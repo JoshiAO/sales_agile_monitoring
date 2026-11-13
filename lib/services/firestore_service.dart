@@ -117,55 +117,70 @@ class FirestoreService {
   ) async {
     final routesMap = <String, SalesRoute>{};
 
-    // 1. Direct query using company_ID field stored on route document
-    try {
-      final directSnapshot = await _firebaseService.firestore
-          .collection('routes')
-          .where('company_ID', isEqualTo: companyId)
-          .where('date', isEqualTo: date)
-          .get();
+    Future<void> fetchDirect() async {
+      try {
+        final directSnapshot = await _firebaseService.firestore
+            .collection('routes')
+            .where('company_ID', isEqualTo: companyId)
+            .where('date', isEqualTo: date)
+            .get();
 
-      for (final doc in directSnapshot.docs) {
-        routesMap[doc.id] = SalesRoute.fromMap(doc.data(), routeId: doc.id);
+        for (final doc in directSnapshot.docs) {
+          routesMap[doc.id] = SalesRoute.fromMap(doc.data(), routeId: doc.id);
+        }
+      } catch (e) {
+        debugPrint('[FirestoreService] Direct company route query failed: $e');
       }
-    } catch (e) {
-      debugPrint('[FirestoreService] Direct company route query failed: $e');
     }
 
-    // 2. Supplementary query via supervisor IDs for routes that predate or lack company_ID
-    try {
-      final supervisorsSnapshot = await _firebaseService.firestore
-          .collection('users')
-          .where('company_ID', isEqualTo: companyId)
-          .where('role', isEqualTo: 'supervisor')
-          .get();
+    Future<void> fetchBySupervisors() async {
+      try {
+        final supervisorsSnapshot = await _firebaseService.firestore
+            .collection('users')
+            .where('company_ID', isEqualTo: companyId)
+            .where('role', isEqualTo: 'supervisor')
+            .get();
 
-      final supervisorIds =
-          supervisorsSnapshot.docs.map((d) => d.id).toList();
+        final supervisorIds =
+            supervisorsSnapshot.docs.map((d) => d.id).toList();
 
-      if (supervisorIds.isNotEmpty) {
-        for (var i = 0; i < supervisorIds.length; i += 30) {
-          final batch = supervisorIds.sublist(
-            i,
-            min(i + 30, supervisorIds.length),
-          );
-          final routeSnapshot = await _firebaseService.firestore
-              .collection('routes')
-              .where('supervisorId', whereIn: batch)
-              .where('date', isEqualTo: date)
-              .get();
+        if (supervisorIds.isNotEmpty) {
+          final batches = <Future<QuerySnapshot<Map<String, dynamic>>>>[];
+          for (var i = 0; i < supervisorIds.length; i += 30) {
+            final batch = supervisorIds.sublist(
+              i,
+              min(i + 30, supervisorIds.length),
+            );
+            batches.add(
+              _firebaseService.firestore
+                  .collection('routes')
+                  .where('supervisorId', whereIn: batch)
+                  .where('date', isEqualTo: date)
+                  .get(),
+            );
+          }
 
-          for (final doc in routeSnapshot.docs) {
-            if (!routesMap.containsKey(doc.id)) {
-              routesMap[doc.id] = SalesRoute.fromMap(doc.data(), routeId: doc.id);
+          final snapshots = await Future.wait(batches);
+          for (final routeSnapshot in snapshots) {
+            for (final doc in routeSnapshot.docs) {
+              routesMap.putIfAbsent(
+                doc.id,
+                () => SalesRoute.fromMap(doc.data(), routeId: doc.id),
+              );
             }
           }
         }
+      } catch (e) {
+        debugPrint(
+          '[FirestoreService] Supervisor fallback route query failed: $e',
+        );
       }
-    } catch (e) {
-      debugPrint('[FirestoreService] Supervisor fallback route query failed: $e');
     }
 
+    await fetchDirect();
+    if (routesMap.isEmpty) {
+      await fetchBySupervisors();
+    }
     return routesMap.values.toList();
   }
 
@@ -192,39 +207,41 @@ class FirestoreService {
       debugPrint('[FirestoreService] Direct date range company route query failed: $e');
     }
 
-    // 2. Supplementary query via supervisor IDs
-    try {
-      final supervisorsSnapshot = await _firebaseService.firestore
-          .collection('users')
-          .where('company_ID', isEqualTo: companyId)
-          .where('role', isEqualTo: 'supervisor')
-          .get();
+    // 2. Fallback query via supervisor IDs only when direct company_ID query returns empty
+    if (routesMap.isEmpty) {
+      try {
+        final supervisorsSnapshot = await _firebaseService.firestore
+            .collection('users')
+            .where('company_ID', isEqualTo: companyId)
+            .where('role', isEqualTo: 'supervisor')
+            .get();
 
-      final supervisorIds =
-          supervisorsSnapshot.docs.map((d) => d.id).toList();
+        final supervisorIds =
+            supervisorsSnapshot.docs.map((d) => d.id).toList();
 
-      if (supervisorIds.isNotEmpty) {
-        for (var i = 0; i < supervisorIds.length; i += 30) {
-          final batch = supervisorIds.sublist(
-            i,
-            min(i + 30, supervisorIds.length),
-          );
-          final routeSnapshot = await _firebaseService.firestore
-              .collection('routes')
-              .where('supervisorId', whereIn: batch)
-              .where('date', isGreaterThanOrEqualTo: startDate)
-              .where('date', isLessThanOrEqualTo: endDate)
-              .get();
+        if (supervisorIds.isNotEmpty) {
+          for (var i = 0; i < supervisorIds.length; i += 30) {
+            final batch = supervisorIds.sublist(
+              i,
+              min(i + 30, supervisorIds.length),
+            );
+            final routeSnapshot = await _firebaseService.firestore
+                .collection('routes')
+                .where('supervisorId', whereIn: batch)
+                .where('date', isGreaterThanOrEqualTo: startDate)
+                .where('date', isLessThanOrEqualTo: endDate)
+                .get();
 
-          for (final doc in routeSnapshot.docs) {
-            if (!routesMap.containsKey(doc.id)) {
-              routesMap[doc.id] = SalesRoute.fromMap(doc.data(), routeId: doc.id);
+            for (final doc in routeSnapshot.docs) {
+              if (!routesMap.containsKey(doc.id)) {
+                routesMap[doc.id] = SalesRoute.fromMap(doc.data(), routeId: doc.id);
+              }
             }
           }
         }
+      } catch (e) {
+        debugPrint('[FirestoreService] Supervisor fallback date range route query failed: $e');
       }
-    } catch (e) {
-      debugPrint('[FirestoreService] Supervisor fallback date range route query failed: $e');
     }
 
     return routesMap.values.toList();
@@ -241,6 +258,78 @@ class FirestoreService {
 
   Future<void> updateUser(String uid, Map<String, dynamic> data) async {
     await _firebaseService.firestore.collection('users').doc(uid).update(data);
+  }
+
+  /// Syncs a salesman's recent route, agile target, and agile submission documents
+  /// when their assigned supervisor changes (e.g. mid-day reassignment).
+  /// Scoped to the last 31 days to avoid reading/writing unbounded historical docs.
+  Future<void> syncSalesmanSupervisorAssignment({
+    required String salesmanId,
+    required String? supervisorId,
+  }) async {
+    if (supervisorId == null || supervisorId.isEmpty) return;
+
+    final firestore = _firebaseService.firestore;
+    final collections = ['routes', 'agile_targets', 'agile_submissions'];
+    final cutoff = DateTime.now().subtract(const Duration(days: 31));
+    final cutoffDate =
+        '${cutoff.year.toString().padLeft(4, '0')}-${cutoff.month.toString().padLeft(2, '0')}-${cutoff.day.toString().padLeft(2, '0')}';
+
+    try {
+      final snapshots = await Future.wait(
+        collections.map(
+          (col) => firestore
+              .collection(col)
+              .where('salesmanId', isEqualTo: salesmanId)
+              .where('date', isGreaterThanOrEqualTo: cutoffDate)
+              .get(),
+        ),
+      );
+
+      final docsToUpdate = <DocumentReference<Map<String, dynamic>>>[];
+      for (final snapshot in snapshots) {
+        for (final doc in snapshot.docs) {
+          if (doc.data()['supervisorId'] != supervisorId) {
+            docsToUpdate.add(doc.reference);
+          }
+        }
+      }
+
+      for (var i = 0; i < docsToUpdate.length; i += 400) {
+        final end = min(i + 400, docsToUpdate.length);
+        final batch = firestore.batch();
+        for (final ref in docsToUpdate.sublist(i, end)) {
+          batch.update(ref, {'supervisorId': supervisorId});
+        }
+        await batch.commit();
+      }
+    } catch (e) {
+      debugPrint(
+        '[FirestoreService] Failed to sync supervisorId for salesman $salesmanId: $e',
+      );
+    }
+  }
+
+  void _healSupervisorIdInBackground(
+    List<DocumentReference<Map<String, dynamic>>> refs,
+    String supervisorId,
+  ) {
+    if (refs.isEmpty) return;
+    Future(() async {
+      try {
+        final firestore = _firebaseService.firestore;
+        for (var i = 0; i < refs.length; i += 400) {
+          final end = min(i + 400, refs.length);
+          final batch = firestore.batch();
+          for (final ref in refs.sublist(i, end)) {
+            batch.update(ref, {'supervisorId': supervisorId});
+          }
+          await batch.commit();
+        }
+      } catch (_) {
+        // Ignore if current user role lacks write permission (e.g. read-only fallback).
+      }
+    });
   }
 
   Future<void> toggleUserActive(String uid, bool active) async {
@@ -322,17 +411,54 @@ class FirestoreService {
 
   Future<List<SalesRoute>> getRoutesByDate(
     String supervisorId,
-    String date,
-  ) async {
+    String date, {
+    List<String>? salesmanIds,
+  }) async {
+    final routesMap = <String, SalesRoute>{};
+    final teamIds = salesmanIds
+        ?.where((id) => id.isNotEmpty)
+        .toSet()
+        .toList();
+
+    // When explicit team salesmanIds are provided (e.g. Superuser/Manager preview),
+    // query directly by salesmanId in a single pass to handle mid-day supervisor
+    // reassignments without reading every route document twice.
+    if (teamIds != null && teamIds.isNotEmpty) {
+      try {
+        final staleRefs = <DocumentReference<Map<String, dynamic>>>[];
+        for (var i = 0; i < teamIds.length; i += 30) {
+          final batch = teamIds.sublist(i, min(i + 30, teamIds.length));
+          final teamSnapshot = await _firebaseService.firestore
+              .collection('routes')
+              .where('salesmanId', whereIn: batch)
+              .where('date', isEqualTo: date)
+              .get();
+
+          for (final doc in teamSnapshot.docs) {
+            routesMap[doc.id] = SalesRoute.fromMap(doc.data(), routeId: doc.id);
+            if (doc.data()['supervisorId'] != supervisorId) {
+              staleRefs.add(doc.reference);
+            }
+          }
+        }
+        _healSupervisorIdInBackground(staleRefs, supervisorId);
+        return routesMap.values.toList();
+      } catch (e) {
+        debugPrint('[FirestoreService] Team route query failed, falling back: $e');
+      }
+    }
+
     final querySnapshot = await _firebaseService.firestore
         .collection('routes')
         .where('supervisorId', isEqualTo: supervisorId)
         .where('date', isEqualTo: date)
         .get();
 
-    return querySnapshot.docs
-        .map((doc) => SalesRoute.fromMap(doc.data(), routeId: doc.id))
-        .toList();
+    for (final doc in querySnapshot.docs) {
+      routesMap[doc.id] = SalesRoute.fromMap(doc.data(), routeId: doc.id);
+    }
+
+    return routesMap.values.toList();
   }
 
   Future<List<SalesRoute>> getAllRoutesByDate(String date) async {
@@ -365,7 +491,42 @@ class FirestoreService {
     required String supervisorId,
     required String startDate,
     required String endDate,
+    List<String>? salesmanIds,
   }) async {
+    final routesMap = <String, SalesRoute>{};
+    final teamIds = salesmanIds
+        ?.where((id) => id.isNotEmpty)
+        .toSet()
+        .toList();
+
+    if (teamIds != null && teamIds.isNotEmpty) {
+      try {
+        final staleRefs = <DocumentReference<Map<String, dynamic>>>[];
+        for (var i = 0; i < teamIds.length; i += 30) {
+          final batch = teamIds.sublist(i, min(i + 30, teamIds.length));
+          final teamSnapshot = await _firebaseService.firestore
+              .collection('routes')
+              .where('salesmanId', whereIn: batch)
+              .where('date', isGreaterThanOrEqualTo: startDate)
+              .where('date', isLessThanOrEqualTo: endDate)
+              .get();
+
+          for (final doc in teamSnapshot.docs) {
+            routesMap[doc.id] = SalesRoute.fromMap(doc.data(), routeId: doc.id);
+            if (doc.data()['supervisorId'] != supervisorId) {
+              staleRefs.add(doc.reference);
+            }
+          }
+        }
+        _healSupervisorIdInBackground(staleRefs, supervisorId);
+        return routesMap.values.toList();
+      } catch (e) {
+        debugPrint(
+          '[FirestoreService] Team date-range route query failed, falling back: $e',
+        );
+      }
+    }
+
     final querySnapshot = await _firebaseService.firestore
         .collection('routes')
         .where('supervisorId', isEqualTo: supervisorId)
@@ -373,9 +534,11 @@ class FirestoreService {
         .where('date', isLessThanOrEqualTo: endDate)
         .get();
 
-    return querySnapshot.docs
-        .map((doc) => SalesRoute.fromMap(doc.data(), routeId: doc.id))
-        .toList();
+    for (final doc in querySnapshot.docs) {
+      routesMap[doc.id] = SalesRoute.fromMap(doc.data(), routeId: doc.id);
+    }
+
+    return routesMap.values.toList();
   }
 
   Future<List<SalesRoute>> getRoutesBySalesman(
@@ -602,18 +765,50 @@ class FirestoreService {
   Future<Map<String, AgileTarget>> getAgileTargetsForSupervisorByDate({
     required String supervisorId,
     required String date,
+    List<String>? salesmanIds,
   }) async {
+    final map = <String, AgileTarget>{};
+    final teamIds = salesmanIds
+        ?.where((id) => id.isNotEmpty)
+        .toSet()
+        .toList();
+
+    if (teamIds != null && teamIds.isNotEmpty) {
+      try {
+        final staleRefs = <DocumentReference<Map<String, dynamic>>>[];
+        for (var i = 0; i < teamIds.length; i += 30) {
+          final batch = teamIds.sublist(i, min(i + 30, teamIds.length));
+          final teamSnapshot = await _firebaseService.firestore
+              .collection('agile_targets')
+              .where('salesmanId', whereIn: batch)
+              .where('date', isEqualTo: date)
+              .get();
+          for (final doc in teamSnapshot.docs) {
+            final target = AgileTarget.fromMap(doc.data());
+            map[target.salesmanId] = target;
+            if (doc.data()['supervisorId'] != supervisorId) {
+              staleRefs.add(doc.reference);
+            }
+          }
+        }
+        _healSupervisorIdInBackground(staleRefs, supervisorId);
+        return map;
+      } catch (e) {
+        debugPrint('[FirestoreService] Team agile targets query failed, falling back: $e');
+      }
+    }
+
     final querySnapshot = await _firebaseService.firestore
         .collection('agile_targets')
         .where('supervisorId', isEqualTo: supervisorId)
         .where('date', isEqualTo: date)
         .get();
 
-    final map = <String, AgileTarget>{};
     for (final doc in querySnapshot.docs) {
       final target = AgileTarget.fromMap(doc.data());
       map[target.salesmanId] = target;
     }
+
     return map;
   }
 
@@ -727,18 +922,52 @@ class FirestoreService {
   Future<Map<String, AgileSubmission>> getAgileSubmissionsForSupervisorByDate({
     required String supervisorId,
     required String date,
+    List<String>? salesmanIds,
   }) async {
+    final map = <String, AgileSubmission>{};
+    final teamIds = salesmanIds
+        ?.where((id) => id.isNotEmpty)
+        .toSet()
+        .toList();
+
+    if (teamIds != null && teamIds.isNotEmpty) {
+      try {
+        final staleRefs = <DocumentReference<Map<String, dynamic>>>[];
+        for (var i = 0; i < teamIds.length; i += 30) {
+          final batch = teamIds.sublist(i, min(i + 30, teamIds.length));
+          final teamSnapshot = await _firebaseService.firestore
+              .collection('agile_submissions')
+              .where('salesmanId', whereIn: batch)
+              .where('date', isEqualTo: date)
+              .get();
+          for (final doc in teamSnapshot.docs) {
+            final submission = AgileSubmission.fromMap(doc.data());
+            map[submission.salesmanId] = submission;
+            if (doc.data()['supervisorId'] != supervisorId) {
+              staleRefs.add(doc.reference);
+            }
+          }
+        }
+        _healSupervisorIdInBackground(staleRefs, supervisorId);
+        return map;
+      } catch (e) {
+        debugPrint(
+          '[FirestoreService] Team agile submissions query failed, falling back: $e',
+        );
+      }
+    }
+
     final querySnapshot = await _firebaseService.firestore
         .collection('agile_submissions')
         .where('supervisorId', isEqualTo: supervisorId)
         .where('date', isEqualTo: date)
         .get();
 
-    final map = <String, AgileSubmission>{};
     for (final doc in querySnapshot.docs) {
       final submission = AgileSubmission.fromMap(doc.data());
       map[submission.salesmanId] = submission;
     }
+
     return map;
   }
 

@@ -26,6 +26,8 @@ class RouteProvider extends ChangeNotifier {
   final Set<String> _approximatePolylines = {};
   final Map<String, Color> _salesmanRouteColors = {};
   bool _isLoading = false;
+  bool _isAligningRoads = false;
+  int _roadAlignGeneration = 0;
   String? _error;
 
   List<SalesRoute> get routes => _routes;
@@ -55,9 +57,11 @@ class RouteProvider extends ChangeNotifier {
   }
 
   bool get isLoading => _isLoading;
+  bool get isAligningRoads => _isAligningRoads;
   String? get error => _error;
 
   Future<void> fetchRoutesByDate(String supervisorId, String date, {bool silent = false}) async {
+    final gen = ++_roadAlignGeneration;
     if (!silent && _routes.isEmpty) {
       _isLoading = true;
       _error = null;
@@ -67,16 +71,21 @@ class RouteProvider extends ChangeNotifier {
     try {
       _routes = await _firestoreService.getRoutesByDate(supervisorId, date);
       _assignDistinctSalesmanColors();
-      await _generatePolylines();
+      _seedImmediatePolylines();
     } catch (e) {
       _error = e.toString();
     } finally {
       _isLoading = false;
       notifyListeners();
     }
+
+    if (_error == null && _routes.isNotEmpty) {
+      _alignPolylinesInBackground(generation: gen);
+    }
   }
 
   Future<void> fetchAllRoutesByDate(String date, {bool silent = false}) async {
+    final gen = ++_roadAlignGeneration;
     if (!silent && _routes.isEmpty) {
       _isLoading = true;
       _error = null;
@@ -86,12 +95,16 @@ class RouteProvider extends ChangeNotifier {
     try {
       _routes = await _firestoreService.getAllRoutesByDate(date);
       _assignDistinctSalesmanColors();
-      await _generatePolylines();
+      _seedImmediatePolylines();
     } catch (e) {
       _error = e.toString();
     } finally {
       _isLoading = false;
       notifyListeners();
+    }
+
+    if (_error == null && _routes.isNotEmpty) {
+      _alignPolylinesInBackground(generation: gen);
     }
   }
 
@@ -100,6 +113,7 @@ class RouteProvider extends ChangeNotifier {
     String date, {
     bool silent = false,
   }) async {
+    final gen = ++_roadAlignGeneration;
     if (!silent && _routes.isEmpty) {
       _isLoading = true;
       _error = null;
@@ -112,22 +126,27 @@ class RouteProvider extends ChangeNotifier {
         date,
       );
       _assignDistinctSalesmanColors();
-      await _generatePolylines();
+      _seedImmediatePolylines();
     } catch (e) {
       _error = e.toString();
     } finally {
       _isLoading = false;
       notifyListeners();
     }
+
+    if (_error == null && _routes.isNotEmpty) {
+      _alignPolylinesInBackground(generation: gen);
+    }
   }
 
   Future<RouteRealignResult> realignRoutesToRoads() async {
-    _isLoading = true;
+    final gen = ++_roadAlignGeneration;
+    _isAligningRoads = true;
     _error = null;
     notifyListeners();
 
     try {
-      await _generatePolylines(forceRoadRefresh: true);
+      await _generatePolylines(generation: gen, forceRoadRefresh: true);
       final fallbackRoutes = _approximatePolylines.length;
       return RouteRealignResult(
         totalRoutes: _routes.length,
@@ -138,110 +157,185 @@ class RouteProvider extends ChangeNotifier {
       _error = e.toString();
       rethrow;
     } finally {
-      _isLoading = false;
+      if (gen == _roadAlignGeneration) {
+        _isAligningRoads = false;
+      }
       notifyListeners();
     }
   }
 
-  Future<void> _generatePolylines({bool forceRoadRefresh = false}) async {
+  List<LatLng> _extractFilteredAnchors(SalesRoute route) {
+    final sortedCps = route.sortedCheckpoints;
+
+    // Downsample checkpoints if oversized for fast OSRM road snapping
+    final List<RouteCheckpoint> effectiveCheckpoints;
+    if (sortedCps.length > 200) {
+      final step = (sortedCps.length / 200).ceil();
+      effectiveCheckpoints = <RouteCheckpoint>[];
+      for (var i = 0; i < sortedCps.length; i += step) {
+        effectiveCheckpoints.add(sortedCps[i]);
+      }
+      if (sortedCps.isNotEmpty && effectiveCheckpoints.last != sortedCps.last) {
+        effectiveCheckpoints.add(sortedCps.last);
+      }
+    } else {
+      effectiveCheckpoints = sortedCps;
+    }
+
+    final rawAnchors = <LatLng>[];
+    if (route.hasFirstCall) {
+      rawAnchors.add(LatLng(route.first.lat, route.first.lon));
+    }
+    for (final checkpoint in effectiveCheckpoints) {
+      rawAnchors.add(LatLng(checkpoint.lat, checkpoint.lon));
+    }
+    if (route.hasLastCall) {
+      rawAnchors.add(LatLng(route.last.lat, route.last.lon));
+    }
+
+    return _filterTeleportSpikes(_filterIndoorJitterAnchors(rawAnchors));
+  }
+
+  /// Phase 1: Immediately populates [_routePolylines] from raw filtered GPS
+  /// checkpoints so the map, markers, and paths render without waiting on OSRM.
+  void _seedImmediatePolylines() {
     _routePolylines.clear();
     _approximatePolylines.clear();
 
     for (final route in _routes) {
-      final sortedCps = route.sortedCheckpoints;
-      
-      // Downsample checkpoints if oversized for fast OSRM road snapping
-      final List<RouteCheckpoint> effectiveCheckpoints;
-      if (sortedCps.length > 200) {
-        final step = (sortedCps.length / 200).ceil();
-        effectiveCheckpoints = <RouteCheckpoint>[];
-        for (var i = 0; i < sortedCps.length; i += step) {
-          effectiveCheckpoints.add(sortedCps[i]);
-        }
-        if (sortedCps.isNotEmpty && effectiveCheckpoints.last != sortedCps.last) {
-          effectiveCheckpoints.add(sortedCps.last);
-        }
-      } else {
-        effectiveCheckpoints = sortedCps;
+      final anchors = _extractFilteredAnchors(route);
+      _routePolylines[route.routeId] = [
+        RouteSegment(points: anchors, isApproximate: true),
+      ];
+      _approximatePolylines.add(route.routeId);
+    }
+  }
+
+  Future<void> _alignPolylinesInBackground({required int generation}) async {
+    _isAligningRoads = true;
+    notifyListeners();
+
+    try {
+      await _generatePolylines(generation: generation);
+    } finally {
+      if (generation == _roadAlignGeneration) {
+        _isAligningRoads = false;
+        notifyListeners();
       }
+    }
+  }
 
-      final rawAnchors = <LatLng>[];
+  Future<void> _generatePolylines({
+    int? generation,
+    bool forceRoadRefresh = false,
+  }) async {
+    final activeGen = generation ?? _roadAlignGeneration;
+    final routesSnapshot = List<SalesRoute>.from(_routes);
+    const concurrency = 3;
 
-      if (route.hasFirstCall) {
-        rawAnchors.add(LatLng(route.first.lat, route.first.lon));
-      }
+    for (var i = 0; i < routesSnapshot.length; i += concurrency) {
+      if (activeGen != _roadAlignGeneration) return;
+      final batch = routesSnapshot.sublist(
+        i,
+        min(i + concurrency, routesSnapshot.length),
+      );
+      await Future.wait(
+        batch.map((route) => _snapSingleRoute(route, activeGen)),
+      );
+      if (activeGen != _roadAlignGeneration) return;
+      notifyListeners();
+    }
+  }
 
-      for (final checkpoint in effectiveCheckpoints) {
-        rawAnchors.add(LatLng(checkpoint.lat, checkpoint.lon));
-      }
+  Future<void> _snapSingleRoute(SalesRoute route, int activeGen) async {
+    final anchors = _extractFilteredAnchors(route);
+    if (anchors.length < 2) {
+      if (activeGen != _roadAlignGeneration) return;
+      _routePolylines[route.routeId] = [
+        RouteSegment(points: anchors, isApproximate: true),
+      ];
+      _approximatePolylines.add(route.routeId);
+      return;
+    }
 
-      if (route.hasLastCall) {
-        rawAnchors.add(LatLng(route.last.lat, route.last.lon));
-      }
+    const distanceCalc = Distance();
+    final roadWaypoints = <LatLng>[anchors.first];
+    var isApproximate = false;
 
-      // Filter micro-movement GPS bounces (<25m radius) while stationary inside establishments/stores
-      // AND filter V-shaped teleport spikes (>25km jump away and back) from stale checkpoints
-      final anchors = _filterTeleportSpikes(_filterIndoorJitterAnchors(rawAnchors));
+    // Batch consecutive waypoints (up to 25 per OSRM request) to avoid N-1 sequential HTTP calls.
+    const maxBatchWaypoints = 25;
+    var index = 0;
 
-      if (anchors.length < 2) {
-        _routePolylines[route.routeId] = [
-          RouteSegment(points: anchors, isApproximate: true),
-        ];
+    while (index < anchors.length - 1) {
+      if (activeGen != _roadAlignGeneration) return;
+
+      final start = anchors[index];
+      final next = anchors[index + 1];
+      final firstStepMeters = distanceCalc.as(LengthUnit.Meter, start, next);
+
+      if (firstStepMeters < 15) {
+        roadWaypoints.add(next);
+        index++;
         continue;
       }
 
-      // Real-time client OSRM road snapping with detour validation
-      final distanceCalc = const Distance();
-      final roadWaypoints = <LatLng>[anchors.first];
-      var isApproximate = false;
+      // Build a multi-waypoint chunk starting at index
+      final chunk = <LatLng>[start];
+      var chunkStraightMeters = 0.0;
+      var cursor = index;
 
-      for (var i = 0; i < anchors.length - 1; i++) {
-        final start = anchors[i];
-        final end = anchors[i + 1];
-        final straightMeters = distanceCalc.as(LengthUnit.Meter, start, end);
-
-        // If points are very close (less than 15m), direct connection is sufficient
-        if (straightMeters < 15) {
-          roadWaypoints.add(end);
-          continue;
+      while (cursor < anchors.length - 1 && chunk.length < maxBatchWaypoints) {
+        final a = anchors[cursor];
+        final b = anchors[cursor + 1];
+        final stepMeters = distanceCalc.as(LengthUnit.Meter, a, b);
+        if (stepMeters < 15 && chunk.length > 1) {
+          break;
         }
+        chunk.add(b);
+        chunkStraightMeters += stepMeters;
+        cursor++;
+      }
 
-        try {
-          final osrmSegment = await _routingService.getRoute(start, end);
-          if (osrmSegment.length >= 2) {
-            double osrmMeters = 0.0;
-            for (var k = 0; k < osrmSegment.length - 1; k++) {
-              osrmMeters += distanceCalc.as(
-                LengthUnit.Meter,
-                osrmSegment[k],
-                osrmSegment[k + 1],
-              );
-            }
-
-            // Accept OSRM road snapping if path is reasonable (<= 5.0x straight distance or under 500m)
-            // Ensures routes around city blocks (like Cabanatuan Central Terminal) follow public roads!
-            if (osrmMeters <= straightMeters * 5.0 || straightMeters < 500) {
-              roadWaypoints.addAll(osrmSegment.skip(1));
-            } else {
-              roadWaypoints.add(end);
-            }
-          } else {
-            roadWaypoints.add(end);
+      try {
+        final osrmSegment = await _routingService.getRouteForWaypoints(chunk);
+        if (osrmSegment.length >= 2) {
+          var osrmMeters = 0.0;
+          for (var k = 0; k < osrmSegment.length - 1; k++) {
+            osrmMeters += distanceCalc.as(
+              LengthUnit.Meter,
+              osrmSegment[k],
+              osrmSegment[k + 1],
+            );
           }
-        } catch (_) {
-          isApproximate = true;
-          roadWaypoints.add(end);
+
+          if (osrmMeters <= chunkStraightMeters * 5.0 ||
+              chunkStraightMeters < 500) {
+            roadWaypoints.addAll(osrmSegment.skip(1));
+          } else {
+            roadWaypoints.addAll(chunk.skip(1));
+          }
+        } else {
+          roadWaypoints.addAll(chunk.skip(1));
         }
+      } catch (_) {
+        isApproximate = true;
+        roadWaypoints.addAll(chunk.skip(1));
       }
 
-      final finalPoints = roadWaypoints.length >= 2 ? roadWaypoints : anchors;
-      _routePolylines[route.routeId] = [
-        RouteSegment(points: finalPoints, isApproximate: isApproximate),
-      ];
+      index = cursor;
+    }
 
-      if (isApproximate) {
-        _approximatePolylines.add(route.routeId);
-      }
+    if (activeGen != _roadAlignGeneration) return;
+
+    final finalPoints = roadWaypoints.length >= 2 ? roadWaypoints : anchors;
+    _routePolylines[route.routeId] = [
+      RouteSegment(points: finalPoints, isApproximate: isApproximate),
+    ];
+
+    if (isApproximate) {
+      _approximatePolylines.add(route.routeId);
+    } else {
+      _approximatePolylines.remove(route.routeId);
     }
   }
 

@@ -271,7 +271,9 @@ class SalesRoute {
     };
   }
 
-  List<RouteCheckpoint> get sortedCheckpoints {
+  late final List<RouteCheckpoint> sortedCheckpoints = _computeSortedCheckpoints();
+
+  List<RouteCheckpoint> _computeSortedCheckpoints() {
     final ordered = checkpoints.where((cp) {
       if (date.isEmpty) return true;
       final cpDateStr =
@@ -279,7 +281,7 @@ class SalesRoute {
       return cpDateStr == date;
     }).toList();
     ordered.sort((a, b) => a.timestamp.compareTo(b.timestamp));
-    return ordered;
+    return List.unmodifiable(ordered);
   }
 
   // Point-to-point great-circle distance sum including first call, checkpoints, and last call (if any).
@@ -317,7 +319,10 @@ class SalesRoute {
   double get distanceKm => distance ?? estimatedDistanceKm;
 
   // Downsample checkpoints for map marker rendering when route has thousands of points
-  List<RouteCheckpoint> get downsampledMapCheckpoints {
+  late final List<RouteCheckpoint> downsampledMapCheckpoints =
+      _computeDownsampledMapCheckpoints();
+
+  List<RouteCheckpoint> _computeDownsampledMapCheckpoints() {
     final sorted = sortedCheckpoints;
     if (sorted.length <= 150) return sorted;
     final step = (sorted.length / 150).ceil();
@@ -328,7 +333,7 @@ class SalesRoute {
     if (sorted.isNotEmpty && result.last != sorted.last) {
       result.add(sorted.last);
     }
-    return result;
+    return List.unmodifiable(result);
   }
 
   static double _haversineKm(

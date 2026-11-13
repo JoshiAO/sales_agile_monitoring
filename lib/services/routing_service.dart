@@ -13,21 +13,37 @@ class RoutingService {
 
   RoutingService._internal();
 
-  // In-memory segment cache: keyed on rounded lat/lon pairs.
-  // Caps at 200 entries to bound memory usage in long sessions.
+  // In-memory segment cache: keyed on rounded lat/lon waypoint sequences.
+  // Caps at 300 entries to bound memory usage in long sessions.
   final _segmentCache = <String, List<LatLng>>{};
-  static const _segmentCacheMaxSize = 200;
+  static const _segmentCacheMaxSize = 300;
 
   String _cacheKey(LatLng start, LatLng end) {
     String fmt(double v) => v.toStringAsFixed(5);
     return '${fmt(start.latitude)},${fmt(start.longitude)}-${fmt(end.latitude)},${fmt(end.longitude)}';
   }
 
+  String _waypointsCacheKey(List<LatLng> waypoints) {
+    String fmt(double v) => v.toStringAsFixed(5);
+    return waypoints
+        .map((p) => '${fmt(p.latitude)},${fmt(p.longitude)}')
+        .join(';');
+  }
+
+  void _putCache(String key, List<LatLng> route) {
+    if (route.isEmpty) return;
+    if (_segmentCache.length >= _segmentCacheMaxSize &&
+        !_segmentCache.containsKey(key)) {
+      _segmentCache.remove(_segmentCache.keys.first);
+    }
+    _segmentCache[key] = route;
+  }
+
   final Dio _dio = Dio(
     BaseOptions(
-      connectTimeout: const Duration(seconds: 15),
-      receiveTimeout: const Duration(seconds: 20),
-      sendTimeout: const Duration(seconds: 15),
+      connectTimeout: const Duration(seconds: 8),
+      receiveTimeout: const Duration(seconds: 10),
+      sendTimeout: const Duration(seconds: 8),
       headers: const {
         'Accept': 'application/json',
         'User-Agent': 'compact_sales_monitoring/1.0',
@@ -43,13 +59,7 @@ class RoutingService {
       return _segmentCache[key]!;
     }
     final route = await getRouteForWaypoints([start, end]);
-    if (route.isNotEmpty) {
-      // Evict oldest entry if cache is full.
-      if (_segmentCache.length >= _segmentCacheMaxSize) {
-        _segmentCache.remove(_segmentCache.keys.first);
-      }
-      _segmentCache[key] = route;
-    }
+    _putCache(key, route);
     return route;
   }
 
@@ -78,76 +88,80 @@ class RoutingService {
       return dedupedWaypoints;
     }
 
+    final cacheKey = _waypointsCacheKey(dedupedWaypoints);
+    if (_segmentCache.containsKey(cacheKey)) {
+      return _segmentCache[cacheKey]!;
+    }
+
     final orsKey = AppConstants.openRouteServiceApiKey.trim();
 
     if (orsKey.isNotEmpty && orsKey != 'YOUR_ORS_API_KEY_HERE') {
-      for (var attempt = 0; attempt < 2; attempt++) {
-        try {
-          final orsResponse = await _dio.post<Map<String, dynamic>>(
-            '${AppConstants.openRouteServiceBaseUrl}/v2/directions/driving-car/geojson',
-            options: Options(
-              headers: {
-                'Authorization': orsKey,
-                'Content-Type': 'application/json',
-              },
-            ),
-            data: {
-              'coordinates': dedupedWaypoints
-                  .map((point) => [point.longitude, point.latitude])
-                  .toList(),
+      try {
+        final orsResponse = await _dio.post<Map<String, dynamic>>(
+          '${AppConstants.openRouteServiceBaseUrl}/v2/directions/driving-car/geojson',
+          options: Options(
+            headers: {
+              'Authorization': orsKey,
+              'Content-Type': 'application/json',
             },
-          );
+          ),
+          data: {
+            'coordinates': dedupedWaypoints
+                .map((point) => [point.longitude, point.latitude])
+                .toList(),
+          },
+        );
 
-          if (orsResponse.statusCode == 200 && orsResponse.data != null) {
-            final features = orsResponse.data!['features'] as List?;
-            if (features != null && features.isNotEmpty) {
-              final geometry =
-                  features.first['geometry'] as Map<String, dynamic>?;
-              final coordinates = geometry?['coordinates'] as List?;
-              if (coordinates != null && coordinates.isNotEmpty) {
-                return coordinates
-                    .whereType<List>()
-                    .map(
-                      (coord) => LatLng(
-                        (coord[1] as num).toDouble(),
-                        (coord[0] as num).toDouble(),
-                      ),
-                    )
-                    .toList();
-              }
+        if (orsResponse.statusCode == 200 && orsResponse.data != null) {
+          final features = orsResponse.data!['features'] as List?;
+          if (features != null && features.isNotEmpty) {
+            final geometry =
+                features.first['geometry'] as Map<String, dynamic>?;
+            final coordinates = geometry?['coordinates'] as List?;
+            if (coordinates != null && coordinates.isNotEmpty) {
+              final resolved = coordinates
+                  .whereType<List<dynamic>>()
+                  .map(
+                    (coord) => LatLng(
+                      (coord[1] as num).toDouble(),
+                      (coord[0] as num).toDouble(),
+                    ),
+                  )
+                  .toList();
+              _putCache(cacheKey, resolved);
+              return resolved;
             }
           }
-        } catch (e) {
-          developer.log(
-            'OpenRouteService failed (attempt ${attempt + 1}): $e',
-            name: 'RoutingService',
-          );
         }
+      } catch (e) {
+        developer.log(
+          'OpenRouteService failed: $e',
+          name: 'RoutingService',
+        );
       }
     }
 
-    // OSRM-compatible fallback chain.
+    // OSRM-compatible fallback chain (single attempt per backend for fast failover).
     const osrmBackends = <String>[
       'https://router.project-osrm.org',
       'https://routing.openstreetmap.de/routed-car',
     ];
 
     for (final backend in osrmBackends) {
-      for (var attempt = 0; attempt < 2; attempt++) {
-        try {
-          final route = await _fetchOsrmLikeRoute(
-            backendBaseUrl: backend,
-            waypoints: dedupedWaypoints,
-          );
-          if (route.isNotEmpty) {
-            return route;
-          }
-        } catch (e) {
-          developer.log(
-            'OSRM backend failed ($backend, attempt ${attempt + 1}): $e',
-            name: 'RoutingService',
-          );
+      try {
+        final route = await _fetchOsrmLikeRoute(
+          backendBaseUrl: backend,
+          waypoints: dedupedWaypoints,
+        );
+        if (route.isNotEmpty) {
+          _putCache(cacheKey, route);
+          return route;
         }
+      } catch (e) {
+        developer.log(
+          'OSRM backend failed ($backend): $e',
+          name: 'RoutingService',
+        );
       }
     }
 

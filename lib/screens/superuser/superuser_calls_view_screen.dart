@@ -117,13 +117,13 @@ class _SuperuserCallsViewScreenState extends State<SuperuserCallsViewScreen> {
 
   Future<_CallsViewData> _loadData({bool forceRefresh = false}) async {
     final dateStr = DateFormat('yyyy-MM-dd').format(widget.selectedDate);
-    final results = await Future.wait([
-      _getTeam(forceRefresh: forceRefresh),
-      _firestoreService.getRoutesByDate(widget.supervisor.uid, dateStr),
-    ]);
-
-    final team = results[0] as List<AppUser>;
-    final routes = results[1] as List<SalesRoute>;
+    final team = await _getTeam(forceRefresh: forceRefresh);
+    final salesmanIds = team.map((u) => u.uid).toList();
+    final routes = await _firestoreService.getRoutesByDate(
+      widget.supervisor.uid,
+      dateStr,
+      salesmanIds: salesmanIds,
+    );
 
     final routesBySalesman = <String, SalesRoute>{};
     for (final route in routes) {
@@ -142,17 +142,14 @@ class _SuperuserCallsViewScreenState extends State<SuperuserCallsViewScreen> {
     final startDateStr = dateFmt.format(weekDays.first);
     final endDateStr = dateFmt.format(weekDays.last);
 
-    final results = await Future.wait([
-      _getTeam(forceRefresh: forceRefresh),
-      _firestoreService.getRoutesForSupervisorByDateRange(
-        supervisorId: widget.supervisor.uid,
-        startDate: startDateStr,
-        endDate: endDateStr,
-      ),
-    ]);
-
-    final team = results[0] as List<AppUser>;
-    final routes = results[1] as List<SalesRoute>;
+    final team = await _getTeam(forceRefresh: forceRefresh);
+    final salesmanIds = team.map((u) => u.uid).toList();
+    final routes = await _firestoreService.getRoutesForSupervisorByDateRange(
+      supervisorId: widget.supervisor.uid,
+      startDate: startDateStr,
+      endDate: endDateStr,
+      salesmanIds: salesmanIds,
+    );
 
     // Keyed by salesmanId -> ('yyyy-MM-dd' -> best SalesRoute for that day)
     final routesBySalesmanByDate = <String, Map<String, SalesRoute>>{};

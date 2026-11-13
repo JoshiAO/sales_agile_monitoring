@@ -146,5 +146,14 @@ class UserProvisioningService {
       'role': role.toString().split('.').last,
       'supervisorId': role == UserRole.salesman ? supervisorId : null,
     });
+
+    if (role == UserRole.salesman &&
+        supervisorId != null &&
+        supervisorId.isNotEmpty) {
+      await _firestoreService.syncSalesmanSupervisorAssignment(
+        salesmanId: uid,
+        supervisorId: supervisorId,
+      );
+    }
   }
 }
