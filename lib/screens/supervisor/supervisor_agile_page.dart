@@ -603,7 +603,7 @@ class _SupervisorAgilePageState extends State<SupervisorAgilePage> {
                   final columns = _cardsPerRow(constraints.maxWidth);
                   const spacing = 12.0;
                   final cardExtent = _viewMode == _SupervisorAgileViewMode.wide
-                      ? 294.0
+                      ? 308.0
                       : 118.0;
 
                   return ListView(
@@ -934,56 +934,53 @@ class _SupervisorSalesmanAgileCard extends StatelessWidget {
                 },
               ),
               const SizedBox(height: 10),
-              Row(
-                children: [
-                  Expanded(
-                    child: LayoutBuilder(
-                      builder: (context, constraints) {
-                        final stacked = constraints.maxWidth < 560;
+              LayoutBuilder(
+                builder: (context, constraints) {
+                  final stacked = constraints.maxWidth < 240;
 
-                        final productiveBox = _MetricWithIndexBox(
-                          icon: Icons.storefront,
-                          iconColor: Colors.blue.shade700,
-                          label: 'Productive Calls Target / Actual',
-                          value: '$productiveTarget / $productiveActual',
-                          indexValue: productiveIndex,
-                        );
-                        final sttBox = _MetricWithIndexBox(
-                          icon: Icons.payments_outlined,
-                          iconColor: Colors.teal.shade700,
-                          label: 'STT Target / Actual',
-                          value:
-                              '${currency.format(sttTarget)} / ${currency.format(sttActual)}',
-                          indexValue: sttIndex,
-                        );
+                  final productiveBox = _MetricWithIndexBox(
+                    icon: Icons.storefront,
+                    iconColor: Colors.blue.shade700,
+                    label: 'Prod. Calls Target / Actual',
+                    value: '$productiveTarget / $productiveActual',
+                    indexValue: productiveIndex,
+                  );
+                  final sttBox = _MetricWithIndexBox(
+                    icon: Icons.payments_outlined,
+                    iconColor: Colors.teal.shade700,
+                    label: 'STT Target / Actual',
+                    value:
+                        '${currency.format(sttTarget)} / ${currency.format(sttActual)}',
+                    indexValue: sttIndex,
+                  );
 
-                        if (stacked) {
-                          return Column(
-                            children: [
-                              productiveBox,
-                              const SizedBox(height: 10),
-                              sttBox,
-                            ],
-                          );
-                        }
+                  if (stacked) {
+                    return Column(
+                      children: [
+                        productiveBox,
+                        const SizedBox(height: 10),
+                        sttBox,
+                      ],
+                    );
+                  }
 
-                        return Row(
-                          children: [
-                            Expanded(child: productiveBox),
-                            const SizedBox(width: 10),
-                            Expanded(child: sttBox),
-                          ],
-                        );
-                      },
+                  return IntrinsicHeight(
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        Expanded(child: productiveBox),
+                        const SizedBox(width: 10),
+                        Expanded(child: sttBox),
+                      ],
                     ),
-                  ),
-                ],
+                  );
+                },
               ),
             ],
             if (mode == _SupervisorAgileViewMode.compact) ...[
               LayoutBuilder(
                 builder: (context, constraints) {
-                  final stacked = constraints.maxWidth < 460;
+                  final stacked = constraints.maxWidth < 240;
 
                   final productiveIcon = _CompactIndexIcon(
                     icon: Icons.storefront,
@@ -1060,6 +1057,8 @@ class _MetricWithIndexBox extends StatelessWidget {
                 Expanded(
                   child: Text(
                     label,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
                     style: Theme.of(context).textTheme.bodySmall,
                   ),
                 ),
@@ -1068,6 +1067,8 @@ class _MetricWithIndexBox extends StatelessWidget {
             const SizedBox(height: 4),
             Text(
               value,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
               style: Theme.of(
                 context,
               ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
@@ -1075,6 +1076,8 @@ class _MetricWithIndexBox extends StatelessWidget {
             const SizedBox(height: 2),
             Text(
               'Index ${indexValue.toStringAsFixed(2)}x • $percent%',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
               style: Theme.of(context).textTheme.bodySmall?.copyWith(
                 color: Colors.blueGrey.shade700,
                 fontWeight: FontWeight.w600,
