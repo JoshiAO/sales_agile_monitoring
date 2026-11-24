@@ -17,6 +17,8 @@ const ACTIVATION_APP_NAME = 'activation-project';
 const ACTIVATION_COLLECTION = 'company_codes';
 const ACTIVATION_LEASE_DAYS = 7;
 const FCM_MAX_RETRIES = 4;
+const RATE_LIMIT_WINDOW_MS = 10 * 60 * 1000;
+const RATE_LIMIT_MAX_ATTEMPTS = 15;
 
 let activationFirestore;
 
@@ -31,6 +33,46 @@ function getActivationFirestore() {
 
   activationFirestore = admin.firestore(activationApp);
   return activationFirestore;
+}
+
+function getClientIpHash(request) {
+  const rawReq = request.rawRequest;
+  const forwarded = rawReq?.headers?.['x-forwarded-for'];
+  const ip = (Array.isArray(forwarded) ? forwarded[0] : forwarded)?.split(',')[0]?.trim() ||
+    rawReq?.ip ||
+    'unknown';
+  return crypto.createHash('sha256').update(ip).digest('hex').slice(0, 24);
+}
+
+async function enforceActivationRateLimit(request, actionName) {
+  const ipHash = getClientIpHash(request);
+  const docRef = admin.firestore().collection('_activation_rate_limits').doc(`${actionName}_${ipHash}`);
+  const now = Date.now();
+
+  await admin.firestore().runTransaction(async (tx) => {
+    const snap = await tx.get(docRef);
+    const data = snap.exists ? snap.data() || {} : {};
+    const windowStart = typeof data.windowStart === 'number' ? data.windowStart : 0;
+    const attempts = typeof data.attempts === 'number' ? data.attempts : 0;
+
+    if (now - windowStart > RATE_LIMIT_WINDOW_MS) {
+      tx.set(docRef, { windowStart: now, attempts: 1, updatedAt: admin.firestore.FieldValue.serverTimestamp() });
+      return;
+    }
+
+    if (attempts >= RATE_LIMIT_MAX_ATTEMPTS) {
+      throw new HttpsError(
+        'resource-exhausted',
+        'Too many activation attempts. Please wait a few minutes and try again.'
+      );
+    }
+
+    tx.set(
+      docRef,
+      { windowStart, attempts: attempts + 1, updatedAt: admin.firestore.FieldValue.serverTimestamp() },
+      { merge: true }
+    );
+  });
 }
 
 function evaluateActivationPayload(payload) {
@@ -110,10 +152,11 @@ exports.validateCompanyCode = onCall(
   {
     timeoutSeconds: 30,
     memory: '256MiB',
-    // Rate-limit: max 5 concurrent calls per instance to mitigate brute-force
     concurrency: 5,
   },
   async (request) => {
+    await enforceActivationRateLimit(request, 'validate');
+
     const data = request.data;
     const rawCode = (data?.companyCode || '').toString().trim().toUpperCase();
 
@@ -148,7 +191,9 @@ exports.validateCompanyCode = onCall(
         leaseDurationDays: ACTIVATION_LEASE_DAYS,
       };
     } catch (error) {
-      throw new HttpsError('internal', error.message || 'Failed to validate company code.');
+      if (error instanceof HttpsError) throw error;
+      console.error('validateCompanyCode failed:', error);
+      throw new HttpsError('internal', 'Failed to validate company code.');
     }
   }
 );
@@ -156,6 +201,8 @@ exports.validateCompanyCode = onCall(
 exports.refreshActivationLease = onCall(
   { timeoutSeconds: 30, memory: '256MiB', concurrency: 5 },
   async (request) => {
+    await enforceActivationRateLimit(request, 'refresh');
+
     const data = request.data;
     const leaseKey = (data?.leaseKey || '').toString().trim();
 
@@ -184,7 +231,9 @@ exports.refreshActivationLease = onCall(
         leaseDurationDays: ACTIVATION_LEASE_DAYS,
       };
     } catch (error) {
-      throw new HttpsError('internal', error.message || 'Failed to refresh activation lease.');
+      if (error instanceof HttpsError) throw error;
+      console.error('refreshActivationLease failed:', error);
+      throw new HttpsError('internal', 'Failed to refresh activation lease.');
     }
   }
 );
@@ -198,10 +247,10 @@ exports.adminUpdateUserCredentials = onCall(
 
     const callerUid = request.auth.uid;
     const callerDoc = await admin.firestore().collection('users').doc(callerUid).get();
-    const callerRole = callerDoc.data()?.role;
+    const callerData = callerDoc.data() || {};
 
-    if (callerRole !== 'superuser') {
-      throw new HttpsError('permission-denied', 'Only superusers can update credentials.');
+    if (!callerDoc.exists || callerData.active !== true || callerData.role !== 'superuser') {
+      throw new HttpsError('permission-denied', 'Only active superusers can update credentials.');
     }
 
     const data = request.data;
@@ -211,6 +260,20 @@ exports.adminUpdateUserCredentials = onCall(
 
     if (!uid) {
       throw new HttpsError('invalid-argument', 'uid is required.');
+    }
+
+    const targetDoc = await admin.firestore().collection('users').doc(uid).get();
+    if (!targetDoc.exists) {
+      throw new HttpsError('not-found', 'Target user was not found.');
+    }
+
+    const callerCompanyId = callerData.company_ID;
+    const targetCompanyId = targetDoc.data()?.company_ID;
+    if (!callerCompanyId || targetCompanyId !== callerCompanyId) {
+      throw new HttpsError(
+        'permission-denied',
+        'You can only manage credentials for users in your own company.'
+      );
     }
 
     const updates = {};
@@ -235,7 +298,8 @@ exports.adminUpdateUserCredentials = onCall(
       await admin.auth().updateUser(uid, updates);
       return { success: true };
     } catch (error) {
-      throw new HttpsError('internal', error.message || 'Failed to update auth user.');
+      console.error('adminUpdateUserCredentials failed:', { uid, error });
+      throw new HttpsError('internal', 'Failed to update auth user.');
     }
   }
 );
@@ -261,11 +325,6 @@ exports.notifyLogoutRequestResolution = onDocumentUpdated(
       return null;
     }
 
-    const token = after.fcmToken;
-    if (!token) {
-      return null;
-    }
-
     const title = afterStatus === 'approved'
       ? 'Logout Request Approved'
       : 'Logout Request Rejected';
@@ -279,6 +338,7 @@ exports.notifyLogoutRequestResolution = onDocumentUpdated(
       userId: event.params.userId,
     };
 
+    // Always persist the in-app notification even if the user has no FCM token.
     await event.data.after.ref.collection('notifications').add({
       title,
       message: body,
@@ -292,6 +352,11 @@ exports.notifyLogoutRequestResolution = onDocumentUpdated(
         resolvedAt: after.logoutResolvedAt || null,
       },
     });
+
+    const token = after.fcmToken;
+    if (!token) {
+      return null;
+    }
 
     try {
       await sendFcmWithRetry({

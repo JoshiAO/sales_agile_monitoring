@@ -88,7 +88,7 @@ class StorageService {
   Future<String> uploadProfilePic(File file, String userId) async {
     return uploadImage(
       file: file,
-      folder: 'profile_pictures',
+      folder: 'profile_pictures/$userId',
       filename: '$userId.jpg',
     );
   }

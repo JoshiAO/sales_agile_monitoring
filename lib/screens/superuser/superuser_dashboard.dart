@@ -7,7 +7,6 @@ import 'package:intl/intl.dart';
 import 'package:compact_sales_monitoring/models/user_model.dart';
 import 'package:compact_sales_monitoring/providers/auth_provider.dart';
 import 'package:compact_sales_monitoring/providers/route_provider.dart';
-import 'package:compact_sales_monitoring/services/archive_service.dart';
 import 'package:compact_sales_monitoring/services/firestore_service.dart';
 import 'package:compact_sales_monitoring/widgets/date_selector_widget.dart';
 import 'package:compact_sales_monitoring/widgets/route_detail_modal.dart';
@@ -16,6 +15,9 @@ import 'package:compact_sales_monitoring/constants/app_constants.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:compact_sales_monitoring/models/route_model.dart';
+import 'package:compact_sales_monitoring/models/transaction_model.dart';
+import 'package:compact_sales_monitoring/widgets/transaction_map_marker.dart';
+import 'package:compact_sales_monitoring/widgets/web_transaction_detail_modal.dart';
 
 class SuperUserDashboard extends StatefulWidget {
   const SuperUserDashboard({super.key});
@@ -29,19 +31,19 @@ class _SuperUserDashboardState extends State<SuperUserDashboard> {
   static const double _checkpointEndpointOverlapMeters = 85;
   late DateTime _selectedDate;
   final FirestoreService _firestoreService = FirestoreService();
-  final ArchiveService _archiveService = ArchiveService();
   late MapController _mapController;
   final Map<String, AppUser> _salesmenCache = {};
   final Map<String, Future<AppUser?>> _salesmenFutureCache = {};
-  bool _isArchiving = false;
   bool _showLegend = false;
   bool _showRouteStatusPanel = true;
   bool _showRouteLabels = true;
   bool _showFirstCallMarkers = true;
   bool _showLastCallMarkers = true;
+  bool _showTransactionMarkers = true;
   double _flagPinScale = 1.0;
   double _currentZoom = 12;
   String? _selectedCheckpointId;
+  String? _selectedTransactionId;
   String? _selectedCurrentLocationRouteId;
   String? _focusedRouteId;
   final ScrollController _timelineScrollController = ScrollController();
@@ -105,102 +107,6 @@ class _SuperUserDashboardState extends State<SuperUserDashboard> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Route realignment failed: $error')),
       );
-    }
-  }
-
-  Future<void> _showArchiveCompleteDialog(ArchiveResult result) async {
-    final dateFolderLabel = result.dateFolders.length <= 3
-        ? result.dateFolders.join(', ')
-        : '${result.dateFolders.first}, ${result.dateFolders[1]}, +${result.dateFolders.length - 2} more';
-
-    await showDialog<void>(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('Archive Complete'),
-        content: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text('Date range: ${result.startDate} to ${result.endDate}'),
-              const SizedBox(height: 8),
-              Text('Routes archived: ${result.routeCount}'),
-              Text('Images exported: ${result.imageCount}'),
-              const SizedBox(height: 12),
-              const Text(
-                'Saved ZIP path',
-                style: TextStyle(fontWeight: FontWeight.w700),
-              ),
-              const SizedBox(height: 4),
-              SelectableText(result.zipPath),
-              const SizedBox(height: 12),
-              const Text(
-                'ZIP structure',
-                style: TextStyle(fontWeight: FontWeight.w700),
-              ),
-              const SizedBox(height: 4),
-              Text('- ${result.workbookFileName}'),
-              Text('- Date folders: $dateFolderLabel'),
-              const Text(
-                '- Inside each date: salesman folders with first/last call images',
-              ),
-            ],
-          ),
-        ),
-        actions: [
-          if (!kIsWeb)
-            TextButton(
-              onPressed: () async {
-                await Clipboard.setData(ClipboardData(text: result.zipPath));
-                if (!mounted) return;
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Archive path copied')),
-                );
-              },
-              child: const Text('Copy Path'),
-            ),
-          FilledButton(
-            onPressed: () => Navigator.of(dialogContext).pop(),
-            child: const Text('Close'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Future<void> _openArchivePicker() async {
-    if (_isArchiving) return;
-
-    final now = DateTime.now();
-    final pickedRange = await showDateRangePicker(
-      context: context,
-      firstDate: DateTime(now.year - 5),
-      lastDate: now,
-      initialDateRange: DateTimeRange(start: _selectedDate, end: _selectedDate),
-      helpText: 'Archive routes',
-      saveText: 'Archive',
-    );
-
-    if (pickedRange == null || !mounted) return;
-
-    setState(() => _isArchiving = true);
-    try {
-      final result = await _archiveService.archiveRoutes(
-        startDate: pickedRange.start,
-        endDate: pickedRange.end,
-      );
-      await _loadRoutes();
-      if (!mounted) return;
-      await _showArchiveCompleteDialog(result);
-    } catch (error) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('Archive failed: $error')));
-    } finally {
-      if (mounted) {
-        setState(() => _isArchiving = false);
-      }
     }
   }
 
@@ -506,8 +412,32 @@ class _SuperUserDashboardState extends State<SuperUserDashboard> {
     return [
       LatLng(route.first.lat, route.first.lon),
       ...route.sortedCheckpoints.map((c) => LatLng(c.lat, c.lon)),
+      ...route.sortedTransactions
+          .where((tx) => tx.hasValidLocation)
+          .map((tx) => LatLng(tx.lat, tx.lon)),
       if (route.hasLastCall) LatLng(route.last.lat, route.last.lon),
     ];
+  }
+
+  Future<void> _openTransactionModal(
+    SalesRoute route,
+    List<RouteTransaction> transactions, {
+    int initialIndex = 0,
+  }) async {
+    final salesman = await _getSalesmanDetails(route.salesmanId);
+    if (!mounted) return;
+    final salesmanLabel = (salesman?.name?.trim().isNotEmpty == true)
+        ? salesman!.name!.trim()
+        : salesman?.email;
+
+    await showDialog<void>(
+      context: context,
+      builder: (_) => WebTransactionDetailModal(
+        transactions: transactions,
+        salesmanLabel: salesmanLabel,
+        initialIndex: initialIndex,
+      ),
+    );
   }
 
   void _focusRoute(SalesRoute route, RouteProvider routeProvider) {
@@ -691,6 +621,7 @@ class _SuperUserDashboardState extends State<SuperUserDashboard> {
 
   @override
   void dispose() {
+    _timelineScrollController.dispose();
     _mapController.dispose();
     super.dispose();
   }
@@ -711,11 +642,6 @@ class _SuperUserDashboardState extends State<SuperUserDashboard> {
               tooltip: 'Re-align all routes to roads',
               icon: const Icon(Icons.alt_route),
             ),
-          ),
-          IconButton(
-            onPressed: _isArchiving ? null : _openArchivePicker,
-            tooltip: 'Archive',
-            icon: const Icon(Icons.archive_outlined),
           ),
         ],
       ),
@@ -956,6 +882,56 @@ class _SuperUserDashboardState extends State<SuperUserDashboard> {
                               .toList(),
                         ),
 
+                        // Captured invoice transactions are always visible and never downsampled.
+                        if (_showTransactionMarkers)
+                          MarkerLayer(
+                            markers: routeProvider.routes
+                                .where(
+                                  (r) =>
+                                      _focusedRouteId == null ||
+                                      r.routeId == _focusedRouteId,
+                                )
+                                .expand((route) {
+                                  final routeColor = routeProvider
+                                      .routeColorForSalesman(route.salesmanId);
+                                  final clusters = clusterRouteTransactions(
+                                    route.sortedTransactions,
+                                  );
+                                  return clusters.map((cluster) {
+                                    final isSelected = cluster.transactions.any(
+                                      (tx) =>
+                                          tx.transactionId ==
+                                          _selectedTransactionId,
+                                    );
+                                    return Marker(
+                                      point: LatLng(cluster.lat, cluster.lon),
+                                      width: 44,
+                                      height: 44,
+                                      rotate: true,
+                                      child: TransactionMapMarker(
+                                        cluster: cluster,
+                                        routeColor: routeColor,
+                                        isSelected: isSelected,
+                                        onTap: () {
+                                          setState(() {
+                                            _selectedTransactionId = cluster
+                                                .transactions
+                                                .first
+                                                .transactionId;
+                                            _selectedCheckpointId = null;
+                                          });
+                                          _openTransactionModal(
+                                            route,
+                                            cluster.transactions,
+                                          );
+                                        },
+                                      ),
+                                    );
+                                  });
+                                })
+                                .toList(),
+                          ),
+
                         // First/last flags are rendered above checkpoints.
                         MarkerLayer(
                             markers: routeProvider.routes
@@ -1098,6 +1074,12 @@ class _SuperUserDashboardState extends State<SuperUserDashboard> {
                                     color: Colors.orange,
                                     label: 'Checkpoint',
                                     style: _LegendItemStyle.checkpoint,
+                                  ),
+                                  SizedBox(height: 6),
+                                  _LegendItem(
+                                    color: Color(0xFF0F766E),
+                                    label: 'Captured Transaction',
+                                    style: _LegendItemStyle.transaction,
                                   ),
                                   SizedBox(height: 6),
                                   _LegendItem(
@@ -1249,6 +1231,31 @@ class _SuperUserDashboardState extends State<SuperUserDashboard> {
                                     });
                                   },
                                 ),
+                                IconButton(
+                                  tooltip: _showTransactionMarkers
+                                      ? 'Hide transaction checkpoints'
+                                      : 'Show transaction checkpoints',
+                                  icon: Icon(
+                                    _showTransactionMarkers
+                                        ? Icons.receipt_long
+                                        : Icons.receipt_long_outlined,
+                                    color: _showTransactionMarkers
+                                        ? const Color(0xFF0F766E)
+                                        : Colors.grey,
+                                  ),
+                                  visualDensity: VisualDensity.compact,
+                                  padding: EdgeInsets.zero,
+                                  constraints: const BoxConstraints.tightFor(
+                                    width: 30,
+                                    height: 30,
+                                  ),
+                                  onPressed: () {
+                                    setState(() {
+                                      _showTransactionMarkers =
+                                          !_showTransactionMarkers;
+                                    });
+                                  },
+                                ),
                               ],
                             ),
                           ),
@@ -1268,30 +1275,6 @@ class _SuperUserDashboardState extends State<SuperUserDashboard> {
                         right: 0,
                         child: _buildTimelineScroller(routeProvider),
                       ),
-                    if (_isArchiving)
-                      Positioned.fill(
-                        child: ColoredBox(
-                          color: Colors.black.withValues(alpha: 0.24),
-                          child: const Center(
-                            child: Card(
-                              child: Padding(
-                                padding: EdgeInsets.symmetric(
-                                  horizontal: 20,
-                                  vertical: 16,
-                                ),
-                                child: Column(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    CircularProgressIndicator(),
-                                    SizedBox(height: 12),
-                                    Text('Archiving selected routes...'),
-                                  ],
-                                ),
-                              ),
-                            ),
-                          ),
-                        ),
-                      ),
                   ],
                 );
               },
@@ -1307,16 +1290,30 @@ class _SuperUserDashboardState extends State<SuperUserDashboard> {
 
     final allPoints = <Map<String, dynamic>>[];
     if (route.hasFirstCall) {
-      allPoints.add({'id': 'first'});
+      allPoints.add({'id': 'first', 'timestamp': route.first.timestamp});
     }
 
     for (var i = 0; i < route.sortedCheckpoints.length; i++) {
       final cp = route.sortedCheckpoints[i];
-      allPoints.add({'id': _checkpointId(route, cp)});
+      allPoints.add({
+        'id': _checkpointId(route, cp),
+        'timestamp': cp.timestamp,
+      });
     }
 
+    for (final tx in route.sortedTransactions) {
+      allPoints.add({
+        'id': 'tx_${tx.transactionId}',
+        'timestamp': tx.capturedAt,
+      });
+    }
+
+    allPoints.sort(
+      (a, b) => (a['timestamp'] as DateTime).compareTo(b['timestamp'] as DateTime),
+    );
+
     if (route.hasLastCall) {
-      allPoints.add({'id': 'last'});
+      allPoints.add({'id': 'last', 'timestamp': route.last.timestamp});
     }
 
     final index = allPoints.indexWhere((p) => p['id'] == cpId);
@@ -1357,9 +1354,11 @@ class _SuperUserDashboardState extends State<SuperUserDashboard> {
       });
     }
 
+    final middlePoints = <Map<String, dynamic>>[];
+
     for (var i = 0; i < route.sortedCheckpoints.length; i++) {
       final cp = route.sortedCheckpoints[i];
-      allPoints.add({
+      middlePoints.add({
         'type': 'checkpoint',
         'checkpoint': cp,
         'lat': cp.lat,
@@ -1369,6 +1368,24 @@ class _SuperUserDashboardState extends State<SuperUserDashboard> {
         'id': _checkpointId(route, cp),
       });
     }
+
+    for (var i = 0; i < route.sortedTransactions.length; i++) {
+      final tx = route.sortedTransactions[i];
+      middlePoints.add({
+        'type': 'transaction',
+        'transaction': tx,
+        'lat': tx.lat,
+        'lon': tx.lon,
+        'timestamp': tx.capturedAt,
+        'label': tx.customerName.isNotEmpty ? tx.customerName : tx.invoiceCode,
+        'id': tx.transactionId,
+      });
+    }
+
+    middlePoints.sort(
+      (a, b) => (a['timestamp'] as DateTime).compareTo(b['timestamp'] as DateTime),
+    );
+    allPoints.addAll(middlePoints);
 
     if (route.hasLastCall) {
       allPoints.add({
@@ -1407,7 +1424,9 @@ class _SuperUserDashboardState extends State<SuperUserDashboard> {
           final time = DateFormat('hh:mm a').format(item['timestamp'] as DateTime);
           final label = item['label'] as String;
           
-          final isSelected = type == 'checkpoint' && _selectedCheckpointId == item['id'];
+          final isSelected =
+              (type == 'checkpoint' && _selectedCheckpointId == item['id']) ||
+              (type == 'transaction' && _selectedTransactionId == item['id']);
 
           Color iconColor = routeColor;
           IconData icon = Icons.place;
@@ -1418,20 +1437,35 @@ class _SuperUserDashboardState extends State<SuperUserDashboard> {
           } else if (type == 'last') {
             iconColor = Colors.red;
             icon = Icons.flag;
+          } else if (type == 'transaction') {
+            iconColor = const Color(0xFF0F766E);
+            icon = Icons.receipt_long;
           }
 
           return GestureDetector(
             onTap: () {
-              // Move map to this point
-              _mapController.move(LatLng(item['lat'] as double, item['lon'] as double), 16);
-              
+              final lat = item['lat'] as double;
+              final lon = item['lon'] as double;
+              if (lat != 0.0 || lon != 0.0) {
+                _mapController.move(LatLng(lat, lon), 16);
+              }
+
               if (type == 'checkpoint') {
                 setState(() {
                   _selectedCheckpointId = item['id'] as String;
+                  _selectedTransactionId = null;
                 });
+              } else if (type == 'transaction') {
+                final tx = item['transaction'] as RouteTransaction;
+                setState(() {
+                  _selectedTransactionId = tx.transactionId;
+                  _selectedCheckpointId = null;
+                });
+                _openTransactionModal(route, [tx]);
               } else {
                 setState(() {
                   _selectedCheckpointId = null;
+                  _selectedTransactionId = null;
                 });
               }
             },
@@ -1608,6 +1642,17 @@ class _LegendItem extends StatelessWidget {
           ),
           child: Icon(Icons.navigation, size: 12, color: color),
         );
+      case _LegendItemStyle.transaction:
+        return Container(
+          width: 22,
+          height: 22,
+          decoration: BoxDecoration(
+            color: color,
+            shape: BoxShape.circle,
+            border: Border.all(color: Colors.white, width: 1.5),
+          ),
+          child: const Icon(Icons.receipt_long, size: 12, color: Colors.white),
+        );
     }
   }
 
@@ -1627,7 +1672,13 @@ class _LegendItem extends StatelessWidget {
   }
 }
 
-enum _LegendItemStyle { flag, checkpoint, cachedPolyline, currentLocation }
+enum _LegendItemStyle {
+  flag,
+  checkpoint,
+  cachedPolyline,
+  currentLocation,
+  transaction,
+}
 
 class _RouteStatusChip extends StatelessWidget {
   final String salesmanLabel;

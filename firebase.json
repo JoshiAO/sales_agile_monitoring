@@ -1,10 +1,10 @@
-﻿{
+{
     "flutter":  {
                     "platforms":  {
                                       "android":  {
                                                       "default":  {
                                                                       "projectId":  "sales-team-stream-monitoring",
-                                                                      "appId":  "1:820214382404:android:07f1c0e9ed7703e7b16111",
+                                                                      "appId":  "1:820214382404:android:55f25b1e195441a9b16111",
                                                                       "fileOutput":  "android/app/google-services.json"
                                                                   }
                                                   },
@@ -12,7 +12,7 @@
                                                    "lib/firebase_options.dart":  {
                                                                                      "projectId":  "sales-team-stream-monitoring",
                                                                                      "configurations":  {
-                                                                                                            "android":  "1:820214382404:android:07f1c0e9ed7703e7b16111",
+                                                                                                            "android":  "1:820214382404:android:55f25b1e195441a9b16111",
                                                                                                             "ios":  "1:820214382404:ios:831ac575ad445f52b16111",
                                                                                                             "macos":  "1:820214382404:ios:831ac575ad445f52b16111",
                                                                                                             "web":  "1:820214382404:web:9d52a46d68fe23e3b16111",
@@ -44,7 +44,14 @@
                       "rules":  "firestore.rules",
                       "indexes":  "firestore.indexes.json"
                   },
-    "storage":  {
-                    "rules":  "storage.rules"
-                }
+    "storage":  [
+                    {
+                        "bucket":  "sales-team-stream-monitoring",
+                        "rules":  "storage.rules"
+                    },
+                    {
+                        "bucket":  "sales-team-stream-monitoring.firebasestorage.app",
+                        "rules":  "storage.rules"
+                    }
+                ]
 }

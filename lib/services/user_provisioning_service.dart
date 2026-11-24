@@ -14,6 +14,9 @@ class UserProvisioningService {
     required String password,
     required UserRole role,
     String? supervisorId,
+    String? encoderId,
+    SalesmanClassification salesmanClassification =
+        SalesmanClassification.booking,
     String? name,
     bool active = true,
     String? companyId,
@@ -46,6 +49,8 @@ class UserProvisioningService {
         email: normalizedEmail,
         role: role,
         supervisorId: role == UserRole.salesman ? supervisorId : null,
+        encoderId: role == UserRole.salesman ? encoderId : null,
+        salesmanClassification: salesmanClassification,
         name: trimmedName == null || trimmedName.isEmpty ? null : trimmedName,
         active: active,
         companyId: companyId,
@@ -92,6 +97,9 @@ class UserProvisioningService {
     required bool active,
     required UserRole role,
     required String? supervisorId,
+    String? encoderId,
+    SalesmanClassification salesmanClassification =
+        SalesmanClassification.booking,
     String? newEmail,
     String? newPassword,
   }) async {
@@ -122,7 +130,7 @@ class UserProvisioningService {
         await currentUser.getIdToken(true);
 
         final callable = _functions.httpsCallable('adminUpdateUserCredentials');
-        await callable.call(<String, dynamic>{
+        await callable.call<Map<String, dynamic>>(<String, dynamic>{
           'uid': uid,
           if (shouldUpdateEmail) 'email': normalizedNewEmail,
           if (shouldUpdatePassword) 'password': trimmedPassword,
@@ -143,8 +151,12 @@ class UserProvisioningService {
       'name': trimmedName == null || trimmedName.isEmpty ? null : trimmedName,
       'fsName': null,
       'active': active,
-      'role': role.toString().split('.').last,
+      'role': roleToString(role),
       'supervisorId': role == UserRole.salesman ? supervisorId : null,
+      'encoderId': role == UserRole.salesman ? encoderId : null,
+      'salesmanClassification': role == UserRole.salesman
+          ? classificationToString(salesmanClassification)
+          : null,
     });
 
     if (role == UserRole.salesman &&

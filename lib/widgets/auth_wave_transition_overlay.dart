@@ -102,6 +102,7 @@ class _AuthWaveRevealLayerState extends State<AuthWaveRevealLayer>
     // If loading ended before entrance completed, finish the entrance first.
     if (_coverIn.value < 1) {
       await _coverIn.forward();
+      if (!mounted) return;
     }
 
     await _reveal.forward(from: 0);

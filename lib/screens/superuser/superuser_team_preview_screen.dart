@@ -5,6 +5,7 @@ import 'package:compact_sales_monitoring/models/agile_model.dart';
 import 'package:compact_sales_monitoring/models/route_model.dart';
 import 'package:compact_sales_monitoring/models/user_model.dart';
 import 'package:compact_sales_monitoring/services/firestore_service.dart';
+import 'package:compact_sales_monitoring/services/salesman_performance_helper.dart';
 import 'package:compact_sales_monitoring/widgets/route_detail_modal.dart';
 
 enum _TeamPreviewFilter { all, active, inactive }
@@ -60,7 +61,14 @@ class _SuperuserTeamPreviewScreenState
     ]);
 
     final routes = results[0] as List<SalesRoute>;
-    final submissionsBySalesman = results[1] as Map<String, AgileSubmission>;
+    final rawSubmissions = results[1] as Map<String, AgileSubmission>;
+    final submissionsBySalesman =
+        SalesmanPerformanceHelper.buildEffectiveSubmissionsBySalesman(
+          salesmen: team,
+          date: dateStr,
+          rawAgileSubmissions: rawSubmissions,
+          routes: routes,
+        );
 
     final routesBySalesman = <String, SalesRoute>{};
     for (final route in routes) {
@@ -117,12 +125,6 @@ class _SuperuserTeamPreviewScreenState
         onRouteChanged: _refresh,
       ),
     );
-
-    if (!mounted) {
-      return;
-    }
-
-    await _refresh();
   }
 
   int _cardsPerRow(double maxWidth) {
@@ -442,27 +444,22 @@ class _SuperuserTeamPreviewScreenState
                         ],
                       ),
                     ),
-                    Wrap(
-                      spacing: spacing,
-                      runSpacing: spacing,
-                      children: [
-                        SizedBox(
-                          width: constraints.maxWidth,
-                          child: GridView.builder(
-                            shrinkWrap: true,
-                            physics: const NeverScrollableScrollPhysics(),
-                            itemCount: filteredTeam.length,
-                            gridDelegate:
-                                SliverGridDelegateWithFixedCrossAxisCount(
-                                  crossAxisCount: columns,
-                                  crossAxisSpacing: spacing,
-                                  mainAxisSpacing: spacing,
-                                  mainAxisExtent: 282,
-                                ),
-                            itemBuilder: (context, index) {
-                              final salesman = filteredTeam[index];
-                              final route = data.routesBySalesman[salesman.uid];
-                              return _SalesmanSummaryCard(
+                    LayoutBuilder(
+                      builder: (context, gridConstraints) {
+                        final cardWidth =
+                            ((gridConstraints.maxWidth -
+                                        ((columns - 1) * spacing)) /
+                                    columns)
+                                .floorToDouble()
+                                .clamp(0.0, gridConstraints.maxWidth);
+                        return Wrap(
+                          spacing: spacing,
+                          runSpacing: spacing,
+                          children: filteredTeam.map((salesman) {
+                            final route = data.routesBySalesman[salesman.uid];
+                            return SizedBox(
+                              width: cardWidth,
+                              child: _SalesmanSummaryCard(
                                 salesman: salesman,
                                 route: route,
                                 submission:
@@ -471,11 +468,11 @@ class _SuperuserTeamPreviewScreenState
                                 onPreviewCalls: route == null
                                     ? null
                                     : () => _openRoutePreview(salesman, route),
-                              );
-                            },
-                          ),
-                        ),
-                      ],
+                              ),
+                            );
+                          }).toList(),
+                        );
+                      },
                     ),
                   ],
                 ),
@@ -600,22 +597,46 @@ class _SalesmanSummaryCard extends StatelessWidget {
               const SizedBox(height: 16),
             ],
             const SizedBox(height: 10),
-            GridView.count(
-              crossAxisCount: 2,
-              mainAxisSpacing: 8,
-              crossAxisSpacing: 8,
-              childAspectRatio: 2.7,
-              shrinkWrap: true,
-              physics: const NeverScrollableScrollPhysics(),
-              children: [
-                _MetricCell(label: 'First Call', value: _firstCallText),
-                _MetricCell(label: 'Last Call', value: _lastCallText),
-                _MetricCell(
-                  label: 'Actual Productive Calls',
-                  value: _actualProductiveCallsText,
-                ),
-                _MetricCell(label: 'Actual STT', value: _actualSttText),
-              ],
+            IntrinsicHeight(
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Expanded(
+                    child: _MetricCell(
+                      label: 'First Call',
+                      value: _firstCallText,
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: _MetricCell(
+                      label: 'Last Call',
+                      value: _lastCallText,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 8),
+            IntrinsicHeight(
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Expanded(
+                    child: _MetricCell(
+                      label: 'Actual Productive Calls',
+                      value: _actualProductiveCallsText,
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: _MetricCell(
+                      label: 'Actual STT',
+                      value: _actualSttText,
+                    ),
+                  ),
+                ],
+              ),
             ),
             const SizedBox(height: 10),
             SizedBox(

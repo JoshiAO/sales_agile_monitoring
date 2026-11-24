@@ -5,10 +5,12 @@ import 'package:android_intent_plus/android_intent.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 import 'package:compact_sales_monitoring/models/agile_model.dart';
+import 'package:compact_sales_monitoring/models/route_model.dart';
 import 'package:compact_sales_monitoring/models/user_model.dart';
 import 'package:compact_sales_monitoring/providers/auth_provider.dart';
 import 'package:compact_sales_monitoring/services/agile_export_service.dart';
 import 'package:compact_sales_monitoring/services/firestore_service.dart';
+import 'package:compact_sales_monitoring/services/salesman_performance_helper.dart';
 import 'package:compact_sales_monitoring/widgets/date_selector_widget.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -66,6 +68,9 @@ class _SuperuserAgilePageState extends State<SuperuserAgilePage> {
     final results = await Future.wait([
       _firestoreService.getAgileTargetsByDate(date: date),
       _firestoreService.getAllAgileSubmissionsByDate(date: date),
+      (companyId != null && companyId.isNotEmpty)
+          ? _firestoreService.getAllRoutesByDateAndCompany(companyId, date)
+          : _firestoreService.getAllRoutesByDate(date),
     ]);
 
     final supervisors = rawSupervisors.toList()
@@ -74,7 +79,15 @@ class _SuperuserAgilePageState extends State<SuperuserAgilePage> {
       );
     final salesmen = rawSalesmen;
     final targetsBySalesman = results[0] as Map<String, AgileTarget>;
-    final submissionsBySalesman = results[1] as Map<String, AgileSubmission>;
+    final rawSubmissions = results[1] as Map<String, AgileSubmission>;
+    final routes = results[2] as List<SalesRoute>;
+    final submissionsBySalesman =
+        SalesmanPerformanceHelper.buildEffectiveSubmissionsBySalesman(
+          salesmen: salesmen,
+          date: date,
+          rawAgileSubmissions: rawSubmissions,
+          routes: routes,
+        );
 
     final salesmenBySupervisor = <String, List<AppUser>>{};
     for (final salesman in salesmen) {
@@ -858,109 +871,128 @@ class _SalesmanPerformancePreviewPage extends StatelessWidget {
               : maxWidth >= 620
               ? 2
               : 1;
-          final cardExtent = columns == 1 ? 312.0 : 278.0;
+          const spacing = 12.0;
+          const horizontalPadding = 32.0;
+          final availableWidth =
+              maxWidth - horizontalPadding - ((columns - 1) * spacing);
+          final cardWidth = (availableWidth / columns)
+              .floorToDouble()
+              .clamp(0.0, maxWidth);
 
-          return GridView.builder(
+          return SingleChildScrollView(
             padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
-            gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-              crossAxisCount: columns,
-              crossAxisSpacing: 12,
-              mainAxisSpacing: 12,
-              mainAxisExtent: cardExtent,
-            ),
-            itemCount: summary.team.length,
-            itemBuilder: (context, index) {
-              final salesman = summary.team[index];
-              final submission = submissionsBySalesman[salesman.uid];
-              final target = targetsBySalesman[salesman.uid];
-              final productiveActual = submission?.productiveCalls ?? 0;
-              final sttActual = submission?.sttActual ?? 0.0;
-              final productiveTarget = target?.productiveCallsTarget ?? 0;
-              final sttTarget = target?.sttTarget ?? 0.0;
-              final productiveIndex = productiveTarget == 0
-                  ? 0.0
-                  : productiveActual / productiveTarget;
-              final sttIndex = sttTarget == 0 ? 0.0 : sttActual / sttTarget;
-              return Card(
-                margin: EdgeInsets.zero,
-                child: Padding(
-                  padding: const EdgeInsets.all(16),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
+            child: Wrap(
+              spacing: spacing,
+              runSpacing: spacing,
+              children: summary.team.map((salesman) {
+                final submission = submissionsBySalesman[salesman.uid];
+                final target = targetsBySalesman[salesman.uid];
+                final productiveActual = submission?.productiveCalls ?? 0;
+                final sttActual = submission?.sttActual ?? 0.0;
+                final productiveTarget = target?.productiveCallsTarget ?? 0;
+                final sttTarget = target?.sttTarget ?? 0.0;
+                final productiveIndex = productiveTarget == 0
+                    ? 0.0
+                    : productiveActual / productiveTarget;
+                final sttIndex = sttTarget == 0 ? 0.0 : sttActual / sttTarget;
+                return SizedBox(
+                  width: cardWidth,
+                  child: Card(
+                    margin: EdgeInsets.zero,
+                    child: Padding(
+                      padding: const EdgeInsets.all(16),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  _displayName(salesman),
-                                  style: Theme.of(context).textTheme.titleMedium
-                                      ?.copyWith(fontWeight: FontWeight.w700),
+                          Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      _displayName(salesman),
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: Theme.of(context)
+                                          .textTheme
+                                          .titleMedium
+                                          ?.copyWith(
+                                            fontWeight: FontWeight.w700,
+                                          ),
+                                    ),
+                                    const SizedBox(height: 4),
+                                    Text(
+                                      salesman.email,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: Theme.of(context)
+                                          .textTheme
+                                          .bodySmall
+                                          ?.copyWith(
+                                            color: Colors.grey.shade700,
+                                          ),
+                                    ),
+                                  ],
                                 ),
-                                const SizedBox(height: 4),
-                                Text(
-                                  salesman.email,
-                                  style: Theme.of(context).textTheme.bodySmall
-                                      ?.copyWith(color: Colors.grey.shade700),
-                                ),
-                              ],
-                            ),
+                              ),
+                              const SizedBox(width: 12),
+                              _StatusTag(active: salesman.active),
+                            ],
                           ),
-                          const SizedBox(width: 12),
-                          _StatusTag(active: salesman.active),
+                          const SizedBox(height: 14),
+                          LayoutBuilder(
+                            builder: (context, metricConstraints) {
+                              final stacked = metricConstraints.maxWidth < 240;
+
+                              final productiveBox = _MetricWithIndexBox(
+                                icon: Icons.storefront,
+                                iconColor: Colors.blue.shade700,
+                                label: 'Prod. Calls Target / Actual',
+                                value: '$productiveTarget / $productiveActual',
+                                indexValue: productiveIndex,
+                              );
+                              final sttBox = _MetricWithIndexBox(
+                                icon: Icons.payments_outlined,
+                                iconColor: Colors.teal.shade700,
+                                label: 'STT Target / Actual',
+                                value:
+                                    '${currency.format(sttTarget)} / ${currency.format(sttActual)}',
+                                indexValue: sttIndex,
+                              );
+
+                              if (stacked) {
+                                return Column(
+                                  children: [
+                                    productiveBox,
+                                    const SizedBox(height: 10),
+                                    sttBox,
+                                  ],
+                                );
+                              }
+
+                              return IntrinsicHeight(
+                                child: Row(
+                                  crossAxisAlignment:
+                                      CrossAxisAlignment.stretch,
+                                  children: [
+                                    Expanded(child: productiveBox),
+                                    const SizedBox(width: 10),
+                                    Expanded(child: sttBox),
+                                  ],
+                                ),
+                              );
+                            },
+                          ),
                         ],
                       ),
-                      const SizedBox(height: 14),
-                      LayoutBuilder(
-                        builder: (context, metricConstraints) {
-                          final stacked = metricConstraints.maxWidth < 240;
-
-                          final productiveBox = _MetricWithIndexBox(
-                            icon: Icons.storefront,
-                            iconColor: Colors.blue.shade700,
-                            label: 'Prod. Calls Target / Actual',
-                            value: '$productiveTarget / $productiveActual',
-                            indexValue: productiveIndex,
-                          );
-                          final sttBox = _MetricWithIndexBox(
-                            icon: Icons.payments_outlined,
-                            iconColor: Colors.teal.shade700,
-                            label: 'STT Target / Actual',
-                            value:
-                                '${currency.format(sttTarget)} / ${currency.format(sttActual)}',
-                            indexValue: sttIndex,
-                          );
-
-                          if (stacked) {
-                            return Column(
-                              children: [
-                                productiveBox,
-                                const SizedBox(height: 10),
-                                sttBox,
-                              ],
-                            );
-                          }
-
-                          return IntrinsicHeight(
-                            child: Row(
-                              crossAxisAlignment: CrossAxisAlignment.stretch,
-                              children: [
-                                Expanded(child: productiveBox),
-                                const SizedBox(width: 10),
-                                Expanded(child: sttBox),
-                              ],
-                            ),
-                          );
-                        },
-                      ),
-                    ],
+                    ),
                   ),
-                ),
-              );
-            },
+                );
+              }).toList(),
+            ),
           );
         },
       ),

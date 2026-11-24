@@ -39,28 +39,38 @@ class _SalesmanDebugScreenState extends State<SalesmanDebugScreen> {
     _refreshData();
   }
 
-  void _refreshData() {
-    if (_prefs == null) return;
-    _prefs!.reload(); // Ensure we get the latest background updates
-    
-    final startStr = _prefs!.getString('route_start_time');
-    final endStr = _prefs!.getString('route_end_time');
-    
-    if (startStr != null) {
-      final startTime = DateTime.parse(startStr);
-      _startTimeStr = DateFormat('hh:mm a').format(startTime);
-      
-      final endTime = endStr != null ? DateTime.parse(endStr) : DateTime.now();
-      final activeDuration = endTime.difference(startTime);
-      
-      final hours = activeDuration.inHours.toString().padLeft(2, '0');
-      final minutes = (activeDuration.inMinutes % 60).toString().padLeft(2, '0');
-      final seconds = (activeDuration.inSeconds % 60).toString().padLeft(2, '0');
-      _activeTime = '$hours:$minutes:$seconds';
-    } else {
-      _activeTime = '00:00:00';
-      _startTimeStr = 'Not started';
-    }
+  bool _isRefreshing = false;
+
+  Future<void> _refreshData() async {
+    if (_prefs == null || _isRefreshing) return;
+    _isRefreshing = true;
+    try {
+      await _prefs!.reload(); // Ensure we get the latest background updates
+      if (!mounted) return;
+
+      final startStr = _prefs!.getString('route_start_time');
+      final endStr = _prefs!.getString('route_end_time');
+
+      if (startStr != null) {
+        final startTime = DateTime.tryParse(startStr);
+        if (startTime != null) {
+          _startTimeStr = DateFormat('hh:mm a').format(startTime);
+
+          final endTime = (endStr != null ? DateTime.tryParse(endStr) : null) ?? DateTime.now();
+          final activeDuration = endTime.difference(startTime);
+
+          final hours = activeDuration.inHours.toString().padLeft(2, '0');
+          final minutes = (activeDuration.inMinutes % 60).toString().padLeft(2, '0');
+          final seconds = (activeDuration.inSeconds % 60).toString().padLeft(2, '0');
+          _activeTime = '$hours:$minutes:$seconds';
+        } else {
+          _activeTime = '00:00:00';
+          _startTimeStr = 'Not started';
+        }
+      } else {
+        _activeTime = '00:00:00';
+        _startTimeStr = 'Not started';
+      }
 
     _checkpointCount = _prefs!.getInt('checkpoint_count') ?? 0;
     
@@ -204,8 +214,11 @@ class _SalesmanDebugScreenState extends State<SalesmanDebugScreen> {
       _checkpointCount = sortedMiddleCheckpoints.length;
     }
 
-    if (mounted) {
-      setState(() {});
+      if (mounted) {
+        setState(() {});
+      }
+    } finally {
+      _isRefreshing = false;
     }
   }
 

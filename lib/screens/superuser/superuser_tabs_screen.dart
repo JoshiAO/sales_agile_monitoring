@@ -3,8 +3,8 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:provider/provider.dart';
 import 'package:compact_sales_monitoring/providers/auth_provider.dart';
-import 'package:compact_sales_monitoring/screens/shared/announcement_page.dart';
-import 'package:compact_sales_monitoring/screens/shared/feeds_page.dart';
+import 'package:compact_sales_monitoring/screens/shared/web_transactions_page.dart';
+import 'package:compact_sales_monitoring/screens/superuser/database_management_screen.dart';
 import 'package:compact_sales_monitoring/screens/superuser/superuser_dashboard.dart';
 import 'package:compact_sales_monitoring/screens/superuser/superuser_home_screen.dart';
 import 'package:compact_sales_monitoring/screens/superuser/superuser_agile_page.dart';
@@ -89,13 +89,15 @@ class _SuperuserTabsScreenState extends State<SuperuserTabsScreen> {
       case 1:
         return SuperUserDashboard(key: ValueKey('su-map-$_refreshTick'));
       case 2:
-        return SuperuserAgilePage(key: ValueKey('su-agile-$_refreshTick'));
+        return WebTransactionsPage(key: ValueKey('su-tx-$_refreshTick'));
       case 3:
-        return const FeedsPage();
+        return SuperuserAgilePage(key: ValueKey('su-agile-$_refreshTick'));
       case 4:
-        return AnnouncementPage(key: ValueKey('su-announcement-$_refreshTick'));
-      case 5:
         return UserManagementScreen(key: ValueKey('su-users-$_refreshTick'));
+      case 5:
+        return DatabaseManagementScreen(
+          key: ValueKey('su-database-$_refreshTick'),
+        );
       case 6:
         return const AppVersionSettingsScreen(key: ValueKey('su-appversion'));
       default:
@@ -333,19 +335,14 @@ class _SuperuserTabsScreenState extends State<SuperuserTabsScreen> {
                                   label: Text('Map'),
                                 ),
                                 const NavigationRailDestination(
+                                  icon: Icon(Icons.receipt_long_outlined),
+                                  selectedIcon: Icon(Icons.receipt_long),
+                                  label: Text('Transactions'),
+                                ),
+                                const NavigationRailDestination(
                                   icon: Icon(Icons.auto_graph_outlined),
                                   selectedIcon: Icon(Icons.auto_graph),
                                   label: Text('Agile'),
-                                ),
-                                const NavigationRailDestination(
-                                  icon: Icon(Icons.feed_outlined),
-                                  selectedIcon: Icon(Icons.feed),
-                                  label: Text('Feeds'),
-                                ),
-                                const NavigationRailDestination(
-                                  icon: Icon(Icons.campaign_outlined),
-                                  selectedIcon: Icon(Icons.campaign),
-                                  label: Text('Announcements'),
                                 ),
                                 NavigationRailDestination(
                                   icon: _badgeIcon(
@@ -357,6 +354,11 @@ class _SuperuserTabsScreenState extends State<SuperuserTabsScreen> {
                                     pendingCount,
                                   ),
                                   label: const Text('Users'),
+                                ),
+                                const NavigationRailDestination(
+                                  icon: Icon(Icons.storage_outlined),
+                                  selectedIcon: Icon(Icons.storage),
+                                  label: Text('Database'),
                                 ),
                                 const NavigationRailDestination(
                                   icon: Icon(Icons.system_update_outlined),
@@ -406,7 +408,7 @@ class _SuperuserTabsScreenState extends State<SuperuserTabsScreen> {
             selectedItemColor: Theme.of(context).colorScheme.primary,
             unselectedItemColor: Colors.grey.shade700,
             selectedLabelStyle: const TextStyle(fontWeight: FontWeight.w600),
-            currentIndex: _currentIndex,
+            currentIndex: _currentIndex.clamp(0, 5),
             onTap: _selectTab,
             items: [
               const BottomNavigationBarItem(
@@ -420,24 +422,24 @@ class _SuperuserTabsScreenState extends State<SuperuserTabsScreen> {
                 label: 'Map',
               ),
               const BottomNavigationBarItem(
+                icon: Icon(Icons.receipt_long_outlined),
+                activeIcon: Icon(Icons.receipt_long),
+                label: 'Transactions',
+              ),
+              const BottomNavigationBarItem(
                 icon: Icon(Icons.auto_graph_outlined),
                 activeIcon: Icon(Icons.auto_graph),
                 label: 'Agile',
-              ),
-              const BottomNavigationBarItem(
-                icon: Icon(Icons.feed_outlined),
-                activeIcon: Icon(Icons.feed),
-                label: 'Feeds',
-              ),
-              const BottomNavigationBarItem(
-                icon: Icon(Icons.campaign_outlined),
-                activeIcon: Icon(Icons.campaign),
-                label: 'Announce',
               ),
               BottomNavigationBarItem(
                 icon: _badgeIcon(Icons.manage_accounts_outlined, pendingCount),
                 activeIcon: _badgeIcon(Icons.manage_accounts, pendingCount),
                 label: 'Users',
+              ),
+              const BottomNavigationBarItem(
+                icon: Icon(Icons.storage_outlined),
+                activeIcon: Icon(Icons.storage),
+                label: 'Database',
               ),
             ],
           ),

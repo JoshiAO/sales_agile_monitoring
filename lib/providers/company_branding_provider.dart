@@ -1,13 +1,12 @@
 import 'dart:convert';
 
-import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/foundation.dart';
-import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:compact_sales_monitoring/models/company_branding_model.dart';
 import 'package:compact_sales_monitoring/models/user_model.dart';
 import 'package:compact_sales_monitoring/services/firestore_service.dart';
+import 'package:compact_sales_monitoring/services/storage_url_resolver.dart';
 
 class CompanyBrandingProvider extends ChangeNotifier {
   static const String _cacheKeyPrefix = 'company_branding_';
@@ -191,77 +190,6 @@ class CompanyBrandingProvider extends ChangeNotifier {
     );
   }
 
-  Future<String?> _resolveImageUrl(String? value) async {
-    final normalized = _normalizeImageUrl(value);
-    if (normalized == null || normalized.isEmpty) return null;
-
-    if (normalized.startsWith('gs://')) {
-      try {
-        return await FirebaseStorage.instance
-            .refFromURL(normalized)
-            .getDownloadURL();
-      } catch (_) {
-        return null;
-      }
-    }
-
-    final parsed = Uri.tryParse(normalized);
-    if (parsed != null && parsed.hasScheme) {
-      if (parsed.host.contains('firebasestorage.googleapis.com')) {
-        final objectPath = _extractStorageObjectPath(parsed);
-        if (objectPath != null) {
-          try {
-            return await FirebaseStorage.instance
-                .ref(objectPath)
-                .getDownloadURL();
-          } catch (_) {
-            // If refresh fails, still use the original URL.
-          }
-        }
-      }
-      return parsed.toString();
-    }
-
-    final objectPath = normalized.replaceAll('\\', '/').replaceFirst(
-      RegExp(r'^/+'),
-      '',
-    );
-    if (objectPath.isNotEmpty) {
-      try {
-        return await FirebaseStorage.instance.ref(objectPath).getDownloadURL();
-      } catch (_) {
-        return null;
-      }
-    }
-
-    return normalized;
-  }
-
-  String? _normalizeImageUrl(String? value) {
-    final raw = value?.trim() ?? '';
-    if (raw.isEmpty) return null;
-    if (raw.startsWith('gs://')) return raw;
-
-    final parsed = Uri.tryParse(raw);
-    if (parsed != null && parsed.hasScheme) {
-      if (parsed.scheme == 'http') {
-        return parsed.replace(scheme: 'https').toString();
-      }
-      return parsed.toString();
-    }
-
-    return Uri.encodeFull(raw);
-  }
-
-  String? _extractStorageObjectPath(Uri uri) {
-    final segments = uri.pathSegments;
-    final objectIndex = segments.indexOf('o');
-    if (objectIndex < 0 || objectIndex + 1 >= segments.length) {
-      return null;
-    }
-
-    final encodedPath = segments[objectIndex + 1];
-    if (encodedPath.isEmpty) return null;
-    return Uri.decodeComponent(encodedPath);
-  }
+  Future<String?> _resolveImageUrl(String? value) =>
+      StorageUrlResolver.resolveUrl(value);
 }

@@ -1,4 +1,4 @@
-import 'dart:io';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:dio/dio.dart';
 import 'package:path_provider/path_provider.dart';
@@ -22,7 +22,7 @@ class _ForceUpdateScreenState extends State<ForceUpdateScreen> {
   String _statusText = 'A new version of the Agile App is available. You must update to continue using the application.';
 
   Future<void> _downloadAndInstall() async {
-    if (widget.downloadUrl == null || widget.downloadUrl!.isEmpty) return;
+    if (kIsWeb || widget.downloadUrl == null || widget.downloadUrl!.isEmpty) return;
 
     setState(() {
       _isDownloading = true;
@@ -39,7 +39,7 @@ class _ForceUpdateScreenState extends State<ForceUpdateScreen> {
         widget.downloadUrl!,
         savePath,
         onReceiveProgress: (received, total) {
-          if (total != -1) {
+          if (total != -1 && mounted) {
             setState(() {
               _downloadProgress = received / total;
             });
@@ -47,6 +47,7 @@ class _ForceUpdateScreenState extends State<ForceUpdateScreen> {
         },
       );
 
+      if (!mounted) return;
       setState(() {
         _statusText = 'Download complete! Launching installer...';
       });

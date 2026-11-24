@@ -2,9 +2,28 @@
   "project_info": {
     "project_number": "820214382404",
     "project_id": "sales-team-stream-monitoring",
-    "storage_bucket": "sales-team-stream-monitoring.firebasestorage.app"
+    "storage_bucket": "sales-team-stream-monitoring"
   },
   "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:820214382404:android:55f25b1e195441a9b16111",
+        "android_client_info": {
+          "package_name": "com.agile.app.jao"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDxtzJrIIV8Uw8oWPru-JhPi_Re6aVHX9s"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
     {
       "client_info": {
         "mobilesdk_app_id": "1:820214382404:android:07f1c0e9ed7703e7b16111",

@@ -13,6 +13,9 @@ import 'package:compact_sales_monitoring/widgets/date_selector_widget.dart';
 import 'package:compact_sales_monitoring/widgets/loading_skeletons.dart';
 import 'package:compact_sales_monitoring/widgets/route_detail_modal.dart';
 import 'package:compact_sales_monitoring/models/route_model.dart';
+import 'package:compact_sales_monitoring/models/transaction_model.dart';
+import 'package:compact_sales_monitoring/widgets/transaction_map_marker.dart';
+import 'package:compact_sales_monitoring/widgets/web_transaction_detail_modal.dart';
 
 class SupervisorDashboard extends StatefulWidget {
   const SupervisorDashboard({super.key});
@@ -34,9 +37,11 @@ class _SupervisorDashboardState extends State<SupervisorDashboard> {
   bool _showRouteLabels = true;
   bool _showFirstCallMarkers = true;
   bool _showLastCallMarkers = true;
+  bool _showTransactionMarkers = true;
   double _flagPinScale = 1.0;
   double _currentZoom = 12;
   String? _selectedCheckpointId;
+  String? _selectedTransactionId;
   String? _selectedCurrentLocationRouteId;
   String? _focusedRouteId;
   final ScrollController _timelineScrollController = ScrollController();
@@ -400,8 +405,32 @@ class _SupervisorDashboardState extends State<SupervisorDashboard> {
     return [
       LatLng(route.first.lat, route.first.lon),
       ...route.sortedCheckpoints.map((c) => LatLng(c.lat, c.lon)),
+      ...route.sortedTransactions
+          .where((tx) => tx.hasValidLocation)
+          .map((tx) => LatLng(tx.lat, tx.lon)),
       if (route.hasLastCall) LatLng(route.last.lat, route.last.lon),
     ];
+  }
+
+  Future<void> _openTransactionModal(
+    SalesRoute route,
+    List<RouteTransaction> transactions, {
+    int initialIndex = 0,
+  }) async {
+    final salesman = await _getSalesmanDetails(route.salesmanId);
+    if (!mounted) return;
+    final salesmanLabel = (salesman?.name?.trim().isNotEmpty == true)
+        ? salesman!.name!.trim()
+        : salesman?.email;
+
+    await showDialog<void>(
+      context: context,
+      builder: (_) => WebTransactionDetailModal(
+        transactions: transactions,
+        salesmanLabel: salesmanLabel,
+        initialIndex: initialIndex,
+      ),
+    );
   }
 
   void _focusRoute(SalesRoute route, RouteProvider routeProvider) {
@@ -585,6 +614,7 @@ class _SupervisorDashboardState extends State<SupervisorDashboard> {
 
   @override
   void dispose() {
+    _timelineScrollController.dispose();
     _mapController.dispose();
     super.dispose();
   }
@@ -845,6 +875,56 @@ class _SupervisorDashboardState extends State<SupervisorDashboard> {
                               .toList(),
                         ),
 
+                        // Captured invoice transactions are always visible and never downsampled.
+                        if (_showTransactionMarkers)
+                          MarkerLayer(
+                            markers: routeProvider.routes
+                                .where(
+                                  (r) =>
+                                      _focusedRouteId == null ||
+                                      r.routeId == _focusedRouteId,
+                                )
+                                .expand((route) {
+                                  final routeColor = routeProvider
+                                      .routeColorForSalesman(route.salesmanId);
+                                  final clusters = clusterRouteTransactions(
+                                    route.sortedTransactions,
+                                  );
+                                  return clusters.map((cluster) {
+                                    final isSelected = cluster.transactions.any(
+                                      (tx) =>
+                                          tx.transactionId ==
+                                          _selectedTransactionId,
+                                    );
+                                    return Marker(
+                                      point: LatLng(cluster.lat, cluster.lon),
+                                      width: 44,
+                                      height: 44,
+                                      rotate: true,
+                                      child: TransactionMapMarker(
+                                        cluster: cluster,
+                                        routeColor: routeColor,
+                                        isSelected: isSelected,
+                                        onTap: () {
+                                          setState(() {
+                                            _selectedTransactionId = cluster
+                                                .transactions
+                                                .first
+                                                .transactionId;
+                                            _selectedCheckpointId = null;
+                                          });
+                                          _openTransactionModal(
+                                            route,
+                                            cluster.transactions,
+                                          );
+                                        },
+                                      ),
+                                    );
+                                  });
+                                })
+                                .toList(),
+                          ),
+
                         // First/last flags are rendered above checkpoints.
                         MarkerLayer(
                             markers: routeProvider.routes
@@ -987,6 +1067,12 @@ class _SupervisorDashboardState extends State<SupervisorDashboard> {
                                     color: Colors.orange,
                                     label: 'Checkpoint',
                                     style: _LegendItemStyle.checkpoint,
+                                  ),
+                                  SizedBox(height: 6),
+                                  _LegendItem(
+                                    color: Color(0xFF0F766E),
+                                    label: 'Captured Transaction',
+                                    style: _LegendItemStyle.transaction,
                                   ),
                                   SizedBox(height: 6),
                                   _LegendItem(
@@ -1138,6 +1224,31 @@ class _SupervisorDashboardState extends State<SupervisorDashboard> {
                                     });
                                   },
                                 ),
+                                IconButton(
+                                  tooltip: _showTransactionMarkers
+                                      ? 'Hide transaction checkpoints'
+                                      : 'Show transaction checkpoints',
+                                  icon: Icon(
+                                    _showTransactionMarkers
+                                        ? Icons.receipt_long
+                                        : Icons.receipt_long_outlined,
+                                    color: _showTransactionMarkers
+                                        ? const Color(0xFF0F766E)
+                                        : Colors.grey,
+                                  ),
+                                  visualDensity: VisualDensity.compact,
+                                  padding: EdgeInsets.zero,
+                                  constraints: const BoxConstraints.tightFor(
+                                    width: 30,
+                                    height: 30,
+                                  ),
+                                  onPressed: () {
+                                    setState(() {
+                                      _showTransactionMarkers =
+                                          !_showTransactionMarkers;
+                                    });
+                                  },
+                                ),
                               ],
                             ),
                           ),
@@ -1172,16 +1283,30 @@ class _SupervisorDashboardState extends State<SupervisorDashboard> {
 
     final allPoints = <Map<String, dynamic>>[];
     if (route.hasFirstCall) {
-      allPoints.add({'id': 'first'});
+      allPoints.add({'id': 'first', 'timestamp': route.first.timestamp});
     }
 
     for (var i = 0; i < route.sortedCheckpoints.length; i++) {
       final cp = route.sortedCheckpoints[i];
-      allPoints.add({'id': _checkpointId(route, cp)});
+      allPoints.add({
+        'id': _checkpointId(route, cp),
+        'timestamp': cp.timestamp,
+      });
     }
 
+    for (final tx in route.sortedTransactions) {
+      allPoints.add({
+        'id': 'tx_${tx.transactionId}',
+        'timestamp': tx.capturedAt,
+      });
+    }
+
+    allPoints.sort(
+      (a, b) => (a['timestamp'] as DateTime).compareTo(b['timestamp'] as DateTime),
+    );
+
     if (route.hasLastCall) {
-      allPoints.add({'id': 'last'});
+      allPoints.add({'id': 'last', 'timestamp': route.last.timestamp});
     }
 
     final index = allPoints.indexWhere((p) => p['id'] == cpId);
@@ -1221,9 +1346,11 @@ class _SupervisorDashboardState extends State<SupervisorDashboard> {
       });
     }
 
+    final middlePoints = <Map<String, dynamic>>[];
+
     for (var i = 0; i < route.sortedCheckpoints.length; i++) {
       final cp = route.sortedCheckpoints[i];
-      allPoints.add({
+      middlePoints.add({
         'type': 'checkpoint',
         'checkpoint': cp,
         'lat': cp.lat,
@@ -1233,6 +1360,24 @@ class _SupervisorDashboardState extends State<SupervisorDashboard> {
         'id': _checkpointId(route, cp),
       });
     }
+
+    for (var i = 0; i < route.sortedTransactions.length; i++) {
+      final tx = route.sortedTransactions[i];
+      middlePoints.add({
+        'type': 'transaction',
+        'transaction': tx,
+        'lat': tx.lat,
+        'lon': tx.lon,
+        'timestamp': tx.capturedAt,
+        'label': tx.customerName.isNotEmpty ? tx.customerName : tx.invoiceCode,
+        'id': tx.transactionId,
+      });
+    }
+
+    middlePoints.sort(
+      (a, b) => (a['timestamp'] as DateTime).compareTo(b['timestamp'] as DateTime),
+    );
+    allPoints.addAll(middlePoints);
 
     if (route.hasLastCall) {
       allPoints.add({
@@ -1272,7 +1417,8 @@ class _SupervisorDashboardState extends State<SupervisorDashboard> {
             final label = item['label'] as String;
 
             final isSelected =
-                type == 'checkpoint' && _selectedCheckpointId == item['id'];
+                (type == 'checkpoint' && _selectedCheckpointId == item['id']) ||
+                (type == 'transaction' && _selectedTransactionId == item['id']);
 
             Color iconColor = routeColor;
             IconData icon = Icons.place;
@@ -1283,22 +1429,35 @@ class _SupervisorDashboardState extends State<SupervisorDashboard> {
             } else if (type == 'last') {
               iconColor = Colors.red;
               icon = Icons.flag;
+            } else if (type == 'transaction') {
+              iconColor = const Color(0xFF0F766E);
+              icon = Icons.receipt_long;
             }
 
             return GestureDetector(
               onTap: () {
-                _mapController.move(
-                  LatLng(item['lat'] as double, item['lon'] as double),
-                  16,
-                );
+                final lat = item['lat'] as double;
+                final lon = item['lon'] as double;
+                if (lat != 0.0 || lon != 0.0) {
+                  _mapController.move(LatLng(lat, lon), 16);
+                }
 
                 if (type == 'checkpoint') {
                   setState(() {
                     _selectedCheckpointId = item['id'] as String;
+                    _selectedTransactionId = null;
                   });
+                } else if (type == 'transaction') {
+                  final tx = item['transaction'] as RouteTransaction;
+                  setState(() {
+                    _selectedTransactionId = tx.transactionId;
+                    _selectedCheckpointId = null;
+                  });
+                  _openTransactionModal(route, [tx]);
                 } else {
                   setState(() {
                     _selectedCheckpointId = null;
+                    _selectedTransactionId = null;
                   });
                 }
               },
@@ -1484,6 +1643,17 @@ class _LegendItem extends StatelessWidget {
           ),
           child: Icon(Icons.navigation, size: 12, color: color),
         );
+      case _LegendItemStyle.transaction:
+        return Container(
+          width: 22,
+          height: 22,
+          decoration: BoxDecoration(
+            color: color,
+            shape: BoxShape.circle,
+            border: Border.all(color: Colors.white, width: 1.5),
+          ),
+          child: const Icon(Icons.receipt_long, size: 12, color: Colors.white),
+        );
     }
   }
 
@@ -1503,7 +1673,13 @@ class _LegendItem extends StatelessWidget {
   }
 }
 
-enum _LegendItemStyle { flag, checkpoint, cachedPolyline, currentLocation }
+enum _LegendItemStyle {
+  flag,
+  checkpoint,
+  cachedPolyline,
+  currentLocation,
+  transaction,
+}
 
 class _RouteStatusChip extends StatelessWidget {
   final String salesmanLabel;

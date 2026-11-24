@@ -24,6 +24,9 @@ import 'package:compact_sales_monitoring/screens/superuser/superuser_tabs_screen
 // Manager screens
 import 'package:compact_sales_monitoring/screens/manager/manager_tabs_screen.dart';
 
+// Encoder screens
+import 'package:compact_sales_monitoring/screens/encoder/encoder_tabs_screen.dart';
+
 class AppRouter extends StatefulWidget {
   const AppRouter({super.key});
 
@@ -41,6 +44,7 @@ class _AppRouterState extends State<AppRouter> {
     if (base is SalesmanTabsScreen) return 'salesman';
     if (base is SupervisorTabsScreen) return 'supervisor';
     if (base is ManagerTabsScreen) return 'manager';
+    if (base is EncoderTabsScreen) return 'encoder';
     if (base is SuperuserTabsScreen) return 'superuser';
     if (base is Scaffold) return 'loading';
     return base.runtimeType.toString();
@@ -133,6 +137,8 @@ class _AppRouterState extends State<AppRouter> {
           return const SupervisorTabsScreen();
         case UserRole.manager:
           return const ManagerTabsScreen();
+        case UserRole.encoder:
+          return const EncoderTabsScreen();
         case UserRole.superuser:
           return const SuperuserTabsScreen();
       }

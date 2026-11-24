@@ -8,6 +8,7 @@ import 'package:compact_sales_monitoring/models/route_model.dart';
 import 'package:compact_sales_monitoring/models/user_model.dart';
 import 'package:compact_sales_monitoring/providers/auth_provider.dart';
 import 'package:compact_sales_monitoring/services/firestore_service.dart';
+import 'package:compact_sales_monitoring/services/salesman_performance_helper.dart';
 import 'package:compact_sales_monitoring/widgets/route_detail_modal.dart';
 import 'package:compact_sales_monitoring/widgets/loading_skeletons.dart';
 
@@ -49,7 +50,14 @@ class _SupervisorHomeScreenState extends State<SupervisorHomeScreen> {
 
     final team = results[0] as List<AppUser>;
     final routes = results[1] as List<SalesRoute>;
-    final submissionsBySalesman = results[2] as Map<String, AgileSubmission>;
+    final rawSubmissions = results[2] as Map<String, AgileSubmission>;
+    final submissionsBySalesman =
+        SalesmanPerformanceHelper.buildEffectiveSubmissionsBySalesman(
+          salesmen: team,
+          date: today,
+          rawAgileSubmissions: rawSubmissions,
+          routes: routes,
+        );
     final routesBySalesman = <String, SalesRoute>{};
 
     for (final route in routes) {
@@ -496,12 +504,6 @@ class _SupervisorHomeScreenState extends State<SupervisorHomeScreen> {
         onRouteChanged: _refresh,
       ),
     );
-
-    if (!mounted) {
-      return;
-    }
-
-    await _refresh();
   }
 
   @override
@@ -877,22 +879,37 @@ class _SalesmanSummaryCard extends StatelessWidget {
           const SizedBox(height: 16),
         ],
         const SizedBox(height: 10),
-        GridView.count(
-          crossAxisCount: 2,
-          mainAxisSpacing: 8,
-          crossAxisSpacing: 8,
-          childAspectRatio: 2.7,
-          shrinkWrap: true,
-          physics: const NeverScrollableScrollPhysics(),
-          children: [
-            _MetricCell(label: 'First Call', value: _firstCallText),
-            _MetricCell(label: 'Last Call', value: _lastCallText),
-            _MetricCell(
-              label: 'Actual Productive Calls',
-              value: _actualProductiveCallsText,
-            ),
-            _MetricCell(label: 'Actual STT', value: _actualSttText),
-          ],
+        IntrinsicHeight(
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Expanded(
+                child: _MetricCell(label: 'First Call', value: _firstCallText),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: _MetricCell(label: 'Last Call', value: _lastCallText),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 8),
+        IntrinsicHeight(
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Expanded(
+                child: _MetricCell(
+                  label: 'Actual Productive Calls',
+                  value: _actualProductiveCallsText,
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: _MetricCell(label: 'Actual STT', value: _actualSttText),
+              ),
+            ],
+          ),
         ),
         const SizedBox(height: 10),
         SizedBox(

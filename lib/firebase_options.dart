@@ -47,15 +47,15 @@ class DefaultFirebaseOptions {
     messagingSenderId: FirebaseWebKeys.messagingSenderId,
     projectId: 'sales-team-stream-monitoring',
     authDomain: 'sales-team-stream-monitoring.firebaseapp.com',
-    storageBucket: 'sales-team-stream-monitoring.firebasestorage.app',
+    storageBucket: 'sales-team-stream-monitoring',
   );
 
   static const FirebaseOptions android = FirebaseOptions(
     apiKey: 'AIzaSyDxtzJrIIV8Uw8oWPru-JhPi_Re6aVHX9s',
-    appId: '1:820214382404:android:07f1c0e9ed7703e7b16111',
+    appId: '1:820214382404:android:55f25b1e195441a9b16111',
     messagingSenderId: '820214382404',
     projectId: 'sales-team-stream-monitoring',
-    storageBucket: 'sales-team-stream-monitoring.firebasestorage.app',
+    storageBucket: 'sales-team-stream-monitoring',
   );
 
   static const FirebaseOptions ios = FirebaseOptions(
@@ -63,7 +63,7 @@ class DefaultFirebaseOptions {
     appId: FirebaseWebKeys.appId,
     messagingSenderId: FirebaseWebKeys.messagingSenderId,
     projectId: 'sales-team-stream-monitoring',
-    storageBucket: 'sales-team-stream-monitoring.firebasestorage.app',
+    storageBucket: 'sales-team-stream-monitoring',
     iosBundleId: 'com.example.compactSalesMonitoring',
   );
 
@@ -72,7 +72,7 @@ class DefaultFirebaseOptions {
     appId: FirebaseWebKeys.appId,
     messagingSenderId: FirebaseWebKeys.messagingSenderId,
     projectId: 'sales-team-stream-monitoring',
-    storageBucket: 'sales-team-stream-monitoring.firebasestorage.app',
+    storageBucket: 'sales-team-stream-monitoring',
     iosBundleId: 'com.example.compactSalesMonitoring',
   );
 
@@ -82,7 +82,7 @@ class DefaultFirebaseOptions {
     messagingSenderId: FirebaseWebKeys.messagingSenderId,
     projectId: 'sales-team-stream-monitoring',
     authDomain: 'sales-team-stream-monitoring.firebaseapp.com',
-    storageBucket: 'sales-team-stream-monitoring.firebasestorage.app',
+    storageBucket: 'sales-team-stream-monitoring',
   );
 
 }

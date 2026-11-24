@@ -206,7 +206,7 @@ class RoutingService {
       }
 
       return coordinates
-          .cast<List>()
+          .cast<List<dynamic>>()
           .map(
             (coord) => LatLng(
               (coord[1] as num).toDouble(),

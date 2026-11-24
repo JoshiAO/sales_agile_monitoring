@@ -113,7 +113,11 @@ class _CameraScreenState extends State<CameraScreen> {
       await controller.initialize();
       await controller.startImageStream(_processCameraImage);
 
-      if (!mounted) return;
+      if (!mounted) {
+        await controller.stopImageStream().catchError((_) {});
+        await controller.dispose();
+        return;
+      }
       setState(() {
         _cameraController = controller;
         _isInitializing = false;

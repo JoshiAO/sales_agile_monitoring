@@ -13,6 +13,7 @@ import 'package:compact_sales_monitoring/providers/version_provider.dart';
 import 'package:compact_sales_monitoring/models/company_branding_model.dart';
 import 'package:compact_sales_monitoring/app_router.dart';
 import 'package:compact_sales_monitoring/screens/splash_screen.dart';
+import 'package:compact_sales_monitoring/screens/salesman/invoice_overlay_app.dart';
 
 /// Selectively clears corrupted background tracking keys left by older app
 /// versions (e.g. v2.1.4, v2.1.5). Only removes background service state —
@@ -129,6 +130,13 @@ void main() async {
 
   final initialBranding = await CompanyBrandingProvider.loadLastCachedBranding();
   runApp(MainApp(initialBranding: initialBranding));
+}
+
+@pragma('vm:entry-point')
+Future<void> invoiceOverlayMain() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await FirebaseService.initializeApp();
+  runApp(const InvoiceOverlayApp());
 }
 
 class MainApp extends StatelessWidget {

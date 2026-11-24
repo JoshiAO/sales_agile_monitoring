@@ -5,6 +5,7 @@ import 'package:compact_sales_monitoring/models/agile_model.dart';
 import 'package:compact_sales_monitoring/models/route_model.dart';
 import 'package:compact_sales_monitoring/models/user_model.dart';
 import 'package:compact_sales_monitoring/services/firestore_service.dart';
+import 'package:compact_sales_monitoring/services/salesman_performance_helper.dart';
 import 'package:excel/excel.dart';
 import 'package:intl/intl.dart';
 import 'package:compact_sales_monitoring/services/export_file_saver/export_file_saver.dart';
@@ -254,6 +255,14 @@ class AgileExportService {
         continue;
       }
 
+      final effectiveActuals = salesman != null
+          ? SalesmanPerformanceHelper.resolveForDate(
+              salesman: salesman,
+              agileSubmission: submission,
+              salesmanRoutes: route == null ? const [] : [route],
+            )
+          : null;
+
       rows.add(
         _AgileExportRow(
           date: dateText,
@@ -272,9 +281,11 @@ class AgileExportService {
                     (route.hasLastCall ? 1 : 0) +
                     route.sortedCheckpoints.length,
           productiveCallsTarget: target?.productiveCallsTarget ?? 0,
-          actualProductiveCalls: submission?.productiveCalls ?? 0,
+          actualProductiveCalls:
+              effectiveActuals?.productiveCalls ??
+              (submission?.productiveCalls ?? 0),
           sttTarget: target?.sttTarget ?? 0.0,
-          actualStt: submission?.sttActual ?? 0.0,
+          actualStt: effectiveActuals?.stt ?? (submission?.sttActual ?? 0.0),
         ),
       );
     }

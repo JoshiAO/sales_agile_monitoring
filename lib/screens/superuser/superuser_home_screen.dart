@@ -9,6 +9,7 @@ import 'package:compact_sales_monitoring/providers/auth_provider.dart';
 import 'package:compact_sales_monitoring/screens/superuser/superuser_team_preview_screen.dart';
 import 'package:compact_sales_monitoring/screens/superuser/superuser_calls_view_screen.dart';
 import 'package:compact_sales_monitoring/services/firestore_service.dart';
+import 'package:compact_sales_monitoring/services/salesman_performance_helper.dart';
 import 'package:compact_sales_monitoring/widgets/date_selector_widget.dart';
 import 'package:compact_sales_monitoring/widgets/loading_skeletons.dart';
 
@@ -47,7 +48,14 @@ class _SuperuserHomeScreenState extends State<SuperuserHomeScreen> {
     final supervisors = (results[0] as List<AppUser>).toList();
     final salesmen = (results[1] as List<AppUser>).toList();
     final routes = results[2] as List<SalesRoute>;
-    final submissionsBySalesman = results[3] as Map<String, AgileSubmission>;
+    final rawSubmissions = results[3] as Map<String, AgileSubmission>;
+    final submissionsBySalesman =
+        SalesmanPerformanceHelper.buildEffectiveSubmissionsBySalesman(
+          salesmen: salesmen,
+          date: dateStr,
+          rawAgileSubmissions: rawSubmissions,
+          routes: routes,
+        );
 
     final salesmenBySupervisor = <String, List<AppUser>>{};
     for (final salesman in salesmen) {

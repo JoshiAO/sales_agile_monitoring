@@ -29,11 +29,14 @@ import 'package:compact_sales_monitoring/services/firestore_service.dart';
 import 'package:compact_sales_monitoring/services/telemetry_service.dart';
 import 'package:compact_sales_monitoring/services/background_location_service.dart';
 import 'package:compact_sales_monitoring/services/connectivity_check_service.dart';
+import 'package:compact_sales_monitoring/services/transaction_sync_service.dart';
 import 'package:compact_sales_monitoring/screens/troubleshooting_screen.dart';
 import 'package:flutter_background_service/flutter_background_service.dart';
 
 class SalesmanHomeScreen extends StatefulWidget {
-  const SalesmanHomeScreen({super.key});
+  final Widget? logoutStatusPill;
+
+  const SalesmanHomeScreen({super.key, this.logoutStatusPill});
 
   @override
   State<SalesmanHomeScreen> createState() => _SalesmanHomeScreenState();
@@ -79,12 +82,15 @@ class _SalesmanHomeScreenState extends State<SalesmanHomeScreen>
     _midnightRolloverTimer = Timer(delay, () async {
       if (!mounted) return;
 
-      // 1. Flush any pending offline call/checkpoints from the day that just
+      // 1. Flush any pending offline call/checkpoints/transactions from the day that just
       //    ended to their own historical route document BEFORE stopping/cleaning.
       await BackgroundLocationService.flushPendingBatch().catchError((_) {});
       await _checkpointQueue
           .flush(_firestoreService.appendRouteCheckpoint)
           .catchError((_) {});
+      await TransactionSyncService().flushPendingTransactions().catchError(
+        (_) => <String>{},
+      );
       // 2. Stop the background service for the previous day's session.
       await BackgroundLocationService.stopTracking().catchError((_) {});
       // 3. Clean up stale session state before loading the new day.
@@ -447,6 +453,7 @@ class _SalesmanHomeScreenState extends State<SalesmanHomeScreen>
     required DateTime capturedAt,
     required bool isFirst,
   }) async {
+    if (kIsWeb) return null;
     try {
       if (Platform.isIOS) {
         final status = await Permission.photosAddOnly.request();
@@ -474,6 +481,7 @@ class _SalesmanHomeScreenState extends State<SalesmanHomeScreen>
   }
 
   Future<String?> _resolveLocalImagePath(DateTime timestamp) async {
+    if (kIsWeb) return null;
     final appDir = await getApplicationDocumentsDirectory();
     final localPath =
         '${appDir.path}/call_images/call_${timestamp.millisecondsSinceEpoch}.jpg';
@@ -483,7 +491,7 @@ class _SalesmanHomeScreenState extends State<SalesmanHomeScreen>
 
   void _previewCallImage({required bool isFirst, required RoutePoint point}) {
     final localPath = isFirst ? _firstLocalImagePath : _lastLocalImagePath;
-    final imageProvider = (localPath != null && File(localPath).existsSync())
+    final imageProvider = (!kIsWeb && localPath != null && File(localPath).existsSync())
         ? FileImage(File(localPath)) as ImageProvider
         : NetworkImage(point.imageUrl);
 
@@ -576,11 +584,18 @@ class _SalesmanHomeScreenState extends State<SalesmanHomeScreen>
       _checkpointQueue
           .flush(_firestoreService.appendRouteCheckpoint)
           .catchError((_) {});
-      _loadTodayRoute();
+      TransactionSyncService().flushPendingTransactions().catchError(
+        (_) => <String>{},
+      );
+      if (mounted) {
+        _loadTodayRoute();
+      }
     }).catchError((Object e) {
       debugPrint('[SalesmanHomeScreen] initState guard error: $e');
       BackgroundLocationService.flushPendingBatchIfDue().catchError((_) {});
-      _loadTodayRoute();
+      if (mounted) {
+        _loadTodayRoute();
+      }
     });
   }
 
@@ -593,6 +608,9 @@ class _SalesmanHomeScreenState extends State<SalesmanHomeScreen>
       _checkpointQueue
           .flush(_firestoreService.appendRouteCheckpoint)
           .catchError((_) {});
+      TransactionSyncService().flushPendingTransactions().catchError(
+        (_) => <String>{},
+      );
 
       if (_loadedForDate != null && _loadedForDate != _todayDate) {
         _loadTodayRoute();
@@ -803,6 +821,7 @@ class _SalesmanHomeScreenState extends State<SalesmanHomeScreen>
   }
 
   Future<void> _loadTodayRoute() async {
+    if (!mounted) return;
     final authProvider = context.read<AuthProvider>();
     final user = authProvider.currentUser;
 
@@ -918,6 +937,7 @@ class _SalesmanHomeScreenState extends State<SalesmanHomeScreen>
             debugPrint('[SalesmanHomeScreen] _loadTodayRoute: corrupted pending_first_call_v2. Resetting.');
             await BackgroundLocationService.cleanupStaleSession(_todayDate);
             await _clearActiveFirstCallCache();
+            if (!mounted) return;
             _resetRouteState();
           }
         } else {
@@ -971,10 +991,9 @@ class _SalesmanHomeScreenState extends State<SalesmanHomeScreen>
           await BackgroundLocationService.purgeStaleLocalCheckpoints(prefs, _todayDate);
           await _clearActiveFirstCallCache();
           await BackgroundLocationService.stopTracking();
+          if (!mounted) return;
           _resetRouteState();
-          if (mounted) {
-            context.read<VersionProvider>().setSessionActive(false);
-          }
+          context.read<VersionProvider>().setSessionActive(false);
         }
       }
     }
@@ -982,6 +1001,7 @@ class _SalesmanHomeScreenState extends State<SalesmanHomeScreen>
   }
 
   void _resetRouteState() {
+    if (!mounted) return;
     setState(() {
       _todayRouteId = null;
       _firstPoint = null;
@@ -1526,6 +1546,14 @@ class _SalesmanHomeScreenState extends State<SalesmanHomeScreen>
               _lastCheckpointLon = routePoint.lon;
             });
             _syncCheckpointTracking();
+            unawaited(
+              TransactionSyncService()
+                  .flushPendingTransactions(
+                    knownRouteId: committedRouteId,
+                    knownRouteDate: _todayDate,
+                  )
+                  .catchError((_) => <String>{}),
+            );
 
             final versionProvider = context.read<VersionProvider>();
             versionProvider.setSessionActive(true);
@@ -1642,8 +1670,8 @@ class _SalesmanHomeScreenState extends State<SalesmanHomeScreen>
 
         while (true) {
           try {
-            // 1. Ensure any pending offline First Call is flushed to Firestore first.
-            await BackgroundLocationService.flushPendingFirstCall();
+            // 1. Ensure any pending offline First Call is flushed to Firestore via locked batch flusher.
+            await BackgroundLocationService.flushPendingBatch();
             final prefs = await SharedPreferences.getInstance();
             await prefs.reload();
             final rawPendingFirst = prefs.getString('pending_first_call_v2');
@@ -1731,6 +1759,14 @@ class _SalesmanHomeScreenState extends State<SalesmanHomeScreen>
                 .flush(_firestoreService.appendRouteCheckpoint)
                 .catchError((_) {});
             _syncCheckpointTracking();
+            unawaited(
+              TransactionSyncService()
+                  .flushPendingTransactions(
+                    knownRouteId: committedRouteId,
+                    knownRouteDate: _todayDate,
+                  )
+                  .catchError((_) => <String>{}),
+            );
 
             if (mounted) {
               context.read<VersionProvider>().setSessionActive(false);
@@ -1905,11 +1941,13 @@ class _SalesmanHomeScreenState extends State<SalesmanHomeScreen>
         ],
       ),
       body: SafeArea(
-        child: Center(
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              const Spacer(),
+        child: Stack(
+          children: [
+            Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  const Spacer(),
               // Title
               const Text(
                 'Daily Route Tracker',
@@ -2036,6 +2074,14 @@ class _SalesmanHomeScreenState extends State<SalesmanHomeScreen>
             ],
           ),
         ),
+        if (widget.logoutStatusPill != null)
+          Positioned(
+            top: 8,
+            left: 12,
+            child: widget.logoutStatusPill!,
+          ),
+      ],
+    ),
       ),
     );
   }

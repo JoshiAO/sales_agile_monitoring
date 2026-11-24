@@ -3,10 +3,12 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'dart:async';
 import 'package:provider/provider.dart';
+import 'package:compact_sales_monitoring/models/user_model.dart';
 import 'package:compact_sales_monitoring/providers/auth_provider.dart';
 import 'package:compact_sales_monitoring/screens/salesman/salesman_home_screen.dart';
-import 'package:compact_sales_monitoring/screens/shared/feeds_page.dart';
+import 'package:compact_sales_monitoring/screens/salesman/salesman_transactions_screen.dart';
 import 'package:compact_sales_monitoring/services/firestore_service.dart';
+import 'package:compact_sales_monitoring/services/transaction_storage_service.dart';
 import 'package:compact_sales_monitoring/widgets/agile_call_form_card.dart';
 import 'package:compact_sales_monitoring/services/telemetry_service.dart';
 
@@ -20,27 +22,52 @@ class SalesmanTabsScreen extends StatefulWidget {
 class _SalesmanTabsScreenState extends State<SalesmanTabsScreen> {
   int _currentIndex = 0;
   int _agileRefreshTrigger = 0;
+  int _transactionsRefreshTrigger = 0;
+  int _pendingTransactionsCount = 0;
   final FirestoreService _firestoreService = FirestoreService();
+  final TransactionStorageService _transactionStorage =
+      TransactionStorageService();
   StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>?
   _logoutRequestSubscription;
   String? _lastLogoutRequestStatus;
   String? _currentLogoutRequestStatus;
   bool _hasLoadedInitialLogoutStatus = false;
 
-  void _onTabSelected(int index) {
+  bool _isBookingUser(AppUser? user) => user?.isBooking ?? false;
+
+  void _onTabSelected(int index, {required bool isBooking}) {
     setState(() {
       _currentIndex = index;
       if (index == 1) {
-        _agileRefreshTrigger++;
+        if (isBooking) {
+          _agileRefreshTrigger++;
+        } else {
+          _transactionsRefreshTrigger++;
+        }
       }
     });
+    if (!isBooking) {
+      _refreshPendingTransactionsCount();
+    }
   }
 
-  List<Widget> get _pages => [
-    const SalesmanHomeScreen(),
-    _AgileTab(refreshTrigger: _agileRefreshTrigger),
-    const FeedsPage(),
+  List<Widget> _buildPages({required bool isBooking}) => [
+    SalesmanHomeScreen(logoutStatusPill: _buildLogoutStatusPill()),
+    if (isBooking)
+      _AgileTab(refreshTrigger: _agileRefreshTrigger)
+    else
+      SalesmanTransactionsScreen(
+        refreshTrigger: _transactionsRefreshTrigger,
+        onPendingCountChanged: _refreshPendingTransactionsCount,
+      ),
   ];
+
+  Future<void> _refreshPendingTransactionsCount() async {
+    final count = await _transactionStorage.getCachedPendingCount();
+    if (mounted && count != _pendingTransactionsCount) {
+      setState(() => _pendingTransactionsCount = count);
+    }
+  }
 
   Widget _badgeIcon(IconData icon, int count) {
     if (count <= 0) {
@@ -83,6 +110,7 @@ class _SalesmanTabsScreenState extends State<SalesmanTabsScreen> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _bindLogoutRequestListener();
       TelemetryService.requestUsagePermission();
+      _refreshPendingTransactionsCount();
     });
   }
 
@@ -463,7 +491,11 @@ class _SalesmanTabsScreenState extends State<SalesmanTabsScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final uid = context.watch<AuthProvider>().currentUser?.uid;
+    final currentUser = context.watch<AuthProvider>().currentUser;
+    final uid = currentUser?.uid;
+    final isBooking = _isBookingUser(currentUser);
+    final pages = _buildPages(isBooking: isBooking);
+    final safeIndex = _currentIndex.clamp(0, pages.length - 1);
     final unreadStream = uid == null
         ? const Stream<int>.empty()
         : _firestoreService.watchUnreadSalesmanNotificationCount(uid: uid);
@@ -486,8 +518,9 @@ class _SalesmanTabsScreenState extends State<SalesmanTabsScreen> {
                         children: [
                           Expanded(
                             child: NavigationRail(
-                              selectedIndex: _currentIndex,
-                              onDestinationSelected: _onTabSelected,
+                              selectedIndex: safeIndex,
+                              onDestinationSelected: (idx) =>
+                                  _onTabSelected(idx, isBooking: isBooking),
                               leading: _buildMenuHeader(isExpandedRail),
                               extended: isExpandedRail,
                               labelType: NavigationRailLabelType.none,
@@ -499,16 +532,24 @@ class _SalesmanTabsScreenState extends State<SalesmanTabsScreen> {
                                   selectedIcon: Icon(Icons.co_present),
                                   label: Text('Calls'),
                                 ),
-                                const NavigationRailDestination(
-                                  icon: Icon(Icons.auto_graph_outlined),
-                                  selectedIcon: Icon(Icons.auto_graph),
-                                  label: Text('Agile'),
-                                ),
-                                const NavigationRailDestination(
-                                  icon: Icon(Icons.feed_outlined),
-                                  selectedIcon: Icon(Icons.feed),
-                                  label: Text('Feeds'),
-                                ),
+                                if (isBooking)
+                                  const NavigationRailDestination(
+                                    icon: Icon(Icons.auto_graph_outlined),
+                                    selectedIcon: Icon(Icons.auto_graph),
+                                    label: Text('Agile'),
+                                  )
+                                else
+                                  NavigationRailDestination(
+                                    icon: _badgeIcon(
+                                      Icons.receipt_long_outlined,
+                                      _pendingTransactionsCount,
+                                    ),
+                                    selectedIcon: _badgeIcon(
+                                      Icons.receipt_long,
+                                      _pendingTransactionsCount,
+                                    ),
+                                    label: const Text('Transactions'),
+                                  ),
                               ],
                             ),
                           ),
@@ -519,8 +560,8 @@ class _SalesmanTabsScreenState extends State<SalesmanTabsScreen> {
                       const VerticalDivider(width: 1),
                       Expanded(
                         child: IndexedStack(
-                          index: _currentIndex,
-                          children: _pages,
+                          index: safeIndex,
+                          children: pages,
                         ),
                       ),
                     ],
@@ -534,35 +575,35 @@ class _SalesmanTabsScreenState extends State<SalesmanTabsScreen> {
     }
 
     return Scaffold(
-      body: Stack(
-        children: [
-          IndexedStack(index: _currentIndex, children: _pages),
-          Positioned(
-            top: 8,
-            left: 10,
-            child: _buildLogoutStatusPill(),
-          ),
-        ],
-      ),
+      body: IndexedStack(index: safeIndex, children: pages),
       bottomNavigationBar: BottomNavigationBar(
-        currentIndex: _currentIndex,
-        onTap: _onTabSelected,
-        items: const [
-          BottomNavigationBarItem(
+        type: BottomNavigationBarType.fixed,
+        currentIndex: safeIndex,
+        onTap: (idx) => _onTabSelected(idx, isBooking: isBooking),
+        items: [
+          const BottomNavigationBarItem(
             icon: Icon(Icons.co_present_outlined),
             activeIcon: Icon(Icons.co_present),
             label: 'Calls',
           ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.auto_graph_outlined),
-            activeIcon: Icon(Icons.auto_graph),
-            label: 'Agile',
-          ),
-          const BottomNavigationBarItem(
-            icon: Icon(Icons.feed_outlined),
-            activeIcon: Icon(Icons.feed),
-            label: 'Feeds',
-          ),
+          if (isBooking)
+            const BottomNavigationBarItem(
+              icon: Icon(Icons.auto_graph_outlined),
+              activeIcon: Icon(Icons.auto_graph),
+              label: 'Agile',
+            )
+          else
+            BottomNavigationBarItem(
+              icon: _badgeIcon(
+                Icons.receipt_long_outlined,
+                _pendingTransactionsCount,
+              ),
+              activeIcon: _badgeIcon(
+                Icons.receipt_long,
+                _pendingTransactionsCount,
+              ),
+              label: 'Transactions',
+            ),
         ],
       ),
     );

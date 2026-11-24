@@ -1,6 +1,8 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 
-enum UserRole { salesman, supervisor, superuser, manager }
+enum UserRole { salesman, supervisor, superuser, manager, encoder }
+
+enum SalesmanClassification { vanExTruck, booking }
 
 DateTime? _dateTimeFromDynamic(dynamic value) {
   if (value == null) return null;
@@ -23,6 +25,8 @@ class AppUser {
   final UserRole role;
   final bool active;
   final String? supervisorId;
+  final String? encoderId;
+  final SalesmanClassification salesmanClassification;
   final String? profilePic;
   final bool logoutRequestPending;
   final bool logoutRequestApproved;
@@ -41,6 +45,8 @@ class AppUser {
     required this.role,
     required this.active,
     this.supervisorId,
+    this.encoderId,
+    this.salesmanClassification = SalesmanClassification.booking,
     this.profilePic,
     required this.logoutRequestPending,
     required this.logoutRequestApproved,
@@ -52,7 +58,18 @@ class AppUser {
     this.companyId,
   });
 
+  bool get isVanExTruck =>
+      salesmanClassification == SalesmanClassification.vanExTruck;
+
+  bool get isBooking =>
+      salesmanClassification == SalesmanClassification.booking;
+
   factory AppUser.fromMap(Map<String, dynamic> data, {required String uid}) {
+    final rawClassification =
+        (data['salesmanClassification'] ??
+                data['classification'] ??
+                data['salesmanType'])
+            as String?;
     return AppUser(
       uid: uid,
       email: data['email'] as String? ?? '',
@@ -61,6 +78,10 @@ class AppUser {
       role: roleFromString(data['role'] as String? ?? 'salesman'),
       active: data['active'] as bool? ?? false,
       supervisorId: data['supervisorId'] as String?,
+      encoderId: (data['encoderId'] as String?)?.trim().isEmpty == true
+          ? null
+          : (data['encoderId'] as String?)?.trim(),
+      salesmanClassification: classificationFromString(rawClassification),
       profilePic: data['profilePic'] as String?,
       logoutRequestPending: data['logoutRequestPending'] as bool? ?? false,
       logoutRequestApproved: data['logoutRequestApproved'] as bool? ?? false,
@@ -69,10 +90,12 @@ class AppUser {
       logoutResolvedAt: _dateTimeFromDynamic(data['logoutResolvedAt']),
       logoutResolvedBy: data['logoutResolvedBy'] as String?,
       logoutResolvedByName: data['logoutResolvedByName'] as String?,
-      companyId: ((data['company_ID'] ??
-                  data['companyId'] ??
-                  data['company_id'] ??
-                  data['companyID']) as String?)
+      companyId:
+          ((data['company_ID'] ??
+                      data['companyId'] ??
+                      data['company_id'] ??
+                      data['companyID'])
+                  as String?)
               ?.trim(),
     );
   }
@@ -85,6 +108,8 @@ class AppUser {
       'role': roleToString(role),
       'active': active,
       'supervisorId': supervisorId,
+      'encoderId': encoderId,
+      'salesmanClassification': classificationToString(salesmanClassification),
       'profilePic': profilePic,
       'logoutRequestPending': logoutRequestPending,
       'logoutRequestApproved': logoutRequestApproved,
@@ -105,6 +130,9 @@ class AppUser {
     UserRole? role,
     bool? active,
     String? supervisorId,
+    String? encoderId,
+    bool clearEncoderId = false,
+    SalesmanClassification? salesmanClassification,
     String? profilePic,
     bool? logoutRequestPending,
     bool? logoutRequestApproved,
@@ -123,6 +151,9 @@ class AppUser {
       role: role ?? this.role,
       active: active ?? this.active,
       supervisorId: supervisorId ?? this.supervisorId,
+      encoderId: clearEncoderId ? null : (encoderId ?? this.encoderId),
+      salesmanClassification:
+          salesmanClassification ?? this.salesmanClassification,
       profilePic: profilePic ?? this.profilePic,
       logoutRequestPending: logoutRequestPending ?? this.logoutRequestPending,
       logoutRequestApproved:
@@ -147,6 +178,8 @@ UserRole roleFromString(String role) {
       return UserRole.superuser;
     case 'manager':
       return UserRole.manager;
+    case 'encoder':
+      return UserRole.encoder;
     default:
       return UserRole.salesman;
   }
@@ -162,5 +195,43 @@ String roleToString(UserRole role) {
       return 'superuser';
     case UserRole.manager:
       return 'manager';
+    case UserRole.encoder:
+      return 'encoder';
+  }
+}
+
+SalesmanClassification classificationFromString(String? value) {
+  final normalized = (value ?? '').trim().toLowerCase().replaceAll(
+    RegExp(r'[\s\-]+'),
+    '_',
+  );
+  switch (normalized) {
+    case 'van_ex_truck':
+    case 'vanextruck':
+    case 'ex_truck':
+    case 'extruck':
+      return SalesmanClassification.vanExTruck;
+    case 'booking':
+    case '':
+    default:
+      return SalesmanClassification.booking;
+  }
+}
+
+String classificationToString(SalesmanClassification classification) {
+  switch (classification) {
+    case SalesmanClassification.vanExTruck:
+      return 'van_ex_truck';
+    case SalesmanClassification.booking:
+      return 'booking';
+  }
+}
+
+String classificationLabel(SalesmanClassification classification) {
+  switch (classification) {
+    case SalesmanClassification.vanExTruck:
+      return 'Van Ex-Truck';
+    case SalesmanClassification.booking:
+      return 'Booking';
   }
 }

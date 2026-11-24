@@ -1,5 +1,6 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'dart:math' as math;
+import 'package:compact_sales_monitoring/models/transaction_model.dart';
 
 class DataUsageEntry {
   final String appName;
@@ -177,6 +178,7 @@ class SalesRoute {
   final bool hasFirstCall;
   final bool hasLastCall;
   final List<RouteCheckpoint> checkpoints;
+  final List<RouteTransaction> transactions;
   final List<CachedPolylinePoint> cachedPolyline;
   final bool cachedPolylineApproximate;
   final bool hasCachedPolylineApproximateFlag;
@@ -196,6 +198,7 @@ class SalesRoute {
     this.hasFirstCall = true,
     this.hasLastCall = true,
     this.checkpoints = const [],
+    this.transactions = const [],
     this.cachedPolyline = const [],
     this.cachedPolylineApproximate = false,
     this.hasCachedPolylineApproximateFlag = false,
@@ -232,6 +235,17 @@ class SalesRoute {
               })
               .toList()
             ..sort((a, b) => a.timestamp.compareTo(b.timestamp)),
+      transactions:
+          ((data['transactions'] as List?) ?? const [])
+              .whereType<Map<String, dynamic>>()
+              .map(RouteTransaction.fromMap)
+              .where((tx) {
+                final routeDate = data['date'] as String? ?? '';
+                if (routeDate.isEmpty || tx.routeDate.isEmpty) return true;
+                return tx.routeDate == routeDate;
+              })
+              .toList()
+            ..sort((a, b) => a.capturedAt.compareTo(b.capturedAt)),
       cachedPolyline: ((data['cachedPolyline'] as List?) ?? const [])
           .whereType<Map<String, dynamic>>()
           .map(CachedPolylinePoint.fromMap)
@@ -261,6 +275,9 @@ class SalesRoute {
       'checkpoints': checkpoints
           .map((checkpoint) => checkpoint.toMap())
           .toList(),
+      'transactions': transactions
+          .map((tx) => tx.toFirestoreMap())
+          .toList(),
       'cachedPolyline': cachedPolyline.map((p) => p.toMap()).toList(),
       'cachedPolylineApproximate': cachedPolylineApproximate,
       'distance': distance,
@@ -272,6 +289,17 @@ class SalesRoute {
   }
 
   late final List<RouteCheckpoint> sortedCheckpoints = _computeSortedCheckpoints();
+
+  late final List<RouteTransaction> sortedTransactions = _computeSortedTransactions();
+
+  List<RouteTransaction> _computeSortedTransactions() {
+    final ordered = transactions.where((tx) {
+      if (date.isEmpty || tx.routeDate.isEmpty) return true;
+      return tx.routeDate == date;
+    }).toList();
+    ordered.sort((a, b) => a.capturedAt.compareTo(b.capturedAt));
+    return List.unmodifiable(ordered);
+  }
 
   List<RouteCheckpoint> _computeSortedCheckpoints() {
     final ordered = checkpoints.where((cp) {

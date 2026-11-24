@@ -3,8 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:provider/provider.dart';
 import 'package:compact_sales_monitoring/providers/auth_provider.dart';
-import 'package:compact_sales_monitoring/screens/shared/announcement_page.dart';
-import 'package:compact_sales_monitoring/screens/shared/feeds_page.dart';
+import 'package:compact_sales_monitoring/screens/shared/web_transactions_page.dart';
 import 'package:compact_sales_monitoring/screens/superuser/superuser_dashboard.dart';
 import 'package:compact_sales_monitoring/screens/superuser/superuser_home_screen.dart';
 import 'package:compact_sales_monitoring/screens/superuser/superuser_agile_page.dart';
@@ -41,11 +40,9 @@ class _ManagerTabsScreenState extends State<ManagerTabsScreen> {
       case 1:
         return SuperUserDashboard(key: ValueKey('mgr-map-$_refreshTick'));
       case 2:
-        return SuperuserAgilePage(key: ValueKey('mgr-agile-$_refreshTick'));
+        return WebTransactionsPage(key: ValueKey('mgr-tx-$_refreshTick'));
       case 3:
-        return const FeedsPage();
-      case 4:
-        return AnnouncementPage(key: ValueKey('mgr-announcement-$_refreshTick'));
+        return SuperuserAgilePage(key: ValueKey('mgr-agile-$_refreshTick'));
       default:
         return const SizedBox.shrink();
     }
@@ -53,7 +50,7 @@ class _ManagerTabsScreenState extends State<ManagerTabsScreen> {
 
   List<Widget> _buildPages() {
     return List<Widget>.generate(
-      5,
+      4,
       (index) => _visitedTabs.contains(index)
           ? _buildTabPage(index)
           : const SizedBox.shrink(),
@@ -276,19 +273,14 @@ class _ManagerTabsScreenState extends State<ManagerTabsScreen> {
                               label: Text('Map'),
                             ),
                             NavigationRailDestination(
+                              icon: Icon(Icons.receipt_long_outlined),
+                              selectedIcon: Icon(Icons.receipt_long),
+                              label: Text('Transactions'),
+                            ),
+                            NavigationRailDestination(
                               icon: Icon(Icons.auto_graph_outlined),
                               selectedIcon: Icon(Icons.auto_graph),
                               label: Text('Agile'),
-                            ),
-                            NavigationRailDestination(
-                              icon: Icon(Icons.feed_outlined),
-                              selectedIcon: Icon(Icons.feed),
-                              label: Text('Feeds'),
-                            ),
-                            NavigationRailDestination(
-                              icon: Icon(Icons.campaign_outlined),
-                              selectedIcon: Icon(Icons.campaign),
-                              label: Text('Announcements'),
                             ),
                           ],
                         ),
@@ -340,19 +332,14 @@ class _ManagerTabsScreenState extends State<ManagerTabsScreen> {
             label: 'Map',
           ),
           BottomNavigationBarItem(
+            icon: Icon(Icons.receipt_long_outlined),
+            activeIcon: Icon(Icons.receipt_long),
+            label: 'Transactions',
+          ),
+          BottomNavigationBarItem(
             icon: Icon(Icons.auto_graph_outlined),
             activeIcon: Icon(Icons.auto_graph),
             label: 'Agile',
-          ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.feed_outlined),
-            activeIcon: Icon(Icons.feed),
-            label: 'Feeds',
-          ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.campaign_outlined),
-            activeIcon: Icon(Icons.campaign),
-            label: 'Announce',
           ),
         ],
       ),

@@ -14,11 +14,14 @@ class AppConstants {
   // Date format
   static const String dateFormat = 'yyyy-MM-dd';
 
+  // Feature Flags
+  static const bool enableTransactionsFeature = false;
+
   // OpenStreetMap Tiles
   static const bool useOfflineTiles = false;
   static const String offlineTileUrl = 'assets/tiles/luzon/{z}/{x}/{y}.png';
   static const String offlineAttribution = 'Offline Luzon map tiles';
   static const String osmTileUrl = 'https://tile.openstreetmap.org/{z}/{x}/{y}.png';
   static const String osmAttribution = '© OpenStreetMap contributors';
-  static const String osmUserAgentPackage = 'com.joshiao.compact_sales_monitoring';
+  static const String osmUserAgentPackage = 'com.agile.app.jao';
 }

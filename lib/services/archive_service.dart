@@ -1,11 +1,10 @@
 import 'dart:io';
-import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
 import 'package:compact_sales_monitoring/services/web_downloader.dart';
 
 import 'package:archive/archive.dart';
+import 'package:dio/dio.dart';
 import 'package:excel/excel.dart';
-import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:compact_sales_monitoring/models/route_model.dart';
@@ -35,29 +34,174 @@ class ArchiveResult {
   });
 }
 
+class ImageRangePreview {
+  final String startDate;
+  final String endDate;
+  final int routeCount;
+  final int imageCount;
+
+  const ImageRangePreview({
+    required this.startDate,
+    required this.endDate,
+    required this.routeCount,
+    required this.imageCount,
+  });
+}
+
+class ImageDeleteResult {
+  final String startDate;
+  final String endDate;
+  final int affectedRouteCount;
+  final int deletedImageCount;
+  final int failedImageCount;
+
+  const ImageDeleteResult({
+    required this.startDate,
+    required this.endDate,
+    required this.affectedRouteCount,
+    required this.deletedImageCount,
+    required this.failedImageCount,
+  });
+}
+
 class ArchiveService {
   ArchiveService({
     FirestoreService? firestoreService,
     StorageService? storageService,
-    http.Client? httpClient,
+    Dio? dio,
   })  : _firestoreService = firestoreService ?? FirestoreService(),
         _storageService = storageService ?? StorageService(),
-        _httpClient = httpClient ?? http.Client();
+        _dio = dio ?? Dio();
 
   final FirestoreService _firestoreService;
   final StorageService _storageService;
-  final http.Client _httpClient;
+  final Dio _dio;
+
+  Future<List<SalesRoute>> _loadRoutesInRange({
+    required String startDate,
+    required String endDate,
+    String? companyId,
+  }) {
+    if (companyId != null && companyId.isNotEmpty) {
+      return _firestoreService.getAllRoutesByDateRangeAndCompany(
+        companyId: companyId,
+        startDate: startDate,
+        endDate: endDate,
+      );
+    }
+    return _firestoreService.getAllRoutesByDateRange(
+      startDate: startDate,
+      endDate: endDate,
+    );
+  }
+
+  Future<ImageRangePreview> previewSavedImages({
+    required DateTime startDate,
+    required DateTime endDate,
+    String? companyId,
+  }) async {
+    final start = DateFormat('yyyy-MM-dd').format(startDate);
+    final end = DateFormat('yyyy-MM-dd').format(endDate);
+    final routes = await _loadRoutesInRange(
+      startDate: start,
+      endDate: end,
+      companyId: companyId,
+    );
+
+    final uniqueUrls = <String>{};
+    for (final route in routes) {
+      final firstUrl = route.first.imageUrl.trim();
+      if (firstUrl.isNotEmpty) uniqueUrls.add(firstUrl);
+      if (route.hasLastCall) {
+        final lastUrl = route.last.imageUrl.trim();
+        if (lastUrl.isNotEmpty) uniqueUrls.add(lastUrl);
+      }
+    }
+
+    return ImageRangePreview(
+      startDate: start,
+      endDate: end,
+      routeCount: routes.length,
+      imageCount: uniqueUrls.length,
+    );
+  }
+
+  /// Deletes ONLY the saved call images in Firebase Storage for the given date
+  /// range and clears `first.imageUrl` / `last.imageUrl` in Firestore.
+  /// Route GPS checkpoints, call timestamps, and transactions are preserved.
+  Future<ImageDeleteResult> deleteSavedImages({
+    required DateTime startDate,
+    required DateTime endDate,
+    String? companyId,
+  }) async {
+    final start = DateFormat('yyyy-MM-dd').format(startDate);
+    final end = DateFormat('yyyy-MM-dd').format(endDate);
+    final routes = await _loadRoutesInRange(
+      startDate: start,
+      endDate: end,
+      companyId: companyId,
+    );
+
+    final routesWithImages = <SalesRoute>[];
+    final imageUrls = <String>{};
+    for (final route in routes) {
+      var hasImage = false;
+      final firstUrl = route.first.imageUrl.trim();
+      if (firstUrl.isNotEmpty) {
+        imageUrls.add(firstUrl);
+        hasImage = true;
+      }
+      if (route.hasLastCall) {
+        final lastUrl = route.last.imageUrl.trim();
+        if (lastUrl.isNotEmpty) {
+          imageUrls.add(lastUrl);
+          hasImage = true;
+        }
+      }
+      if (hasImage) {
+        routesWithImages.add(route);
+      }
+    }
+
+    if (imageUrls.isEmpty) {
+      throw StateError('No saved images found for the selected date range.');
+    }
+
+    var deletedCount = 0;
+    var failedCount = 0;
+    for (final url in imageUrls) {
+      try {
+        await _storageService.deleteImage(url);
+        deletedCount++;
+      } catch (_) {
+        failedCount++;
+      }
+    }
+
+    await _firestoreService.clearRouteImageUrls(routesWithImages);
+
+    return ImageDeleteResult(
+      startDate: start,
+      endDate: end,
+      affectedRouteCount: routesWithImages.length,
+      deletedImageCount: deletedCount,
+      failedImageCount: failedCount,
+    );
+  }
 
   Future<ArchiveResult> archiveRoutes({
     required DateTime startDate,
     required DateTime endDate,
+    bool deleteAfterArchive = false,
+    String? companyId,
   }) async {
     final start = DateFormat('yyyy-MM-dd').format(startDate);
     final end = DateFormat('yyyy-MM-dd').format(endDate);
 
-    final routes = await _firestoreService.getAllRoutesByDateRange(
+    final routes = await _loadRoutesInRange(
       startDate: start,
       endDate: end,
+      companyId: companyId,
     );
 
     if (routes.isEmpty) {
@@ -129,7 +273,14 @@ class ArchiveService {
     if (kIsWeb) {
       // Trigger browser download for web builds.
       downloadFile(zipName, encodedZip);
-      // No filesystem path available on web; return a friendly placeholder.
+      if (deleteAfterArchive) {
+        for (final imageUrl in exportedImageUrls) {
+          await _storageService.deleteImage(imageUrl);
+        }
+        await _firestoreService.deleteRoutesByIds(
+          routes.map((route) => route.routeId).toList(),
+        );
+      }
       final dateFolders = routes
           .map((route) => route.date)
           .toSet()
@@ -157,12 +308,14 @@ class ArchiveService {
     final zipFile = File(zipPath);
     await zipFile.writeAsBytes(encodedZip, flush: true);
 
-    for (final imageUrl in exportedImageUrls) {
-      await _storageService.deleteImage(imageUrl);
+    if (deleteAfterArchive) {
+      for (final imageUrl in exportedImageUrls) {
+        await _storageService.deleteImage(imageUrl);
+      }
+      await _firestoreService.deleteRoutesByIds(
+        routes.map((route) => route.routeId).toList(),
+      );
     }
-    await _firestoreService.deleteRoutesByIds(
-      routes.map((route) => route.routeId).toList(),
-    );
 
     final dateFolders = routes
         .map((route) => route.date)
@@ -191,10 +344,13 @@ class ArchiveService {
     if (imageUrl.isEmpty) return 0;
 
     try {
-      final response = await _httpClient.get(Uri.parse(imageUrl));
-      if (response.statusCode != 200) return 0;
+      final response = await _dio.get<List<int>>(
+        imageUrl,
+        options: Options(responseType: ResponseType.bytes),
+      );
+      if (response.statusCode != 200 || response.data == null) return 0;
 
-      final bytes = response.bodyBytes;
+      final bytes = Uint8List.fromList(response.data!);
       archive.addFile(ArchiveFile(filePath, bytes.length, bytes));
       exportedImageUrls.add(imageUrl);
       return 1;

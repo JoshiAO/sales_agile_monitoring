@@ -6,10 +6,12 @@ import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:compact_sales_monitoring/models/agile_model.dart';
+import 'package:compact_sales_monitoring/models/route_model.dart';
 import 'package:compact_sales_monitoring/models/user_model.dart';
 import 'package:compact_sales_monitoring/providers/auth_provider.dart';
 import 'package:compact_sales_monitoring/services/agile_export_service.dart';
 import 'package:compact_sales_monitoring/services/firestore_service.dart';
+import 'package:compact_sales_monitoring/services/salesman_performance_helper.dart';
 import 'package:compact_sales_monitoring/widgets/date_selector_widget.dart';
 
 enum _SupervisorAgileViewMode { wide, compact }
@@ -72,6 +74,7 @@ class _SupervisorAgilePageState extends State<SupervisorAgilePage> {
         supervisorId: currentUser.uid,
         date: date,
       ),
+      _firestoreService.getRoutesByDate(currentUser.uid, date),
     ]);
 
     final team = (results[0] as List<AppUser>).toList()
@@ -79,7 +82,24 @@ class _SupervisorAgilePageState extends State<SupervisorAgilePage> {
         (left, right) => _displayName(left).compareTo(_displayName(right)),
       );
     final targetsBySalesman = results[1] as Map<String, AgileTarget>;
-    final submissionsBySalesman = results[2] as Map<String, AgileSubmission>;
+    final rawSubmissions = results[2] as Map<String, AgileSubmission>;
+    final routes = results[3] as List<SalesRoute>;
+    final submissionsBySalesman =
+        SalesmanPerformanceHelper.buildEffectiveSubmissionsBySalesman(
+          salesmen: team,
+          date: date,
+          rawAgileSubmissions: rawSubmissions,
+          routes: routes,
+        );
+
+    if (!mounted) {
+      return _SupervisorAgileData(
+        date: date,
+        team: team,
+        targetsBySalesman: targetsBySalesman,
+        submissionsBySalesman: submissionsBySalesman,
+      );
+    }
 
     _syncControllers(team, targetsBySalesman);
 
@@ -602,9 +622,14 @@ class _SupervisorAgilePageState extends State<SupervisorAgilePage> {
                 builder: (context, constraints) {
                   final columns = _cardsPerRow(constraints.maxWidth);
                   const spacing = 12.0;
-                  final cardExtent = _viewMode == _SupervisorAgileViewMode.wide
-                      ? 308.0
-                      : 118.0;
+                  const horizontalPadding = 32.0;
+                  final availableWidth =
+                      constraints.maxWidth -
+                      horizontalPadding -
+                      ((columns - 1) * spacing);
+                  final cardWidth = (availableWidth / columns)
+                      .floorToDouble()
+                      .clamp(0.0, constraints.maxWidth);
 
                   return ListView(
                     physics: const AlwaysScrollableScrollPhysics(),
@@ -719,18 +744,10 @@ class _SupervisorAgilePageState extends State<SupervisorAgilePage> {
                           ],
                         ),
                       ),
-                      GridView.builder(
-                        shrinkWrap: true,
-                        physics: const NeverScrollableScrollPhysics(),
-                        itemCount: data.team.length,
-                        gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                          crossAxisCount: columns,
-                          crossAxisSpacing: spacing,
-                          mainAxisSpacing: spacing,
-                          mainAxisExtent: cardExtent,
-                        ),
-                        itemBuilder: (context, index) {
-                          final salesman = data.team[index];
+                      Wrap(
+                        spacing: spacing,
+                        runSpacing: spacing,
+                        children: data.team.map((salesman) {
                           final submission =
                               data.submissionsBySalesman[salesman.uid];
                           final productiveActual =
@@ -741,19 +758,22 @@ class _SupervisorAgilePageState extends State<SupervisorAgilePage> {
                           );
                           final sttTarget = _sttTargetFor(salesman.uid);
 
-                          return _SupervisorSalesmanAgileCard(
-                            salesman: salesman,
-                            productiveTargetController:
-                                _productiveTargetControllers[salesman.uid]!,
-                            sttTargetController:
-                                _sttTargetControllers[salesman.uid]!,
-                            productiveActual: productiveActual,
-                            sttActual: sttActual,
-                            productiveTarget: productiveTarget,
-                            sttTarget: sttTarget,
-                            mode: _viewMode,
+                          return SizedBox(
+                            width: cardWidth,
+                            child: _SupervisorSalesmanAgileCard(
+                              salesman: salesman,
+                              productiveTargetController:
+                                  _productiveTargetControllers[salesman.uid]!,
+                              sttTargetController:
+                                  _sttTargetControllers[salesman.uid]!,
+                              productiveActual: productiveActual,
+                              sttActual: sttActual,
+                              productiveTarget: productiveTarget,
+                              sttTarget: sttTarget,
+                              mode: _viewMode,
+                            ),
                           );
-                        },
+                        }).toList(),
                       ),
                     ],
                   );

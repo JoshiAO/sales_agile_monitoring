@@ -37,23 +37,36 @@ class _WebStorageImage extends StatefulWidget {
 }
 
 class _WebStorageImageState extends State<_WebStorageImage> {
+  static int _nextViewId = 0;
   late final String _viewType;
+  late final html.ImageElement _imgElement;
 
   @override
   void initState() {
     super.initState();
-    _viewType =
-        'web-storage-image-${widget.imageUrl.hashCode}-${DateTime.now().microsecondsSinceEpoch}';
+    _viewType = 'web-storage-image-${_nextViewId++}';
+    _imgElement = html.ImageElement()
+      ..src = widget.imageUrl
+      ..style.width = '100%'
+      ..style.height = '100%'
+      ..style.objectFit = _cssObjectFit(widget.fit)
+      ..style.display = 'block'
+      ..style.pointerEvents = 'none';
 
     ui_web.platformViewRegistry.registerViewFactory(_viewType, (int viewId) {
-      final img = html.ImageElement()
-        ..src = widget.imageUrl
-        ..style.width = '100%'
-        ..style.height = '100%'
-        ..style.objectFit = _cssObjectFit(widget.fit)
-        ..style.display = 'block';
-      return img;
+      return _imgElement;
     });
+  }
+
+  @override
+  void didUpdateWidget(covariant _WebStorageImage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.imageUrl != widget.imageUrl) {
+      _imgElement.src = widget.imageUrl;
+    }
+    if (oldWidget.fit != widget.fit) {
+      _imgElement.style.objectFit = _cssObjectFit(widget.fit);
+    }
   }
 
   @override

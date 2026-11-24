@@ -149,6 +149,11 @@ class AuthService {
 
     final appUser = AppUser.fromMap(userData.data() ?? {}, uid: user.uid);
 
+    if (!appUser.active) {
+      await _firebaseService.auth.signOut();
+      throw Exception('Account is deactivated. Please contact your administrator.');
+    }
+
     if (!_isRoleAllowedForCurrentPlatform(appUser.role)) {
       await _firebaseService.auth.signOut();
       throw Exception(_platformRoleAccessMessage());

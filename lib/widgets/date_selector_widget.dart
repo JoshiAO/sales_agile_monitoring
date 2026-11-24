@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 
 class DateSelectorWidget extends StatefulWidget {
   final DateTime initialDate;
-  final Function(DateTime) onDateChanged;
+  final void Function(DateTime) onDateChanged;
 
   const DateSelectorWidget({
     super.key,

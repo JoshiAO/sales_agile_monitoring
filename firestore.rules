@@ -6,9 +6,28 @@ service cloud.firestore {
       return request.auth != null;
     }
 
+    function myUserPath() {
+      return /databases/$(database)/documents/users/$(request.auth.uid);
+    }
+
+    function myUserExists() {
+      return signedIn() && exists(myUserPath());
+    }
+
+    function myUserData() {
+      return get(myUserPath()).data;
+    }
+
+    function isActiveUser() {
+      return myUserExists() && myUserData().active == true;
+    }
+
     function myRole() {
-      let userPath = /databases/$(database)/documents/users/$(request.auth.uid);
-      return exists(userPath) ? get(userPath).data.role : null;
+      return myUserExists() ? myUserData().role : null;
+    }
+
+    function myCompanyId() {
+      return myUserExists() ? myUserData().company_ID : null;
     }
 
     function isOwner(userId) {
@@ -16,11 +35,11 @@ service cloud.firestore {
     }
 
     function isSuperuser() {
-      return signedIn() && myRole() == 'superuser';
+      return isActiveUser() && myRole() == 'superuser';
     }
 
     function isManager() {
-      return signedIn() && myRole() == 'manager';
+      return isActiveUser() && myRole() == 'manager';
     }
 
     function isSuperuserOrManager() {
@@ -28,15 +47,53 @@ service cloud.firestore {
     }
 
     function isSupervisor() {
-      return signedIn() && myRole() == 'supervisor';
+      return isActiveUser() && myRole() == 'supervisor';
+    }
+
+    function isEncoder() {
+      return isActiveUser() && myRole() == 'encoder';
+    }
+
+    function sameCompany(data) {
+      return myCompanyId() != null &&
+        ('company_ID' in data) &&
+        data.company_ID == myCompanyId();
+    }
+
+    function sameCompanyOrCreatorCompany(data) {
+      return sameCompany(data) ||
+        (!('company_ID' in data) &&
+          myCompanyId() != null &&
+          ('createdBy' in data) &&
+          data.createdBy is string &&
+          exists(/databases/$(database)/documents/users/$(data.createdBy)) &&
+          get(/databases/$(database)/documents/users/$(data.createdBy)).data.company_ID == myCompanyId());
+    }
+
+    function sameCompanyOrSalesmanCompany(data) {
+      return sameCompany(data) ||
+        (!('company_ID' in data) &&
+          myCompanyId() != null &&
+          ('salesmanId' in data) &&
+          data.salesmanId is string &&
+          exists(/databases/$(database)/documents/users/$(data.salesmanId)) &&
+          get(/databases/$(database)/documents/users/$(data.salesmanId)).data.company_ID == myCompanyId());
     }
 
     function isSupervisorOf(userId) {
       let userPath = /databases/$(database)/documents/users/$(userId);
-      return signedIn() &&
-        isSupervisor() &&
+      return isSupervisor() &&
         exists(userPath) &&
-        get(userPath).data.supervisorId == request.auth.uid;
+        get(userPath).data.supervisorId == request.auth.uid &&
+        sameCompany(get(userPath).data);
+    }
+
+    function isEncoderOf(userId) {
+      let userPath = /databases/$(database)/documents/users/$(userId);
+      return isEncoder() &&
+        exists(userPath) &&
+        get(userPath).data.encoderId == request.auth.uid &&
+        sameCompany(get(userPath).data);
     }
 
     function isValidAnnouncementWindow(data) {
@@ -49,58 +106,112 @@ service cloud.firestore {
       return signedIn() && docId.matches('^.+_' + request.auth.uid + '$');
     }
 
+    function isSafeOwnerUserUpdate() {
+      let allowedKeys = [
+        'fcmToken',
+        'fcmTokenUpdatedAt',
+        'profilePic',
+        'logoutRequestPending',
+        'logoutRequestApproved',
+        'logoutRequestStatus',
+        'logoutRequestedAt'
+      ];
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly(allowedKeys) &&
+        request.resource.data.logoutRequestApproved == false &&
+        (request.resource.data.logoutRequestStatus == null ||
+          request.resource.data.logoutRequestStatus == 'pending');
+    }
+
+    function isSafeSalesmanRouteUpdate() {
+      let unchangedCore = request.resource.data.salesmanId == resource.data.salesmanId &&
+        request.resource.data.supervisorId == resource.data.supervisorId &&
+        request.resource.data.date == resource.data.date &&
+        request.resource.data.company_ID == resource.data.company_ID;
+      let noSelfRetakeApproval =
+        (request.resource.data.firstRetakeApproved == resource.data.firstRetakeApproved ||
+          request.resource.data.firstRetakeApproved == false) &&
+        (request.resource.data.lastRetakeApproved == resource.data.lastRetakeApproved ||
+          request.resource.data.lastRetakeApproved == false);
+      let validTransactions = !('transactions' in request.resource.data) ||
+        (request.resource.data.transactions is list &&
+          (!('transactions' in resource.data) ||
+            request.resource.data.transactions.size() >= resource.data.transactions.size()));
+      return unchangedCore && noSelfRetakeApproval && validTransactions;
+    }
+
     match /users/{userId} {
       allow read: if signedIn() && (
         isOwner(userId) ||
-        isSuperuserOrManager() ||
-        (isSupervisor() && resource.data.supervisorId == request.auth.uid)
+        (isSuperuserOrManager() && sameCompany(resource.data)) ||
+        (isSupervisor() && resource.data.supervisorId == request.auth.uid && sameCompany(resource.data)) ||
+        (isEncoder() && resource.data.encoderId == request.auth.uid && sameCompany(resource.data))
       );
-      allow update: if signedIn() && (isOwner(userId) || isSuperuser());
-      allow create, delete: if isSuperuser();
+
+      allow update: if (isOwner(userId) && isActiveUser() && isSafeOwnerUserUpdate()) ||
+        (isSuperuser() && sameCompany(resource.data) && sameCompany(request.resource.data));
+
+      allow create: if isSuperuser() && sameCompany(request.resource.data);
+      allow delete: if isSuperuser() && sameCompany(resource.data);
 
       match /notifications/{notificationId} {
         allow read: if signedIn() && (
           isOwner(userId) ||
-          isSuperuserOrManager() ||
+          (isSuperuserOrManager() && sameCompany(get(/databases/$(database)/documents/users/$(userId)).data)) ||
           isSupervisorOf(userId)
         );
-        allow create: if signedIn() && (isSuperuserOrManager() || isSupervisorOf(userId));
-        allow update: if signedIn() && (isOwner(userId) || isSuperuserOrManager() || isSupervisorOf(userId));
-        allow delete: if signedIn() && (isSuperuserOrManager() || isSupervisorOf(userId));
+        allow create: if (isSuperuserOrManager() && sameCompany(get(/databases/$(database)/documents/users/$(userId)).data)) ||
+          isSupervisorOf(userId);
+        allow update: if (isOwner(userId) && isActiveUser()) ||
+          (isSuperuserOrManager() && sameCompany(get(/databases/$(database)/documents/users/$(userId)).data)) ||
+          isSupervisorOf(userId);
+        allow delete: if (isSuperuserOrManager() && sameCompany(get(/databases/$(database)/documents/users/$(userId)).data)) ||
+          isSupervisorOf(userId);
       }
     }
 
     match /announcements/{announcementId} {
-      allow read: if signedIn();
+      allow read: if isActiveUser() && sameCompanyOrCreatorCompany(resource.data);
 
-      allow create: if signedIn() && (
+      allow create: if isActiveUser() && (
         (isSuperuserOrManager() &&
           request.resource.data.createdBy == request.auth.uid &&
           (request.resource.data.creatorRole == 'superuser' || request.resource.data.creatorRole == 'manager') &&
+          sameCompanyOrCreatorCompany(request.resource.data) &&
           isValidAnnouncementWindow(request.resource.data)) ||
         (isSupervisor() &&
           request.resource.data.createdBy == request.auth.uid &&
           request.resource.data.creatorRole == 'supervisor' &&
+          sameCompanyOrCreatorCompany(request.resource.data) &&
           isValidAnnouncementWindow(request.resource.data))
       );
 
-      allow delete: if signedIn() && (
-        isSuperuserOrManager() || resource.data.createdBy == request.auth.uid
-      );
+      allow delete: if isActiveUser() &&
+        sameCompanyOrCreatorCompany(resource.data) && (
+          isSuperuserOrManager() || resource.data.createdBy == request.auth.uid
+        );
 
-      allow update: if signedIn() &&
+      allow update: if isActiveUser() &&
+        sameCompanyOrCreatorCompany(resource.data) &&
         (isSuperuserOrManager() || resource.data.createdBy == request.auth.uid) &&
         isValidAnnouncementWindow(request.resource.data);
 
       match /likes/{userId} {
-        allow read: if signedIn();
-        allow create, update, delete: if signedIn() && request.auth.uid == userId;
+        allow read: if isActiveUser() &&
+          sameCompanyOrCreatorCompany(get(/databases/$(database)/documents/announcements/$(announcementId)).data);
+        allow create, update, delete: if isActiveUser() &&
+          request.auth.uid == userId &&
+          sameCompanyOrCreatorCompany(get(/databases/$(database)/documents/announcements/$(announcementId)).data);
       }
     }
 
     match /company_ID/{companyDocId} {
-      allow read: if signedIn();
-      allow create, update, delete: if isSuperuser();
+      allow read: if isActiveUser() && (
+        myCompanyId() == companyDocId ||
+        sameCompany(resource.data)
+      );
+      allow create: if isSuperuser() && (myCompanyId() == companyDocId || sameCompany(request.resource.data));
+      allow update: if isSuperuser() && (myCompanyId() == companyDocId || sameCompany(resource.data));
+      allow delete: if isSuperuser() && (myCompanyId() == companyDocId || sameCompany(resource.data));
     }
 
     match /settings/{document=**} {
@@ -109,48 +220,83 @@ service cloud.firestore {
     }
 
     match /routes/{routeId} {
-      allow create: if signedIn();
-      allow read: if signedIn() && (
-        isSuperuserOrManager() ||
-        resource.data.salesmanId == request.auth.uid ||
-        resource.data.supervisorId == request.auth.uid
+      allow create: if isActiveUser() && (
+        (isSuperuserOrManager() && sameCompany(request.resource.data)) ||
+        (request.resource.data.salesmanId == request.auth.uid &&
+          request.resource.data.date is string &&
+          (!('company_ID' in request.resource.data) || request.resource.data.company_ID == myCompanyId()) &&
+          request.resource.data.firstRetakeApproved == false &&
+          request.resource.data.lastRetakeApproved == false)
       );
-      allow update: if signedIn() && (
-        isSuperuserOrManager() ||
+
+      allow read: if isActiveUser() && (
+        (isSuperuserOrManager() && sameCompanyOrSalesmanCompany(resource.data)) ||
         resource.data.salesmanId == request.auth.uid ||
-        resource.data.supervisorId == request.auth.uid
+        (isSupervisor() && resource.data.supervisorId == request.auth.uid && sameCompanyOrSalesmanCompany(resource.data)) ||
+        (isEncoderOf(resource.data.salesmanId) && sameCompanyOrSalesmanCompany(resource.data))
       );
-      allow delete: if isSuperuser();
+
+      allow update: if isActiveUser() && (
+        (isSuperuserOrManager() && sameCompanyOrSalesmanCompany(resource.data)) ||
+        (isSupervisor() &&
+          resource.data.supervisorId == request.auth.uid &&
+          sameCompanyOrSalesmanCompany(resource.data) &&
+          request.resource.data.salesmanId == resource.data.salesmanId &&
+          request.resource.data.date == resource.data.date) ||
+        (resource.data.salesmanId == request.auth.uid && isSafeSalesmanRouteUpdate())
+      );
+
+      allow delete: if isSuperuser() && sameCompanyOrSalesmanCompany(resource.data);
     }
 
     match /agile_targets/{targetId} {
-      allow read: if signedIn() && (
-        isSuperuserOrManager() ||
+      allow read: if isActiveUser() && (
+        (isSuperuserOrManager() && sameCompanyOrSalesmanCompany(resource.data)) ||
         isOwnedAgileDoc(targetId) ||
-        (resource != null && resource.data.supervisorId == request.auth.uid)
+        (isSupervisor() && resource != null && resource.data.supervisorId == request.auth.uid)
       );
 
-      allow create, update: if signedIn() && (
-        isSuperuserOrManager() ||
-        (isSupervisor() && request.resource.data.supervisorId == request.auth.uid)
+      allow create: if isActiveUser() && (
+        (isSuperuserOrManager() && sameCompanyOrSalesmanCompany(request.resource.data)) ||
+        (isSupervisor() &&
+          request.resource.data.supervisorId == request.auth.uid &&
+          isSupervisorOf(request.resource.data.salesmanId))
       );
 
-      allow delete: if isSuperuser();
+      allow update: if isActiveUser() && (
+        (isSuperuserOrManager() && sameCompanyOrSalesmanCompany(resource.data)) ||
+        (isSupervisor() &&
+          resource.data.supervisorId == request.auth.uid &&
+          request.resource.data.supervisorId == request.auth.uid &&
+          request.resource.data.salesmanId == resource.data.salesmanId &&
+          isSupervisorOf(request.resource.data.salesmanId))
+      );
+
+      allow delete: if isSuperuser() && sameCompanyOrSalesmanCompany(resource.data);
     }
 
     match /agile_submissions/{submissionId} {
-      allow read: if signedIn() && (
-        isSuperuserOrManager() ||
+      allow read: if isActiveUser() && (
+        (isSuperuserOrManager() && sameCompanyOrSalesmanCompany(resource.data)) ||
         isOwnedAgileDoc(submissionId) ||
-        (resource != null && resource.data.supervisorId == request.auth.uid)
+        (isSupervisor() && resource != null && resource.data.supervisorId == request.auth.uid)
       );
 
-      allow create, update: if signedIn() && (
-        isSuperuserOrManager() ||
-        request.resource.data.salesmanId == request.auth.uid
+      allow create: if isActiveUser() && (
+        (isSuperuserOrManager() && sameCompanyOrSalesmanCompany(request.resource.data)) ||
+        (isOwnedAgileDoc(submissionId) &&
+          request.resource.data.salesmanId == request.auth.uid)
       );
 
-      allow delete: if isSuperuser();
+      allow update: if isActiveUser() && (
+        (isSuperuserOrManager() && sameCompanyOrSalesmanCompany(resource.data)) ||
+        (isOwnedAgileDoc(submissionId) &&
+          resource.data.salesmanId == request.auth.uid &&
+          request.resource.data.salesmanId == request.auth.uid &&
+          resource.data.submitted != true)
+      );
+
+      allow delete: if isSuperuser() && sameCompanyOrSalesmanCompany(resource.data);
     }
   }
 }

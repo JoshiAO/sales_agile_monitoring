@@ -24,6 +24,7 @@ class _AppVersionSettingsScreenState extends State<AppVersionSettingsScreen> {
   Future<void> _loadConfig() async {
     try {
       final config = await _firestoreService.getAppConfig();
+      if (!mounted) return;
       if (config != null) {
         _versionController.text = (config['latest_version'] as String?) ?? '';
         _urlController.text = (config['download_url'] as String?) ?? '';

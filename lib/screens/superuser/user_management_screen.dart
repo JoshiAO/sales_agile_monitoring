@@ -21,6 +21,7 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
 
   List<AppUser> _allUsers = [];
   List<AppUser> _supervisors = [];
+  List<AppUser> _encoders = [];
   String? _selectedSupervisorFilterId;
   bool _isLoading = false;
 
@@ -43,38 +44,55 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
       final List<AppUser> salesmen;
 
       if (companyId != null && companyId.isNotEmpty) {
-        superusers = await _firestoreService.getUsersByRoleAndCompany(
-          UserRole.superuser,
-          companyId,
-        );
-        managers = await _firestoreService.getUsersByRoleAndCompany(
-          UserRole.manager,
-          companyId,
-        );
-        _supervisors = await _firestoreService.getUsersByRoleAndCompany(
-          UserRole.supervisor,
-          companyId,
-        );
-        salesmen = await _firestoreService.getUsersByRoleAndCompany(
-          UserRole.salesman,
-          companyId,
-        );
+        final results = await Future.wait([
+          _firestoreService.getUsersByRoleAndCompany(
+            UserRole.superuser,
+            companyId,
+          ),
+          _firestoreService.getUsersByRoleAndCompany(
+            UserRole.manager,
+            companyId,
+          ),
+          _firestoreService.getUsersByRoleAndCompany(
+            UserRole.supervisor,
+            companyId,
+          ),
+          _firestoreService.getUsersByRoleAndCompany(
+            UserRole.encoder,
+            companyId,
+          ),
+          _firestoreService.getUsersByRoleAndCompany(
+            UserRole.salesman,
+            companyId,
+          ),
+        ]);
+        superusers = results[0];
+        managers = results[1];
+        _supervisors = results[2];
+        _encoders = results[3];
+        salesmen = results[4];
       } else {
-        superusers = await _firestoreService.getUsersByRole(
-          UserRole.superuser,
-        );
-        managers = await _firestoreService.getUsersByRole(
-          UserRole.manager,
-        );
-        _supervisors = await _firestoreService.getUsersByRole(
-          UserRole.supervisor,
-        );
-        salesmen = await _firestoreService.getUsersByRole(
-          UserRole.salesman,
-        );
+        final results = await Future.wait([
+          _firestoreService.getUsersByRole(UserRole.superuser),
+          _firestoreService.getUsersByRole(UserRole.manager),
+          _firestoreService.getUsersByRole(UserRole.supervisor),
+          _firestoreService.getUsersByRole(UserRole.encoder),
+          _firestoreService.getUsersByRole(UserRole.salesman),
+        ]);
+        superusers = results[0];
+        managers = results[1];
+        _supervisors = results[2];
+        _encoders = results[3];
+        salesmen = results[4];
       }
 
-      _allUsers = [...superusers, ...managers, ..._supervisors, ...salesmen];
+      _allUsers = [
+        ...superusers,
+        ...managers,
+        ..._supervisors,
+        ..._encoders,
+        ...salesmen,
+      ];
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(
@@ -95,6 +113,8 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
         return 'Supervisor';
       case UserRole.manager:
         return 'Manager';
+      case UserRole.encoder:
+        return 'Encoder';
       case UserRole.superuser:
         return 'Superuser';
     }
@@ -131,6 +151,15 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
     return (supervisor.name?.trim().isNotEmpty == true)
         ? supervisor.name!
         : supervisor.email;
+  }
+
+  String _getEncoderName(String? encoderId) {
+    if (encoderId == null || encoderId.isEmpty) return 'Not assigned';
+    final encoder = _encoders.where((u) => u.uid == encoderId).firstOrNull;
+    if (encoder == null) return 'Not assigned';
+    return (encoder.name?.trim().isNotEmpty == true)
+        ? encoder.name!
+        : encoder.email;
   }
 
   String _activeFilterLabel() {
@@ -195,12 +224,14 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
       UserRole.superuser => Colors.purple.shade50,
       UserRole.manager => Colors.teal.shade50,
       UserRole.supervisor => Colors.blue.shade50,
+      UserRole.encoder => Colors.indigo.shade50,
       UserRole.salesman => Colors.grey.shade100,
     };
     final roleFg = switch (user.role) {
       UserRole.superuser => Colors.purple.shade700,
       UserRole.manager => Colors.teal.shade700,
       UserRole.supervisor => Colors.blue.shade700,
+      UserRole.encoder => Colors.indigo.shade700,
       UserRole.salesman => Colors.grey.shade700,
     };
     final statusBg = user.active ? Colors.green.shade50 : Colors.orange.shade50;
@@ -258,20 +289,34 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
                   ),
                 ],
                 const SizedBox(height: 8),
-                _UserBadge(
-                  label: user.active ? 'Active' : 'Inactive',
-                  backgroundColor: statusBg,
-                  foregroundColor: statusFg,
+                Wrap(
+                  spacing: 6,
+                  runSpacing: 6,
+                  children: [
+                    _UserBadge(
+                      label: user.active ? 'Active' : 'Inactive',
+                      backgroundColor: statusBg,
+                      foregroundColor: statusFg,
+                    ),
+                    if (user.role == UserRole.salesman)
+                      _UserBadge(
+                        label: classificationLabel(user.salesmanClassification),
+                        backgroundColor: user.isVanExTruck
+                            ? Colors.teal.shade50
+                            : Colors.amber.shade50,
+                        foregroundColor: user.isVanExTruck
+                            ? Colors.teal.shade800
+                            : Colors.amber.shade900,
+                      ),
+                    if (isFilterSelected)
+                      _UserBadge(
+                        label: 'Filter Active',
+                        backgroundColor: Theme.of(context).colorScheme.primaryContainer,
+                        foregroundColor:
+                            Theme.of(context).colorScheme.onPrimaryContainer,
+                      ),
+                  ],
                 ),
-                if (isFilterSelected) ...[
-                  const SizedBox(height: 6),
-                  _UserBadge(
-                    label: 'Filter Active',
-                    backgroundColor: Theme.of(context).colorScheme.primaryContainer,
-                    foregroundColor:
-                        Theme.of(context).colorScheme.onPrimaryContainer,
-                  ),
-                ],
                 if (user.role == UserRole.salesman) ...[
                   const SizedBox(height: 6),
                   Text(
@@ -282,8 +327,17 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
                       context,
                     ).textTheme.bodySmall?.copyWith(color: Colors.grey.shade700),
                   ),
+                  const SizedBox(height: 2),
+                  Text(
+                    'Encoder: ${_getEncoderName(user.encoderId)}',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: Theme.of(
+                      context,
+                    ).textTheme.bodySmall?.copyWith(color: Colors.grey.shade700),
+                  ),
                 ],
-                const Spacer(),
+                const SizedBox(height: 10),
                 if (user.role != UserRole.superuser)
                   Wrap(
                     alignment: WrapAlignment.end,
@@ -488,17 +542,21 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
     );
   }
 
-  void _showAddUserDialog() {
+  Future<void> _showAddUserDialog() async {
     final rootContext = context;
     final nameController = TextEditingController();
     final emailController = TextEditingController();
     final passwordController = TextEditingController();
     UserRole selectedRole = UserRole.salesman;
     String? selectedSupervisorId;
+    String? selectedEncoderId;
+    SalesmanClassification selectedClassification =
+        SalesmanClassification.booking;
     bool isActive = true;
     bool obscurePassword = true;
 
-    showDialog(
+    try {
+      await showDialog<void>(
       context: rootContext,
       builder: (dialogContext) => StatefulBuilder(
         builder: (dialogContext, setState) {
@@ -546,7 +604,12 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
                   DropdownButton<UserRole>(
                     value: selectedRole,
                     isExpanded: true,
-                    items: [UserRole.salesman, UserRole.supervisor, UserRole.manager].map((role) {
+                    items: [
+                      UserRole.salesman,
+                      UserRole.supervisor,
+                      UserRole.encoder,
+                      UserRole.manager,
+                    ].map((role) {
                       return DropdownMenuItem(
                         value: role,
                         child: Text(_roleLabel(role)),
@@ -558,12 +621,32 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
                           selectedRole = role;
                           if (selectedRole != UserRole.salesman) {
                             selectedSupervisorId = null;
+                            selectedEncoderId = null;
                           }
                         });
                       }
                     },
                   ),
                   if (selectedRole == UserRole.salesman) ...[
+                    const SizedBox(height: 12),
+                    DropdownButtonFormField<SalesmanClassification>(
+                      initialValue: selectedClassification,
+                      decoration: const InputDecoration(
+                        labelText: 'Salesman Classification',
+                        isDense: true,
+                      ),
+                      items: SalesmanClassification.values.map((c) {
+                        return DropdownMenuItem(
+                          value: c,
+                          child: Text(classificationLabel(c)),
+                        );
+                      }).toList(),
+                      onChanged: (value) {
+                        if (value != null) {
+                          setState(() => selectedClassification = value);
+                        }
+                      },
+                    ),
                     const SizedBox(height: 12),
                     DropdownButton<String>(
                       value: selectedSupervisorId,
@@ -577,6 +660,31 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
                       }).toList(),
                       onChanged: (value) {
                         setState(() => selectedSupervisorId = value);
+                      },
+                    ),
+                    const SizedBox(height: 12),
+                    DropdownButtonFormField<String?>(
+                      initialValue: _encoders.any((e) => e.uid == selectedEncoderId)
+                          ? selectedEncoderId
+                          : null,
+                      decoration: const InputDecoration(
+                        labelText: 'Assigned Encoder (Optional)',
+                        isDense: true,
+                      ),
+                      items: [
+                        const DropdownMenuItem<String?>(
+                          value: null,
+                          child: Text('None'),
+                        ),
+                        ..._encoders.map((encoder) {
+                          return DropdownMenuItem<String?>(
+                            value: encoder.uid,
+                            child: Text(encoder.name ?? encoder.email),
+                          );
+                        }),
+                      ],
+                      onChanged: (value) {
+                        setState(() => selectedEncoderId = value);
                       },
                     ),
                   ],
@@ -634,6 +742,10 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
                         supervisorId: selectedRole == UserRole.salesman
                             ? selectedSupervisorId
                             : null,
+                        encoderId: selectedRole == UserRole.salesman
+                            ? selectedEncoderId
+                            : null,
+                        salesmanClassification: selectedClassification,
                         companyId: companyId,
                       );
                     });
@@ -661,19 +773,27 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
         },
       ),
     );
+    } finally {
+      nameController.dispose();
+      emailController.dispose();
+      passwordController.dispose();
+    }
   }
 
-  void _showEditUserDialog(AppUser user) {
+  Future<void> _showEditUserDialog(AppUser user) async {
     final rootContext = context;
     final nameController = TextEditingController(text: user.name ?? '');
     final emailController = TextEditingController(text: user.email);
     final passwordController = TextEditingController();
     UserRole selectedRole = user.role;
     String? selectedSupervisorId = user.supervisorId;
+    String? selectedEncoderId = user.encoderId;
+    SalesmanClassification selectedClassification = user.salesmanClassification;
     bool isActive = user.active;
     bool obscurePassword = true;
 
-    showDialog(
+    try {
+      await showDialog<void>(
       context: rootContext,
       builder: (dialogContext) => StatefulBuilder(
         builder: (dialogContext, setState) {
@@ -718,7 +838,12 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
                   DropdownButton<UserRole>(
                     value: selectedRole,
                     isExpanded: true,
-                    items: [UserRole.salesman, UserRole.supervisor, UserRole.manager].map((role) {
+                    items: [
+                      UserRole.salesman,
+                      UserRole.supervisor,
+                      UserRole.encoder,
+                      UserRole.manager,
+                    ].map((role) {
                       return DropdownMenuItem(
                         value: role,
                         child: Text(_roleLabel(role)),
@@ -730,12 +855,32 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
                           selectedRole = role;
                           if (selectedRole != UserRole.salesman) {
                             selectedSupervisorId = null;
+                            selectedEncoderId = null;
                           }
                         });
                       }
                     },
                   ),
                   if (selectedRole == UserRole.salesman) ...[
+                    const SizedBox(height: 12),
+                    DropdownButtonFormField<SalesmanClassification>(
+                      initialValue: selectedClassification,
+                      decoration: const InputDecoration(
+                        labelText: 'Salesman Classification',
+                        isDense: true,
+                      ),
+                      items: SalesmanClassification.values.map((c) {
+                        return DropdownMenuItem(
+                          value: c,
+                          child: Text(classificationLabel(c)),
+                        );
+                      }).toList(),
+                      onChanged: (value) {
+                        if (value != null) {
+                          setState(() => selectedClassification = value);
+                        }
+                      },
+                    ),
                     const SizedBox(height: 12),
                     DropdownButton<String>(
                       value: selectedSupervisorId,
@@ -749,6 +894,31 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
                       }).toList(),
                       onChanged: (value) {
                         setState(() => selectedSupervisorId = value);
+                      },
+                    ),
+                    const SizedBox(height: 12),
+                    DropdownButtonFormField<String?>(
+                      initialValue: _encoders.any((e) => e.uid == selectedEncoderId)
+                          ? selectedEncoderId
+                          : null,
+                      decoration: const InputDecoration(
+                        labelText: 'Assigned Encoder (Optional)',
+                        isDense: true,
+                      ),
+                      items: [
+                        const DropdownMenuItem<String?>(
+                          value: null,
+                          child: Text('None'),
+                        ),
+                        ..._encoders.map((encoder) {
+                          return DropdownMenuItem<String?>(
+                            value: encoder.uid,
+                            child: Text(encoder.name ?? encoder.email),
+                          );
+                        }),
+                      ],
+                      onChanged: (value) {
+                        setState(() => selectedEncoderId = value);
                       },
                     ),
                   ],
@@ -803,6 +973,10 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
                         supervisorId: selectedRole == UserRole.salesman
                             ? selectedSupervisorId
                             : null,
+                        encoderId: selectedRole == UserRole.salesman
+                            ? selectedEncoderId
+                            : null,
+                        salesmanClassification: selectedClassification,
                       );
                     });
 
@@ -829,6 +1003,11 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
         },
       ),
     );
+    } finally {
+      nameController.dispose();
+      emailController.dispose();
+      passwordController.dispose();
+    }
   }
 
   void _showDeleteUserDialog(AppUser user) {
@@ -942,6 +1121,10 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
                     .where((u) => u.role == UserRole.supervisor)
                     .toList()
                   ..sort(_compareByEmailCode);
+                final encodersOnly = _allUsers
+                    .where((u) => u.role == UserRole.encoder)
+                    .toList()
+                  ..sort(_compareByEmailCode);
                 final salesmenOnly =
                     _allUsers.where((u) => u.role == UserRole.salesman).toList()
                       ..sort(_compareByEmailCode);
@@ -959,21 +1142,28 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
                   builder: (context, constraints) {
                     final columns = _cardsPerRow(constraints.maxWidth);
                     const spacing = 12.0;
-                    final cardHeight = constraints.maxWidth < 720 ? 206.0 : 186.0;
+                    const horizontalPadding = 32.0;
+                    final availableWidth =
+                        constraints.maxWidth -
+                        horizontalPadding -
+                        ((columns - 1) * spacing);
+                    final cardWidth = (availableWidth / columns)
+                        .floorToDouble()
+                        .clamp(0.0, constraints.maxWidth);
 
                     Widget buildSectionGrid(List<AppUser> users) {
                       if (users.isEmpty) return const SizedBox.shrink();
-                      return GridView.builder(
-                        shrinkWrap: true,
-                        physics: const NeverScrollableScrollPhysics(),
-                        itemCount: users.length,
-                        gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                          crossAxisCount: columns,
-                          crossAxisSpacing: spacing,
-                          mainAxisSpacing: spacing,
-                          mainAxisExtent: cardHeight,
-                        ),
-                        itemBuilder: (_, i) => _buildUserCard(users[i]),
+                      return Wrap(
+                        spacing: spacing,
+                        runSpacing: spacing,
+                        children: users
+                            .map(
+                              (u) => SizedBox(
+                                width: cardWidth,
+                                child: _buildUserCard(u),
+                              ),
+                            )
+                            .toList(),
                       );
                     }
 
@@ -984,6 +1174,16 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
                         buildSectionGrid(managersOnly),
                         _buildSectionHeader('Supervisors'),
                         buildSectionGrid(supervisorsOnly),
+                        _buildSectionHeader('Encoders'),
+                        buildSectionGrid(encodersOnly),
+                        if (encodersOnly.isEmpty)
+                          Padding(
+                            padding: const EdgeInsets.only(bottom: 8),
+                            child: Text(
+                              'No encoders found.',
+                              style: TextStyle(color: Colors.grey.shade700),
+                            ),
+                          ),
                         _buildSectionHeader(
                           _selectedSupervisorFilterId == null
                               ? 'Salesmen'

@@ -19,6 +19,8 @@ import 'package:compact_sales_monitoring/services/connectivity_check_service.dar
 import 'package:compact_sales_monitoring/services/firebase_service.dart';
 import 'package:compact_sales_monitoring/services/firestore_service.dart';
 import 'package:compact_sales_monitoring/services/storage_service.dart';
+import 'package:compact_sales_monitoring/services/transaction_storage_service.dart';
+import 'package:compact_sales_monitoring/services/transaction_sync_service.dart';
 
 @pragma('vm:entry-point')
 class BackgroundLocationService {
@@ -187,13 +189,23 @@ class BackgroundLocationService {
     StreamSubscription<geo.Position>? locationSubscription;
     Timer? streamWatchdog;
     Timer? periodicFlushTimer;
+    Timer? initialCheckTimer;
+    bool isStopped = false;
+    bool isProcessingLocation = false;
 
-    service.on('stopService').listen((event) {
+    void shutdownService() {
+      if (isStopped) return;
+      isStopped = true;
       locationSubscription?.cancel();
       streamWatchdog?.cancel();
       periodicFlushTimer?.cancel();
+      initialCheckTimer?.cancel();
       WakelockPlus.disable();
       service.stopSelf();
+    }
+
+    service.on('stopService').listen((event) {
+      shutdownService();
     });
 
     // GUARANTEE CPU DOES NOT SLEEP
@@ -264,12 +276,15 @@ class BackgroundLocationService {
     }
 
     void resetWatchdog() {
+      if (isStopped) return;
       streamWatchdog?.cancel();
       streamWatchdog = Timer(const Duration(minutes: 2), () async {
+        if (isStopped) return;
         debugPrint(
           '[BackgroundLocationService] GPS stream silent for 2 mins. Re-subscribing stream...',
         );
         final pos = await getBestAvailablePosition();
+        if (isStopped) return;
         if (pos != null) {
           await processLocation(pos);
         } else {
@@ -281,94 +296,103 @@ class BackgroundLocationService {
     }
 
     processLocation = (geo.Position position, [bool isManual = false]) async {
-      resetWatchdog();
-      processLocationCount++;
-
-      if (processLocationCount == 1 || processLocationCount % 5 == 0) {
-        await prefs.reload();
-      }
-      final routeId = prefs.getString('active_route_id');
-      if (routeId == null) {
-        service.stopSelf();
-        return;
-      }
-
-      final now = DateTime.now();
-      final lastTimeStr = prefs.getString('last_checkpoint_time');
-      final lastTime = lastTimeStr != null ? DateTime.parse(lastTimeStr) : null;
-
-      final timeSinceLast = lastTime == null
-          ? const Duration(minutes: _checkpointMinIntervalMinutes)
-          : now.difference(lastTime);
-
-      final timeThresholdMet = timeSinceLast.inSeconds >= 60;
-
-      // Strict 1-minute interval requirement unless triggered manually
-      if (!timeThresholdMet && !isManual) return;
-
-      if (!timeThresholdMet &&
-          !isManual &&
-          position.accuracy > _maxCheckpointAccuracyMeters) {
-        return;
-      }
-
-      // Update base
-      await prefs.setString('last_checkpoint_time', now.toIso8601String());
-      await prefs.setDouble('last_checkpoint_lat', position.latitude);
-      await prefs.setDouble('last_checkpoint_lon', position.longitude);
-
-      final currentCount = prefs.getInt('checkpoint_count') ?? 0;
-      await prefs.setInt('checkpoint_count', currentCount + 1);
-
-      int? batteryLevel;
-      bool? isMobileDataOn;
-      bool? isWifiOn;
-
+      if (isStopped || isProcessingLocation) return;
+      isProcessingLocation = true;
       try {
-        batteryLevel = await Battery().batteryLevel;
-      } catch (_) {}
+        resetWatchdog();
+        processLocationCount++;
 
-      try {
-        final connectivityResult = await Connectivity().checkConnectivity();
-        isMobileDataOn = connectivityResult.contains(ConnectivityResult.mobile);
-        isWifiOn = connectivityResult.contains(ConnectivityResult.wifi);
-      } catch (_) {}
+        if (processLocationCount == 1 || processLocationCount % 5 == 0) {
+          await prefs.reload();
+        }
+        final routeId = prefs.getString('active_route_id');
+        if (routeId == null) {
+          shutdownService();
+          return;
+        }
 
-      final checkpoint = RouteCheckpoint(
-        lat: position.latitude,
-        lon: position.longitude,
-        timestamp: now,
-        batteryLevel: batteryLevel,
-        isMobileDataOn: isMobileDataOn,
-        isWifiOn: isWifiOn,
-      );
+        final now = DateTime.now();
+        final lastTimeStr = prefs.getString('last_checkpoint_time');
+        final lastTime = lastTimeStr != null ? DateTime.tryParse(lastTimeStr) : null;
 
-      // OFFLINE FIRST: Accumulate locally every 1 minute (0 Firebase writes).
-      await _persistToLocalBatch(prefs, routeId, checkpoint);
+        final timeSinceLast = lastTime == null
+            ? const Duration(minutes: _checkpointMinIntervalMinutes)
+            : now.difference(lastTime);
 
-      // Upload only on manual trigger or when the 20-minute batch window is reached.
-      final lastFlushStr = prefs.getString('last_flush_time');
-      final lastFlush = lastFlushStr != null ? DateTime.parse(lastFlushStr) : null;
-      if (isManual ||
-          lastFlush == null ||
-          now.difference(lastFlush).inMinutes >= _batchUploadIntervalMinutes) {
-        await flushPendingBatch(prefs, firestoreService);
+        final timeThresholdMet = timeSinceLast.inSeconds >= 60;
+
+        // Strict 1-minute interval requirement unless triggered manually
+        if (!timeThresholdMet && !isManual) return;
+
+        if (!isManual && position.accuracy > _maxCheckpointAccuracyMeters) {
+          return;
+        }
+
+        // Update base
+        await prefs.setString('last_checkpoint_time', now.toIso8601String());
+        await prefs.setDouble('last_checkpoint_lat', position.latitude);
+        await prefs.setDouble('last_checkpoint_lon', position.longitude);
+
+        final currentCount = prefs.getInt('checkpoint_count') ?? 0;
+        await prefs.setInt('checkpoint_count', currentCount + 1);
+
+        int? batteryLevel;
+        bool? isMobileDataOn;
+        bool? isWifiOn;
+
+        try {
+          batteryLevel = await Battery().batteryLevel;
+        } catch (_) {}
+
+        try {
+          final connectivityResult = await Connectivity().checkConnectivity();
+          isMobileDataOn = connectivityResult.contains(ConnectivityResult.mobile);
+          isWifiOn = connectivityResult.contains(ConnectivityResult.wifi);
+        } catch (_) {}
+
+        final checkpoint = RouteCheckpoint(
+          lat: position.latitude,
+          lon: position.longitude,
+          timestamp: now,
+          batteryLevel: batteryLevel,
+          isMobileDataOn: isMobileDataOn,
+          isWifiOn: isWifiOn,
+        );
+
+        // OFFLINE FIRST: Accumulate locally every 1 minute (0 Firebase writes).
+        await _persistToLocalBatch(prefs, routeId, checkpoint);
+
+        // Upload only on manual trigger or when the 20-minute batch window is reached.
+        final lastFlushStr = prefs.getString('last_flush_time');
+        final lastFlush = lastFlushStr != null ? DateTime.tryParse(lastFlushStr) : null;
+        if (isManual ||
+            lastFlush == null ||
+            now.difference(lastFlush).inMinutes >= _batchUploadIntervalMinutes) {
+          await flushPendingBatch(prefs, firestoreService);
+        }
+      } finally {
+        isProcessingLocation = false;
       }
     };
 
     subscribeToLocation = () {
+      if (isStopped) return;
       locationSubscription?.cancel();
       locationSubscription = stream.listen(
         (pos) => processLocation(pos),
         onError: (Object e) {
           debugPrint('[BackgroundLocationService] Stream error: $e');
-          Future.delayed(const Duration(seconds: 10), subscribeToLocation);
+          Future.delayed(const Duration(seconds: 10), () {
+            if (!isStopped) subscribeToLocation();
+          });
         },
         onDone: () {
           debugPrint(
             '[BackgroundLocationService] Stream done. Re-subscribing...',
           );
-          Future.delayed(const Duration(seconds: 5), subscribeToLocation);
+          Future.delayed(const Duration(seconds: 5), () {
+            if (!isStopped) subscribeToLocation();
+          });
         },
       );
     };
@@ -377,64 +401,80 @@ class BackgroundLocationService {
     resetWatchdog();
 
     // 1.5. Initial 3-minute check to guarantee an early checkpoint
-    Timer(const Duration(minutes: 3), () async {
+    initialCheckTimer = Timer(const Duration(minutes: 3), () async {
+      if (isStopped) return;
       final pos = await getBestAvailablePosition();
-      if (pos != null) await processLocation(pos);
+      if (!isStopped && pos != null) await processLocation(pos);
     });
 
     // 2. Force a location check every 1 minute for stationary users & handle
     //    20-minute batch uploads + connectivity-gated retries.
     periodicFlushTimer = Timer.periodic(const Duration(minutes: 1), (timer) async {
+      if (isStopped) {
+        timer.cancel();
+        return;
+      }
       periodicTickCount++;
       await prefs.reload();
       if (prefs.getString('active_route_id') == null) {
-        timer.cancel();
+        shutdownService();
         return;
       }
 
       // Date rollover safety check inside periodic loop
       final startStr = prefs.getString('route_start_time');
       if (startStr != null) {
-        try {
-          final startDay = DateFormat('yyyy-MM-dd').format(DateTime.parse(startStr));
+        final parsedStart = DateTime.tryParse(startStr);
+        if (parsedStart != null) {
+          final startDay = DateFormat('yyyy-MM-dd').format(parsedStart);
           final todayDay = DateFormat('yyyy-MM-dd').format(DateTime.now());
           if (startDay != todayDay) {
             await flushPendingBatch(prefs, firestoreService);
             await prefs.remove('active_route_id');
-            timer.cancel();
-            service.stopSelf();
+            shutdownService();
             return;
           }
-        } catch (_) {}
+        }
       }
 
       final pos = await getBestAvailablePosition();
-      if (pos != null) await processLocation(pos);
+      if (!isStopped && pos != null) await processLocation(pos);
 
       final now = DateTime.now();
       final lastFlushStr = prefs.getString('last_flush_time');
-      final lastFlush = lastFlushStr != null ? DateTime.parse(lastFlushStr) : null;
+      final lastFlush = lastFlushStr != null ? DateTime.tryParse(lastFlushStr) : null;
       final isBatchDue =
           lastFlush == null ||
           now.difference(lastFlush).inMinutes >= _batchUploadIntervalMinutes;
 
       final hasPendingFirstCall =
           (prefs.getString('pending_first_call_v2') ?? '').isNotEmpty;
+      final hasPendingTransactions =
+          (prefs.getInt(TransactionStorageService.pendingCountPrefsKey) ?? 0) > 0;
       final lastFlushFailed = prefs.getBool(_lastFlushFailedKey) ?? false;
 
       if (isBatchDue) {
         await flushPendingBatch(prefs, firestoreService);
-      } else if (hasPendingFirstCall && periodicTickCount % 3 == 0) {
-        // Pending First Call waiting: check free HTTP 204 every 3 mins before
-        // attempting upload (costs at most 1 Firestore write once online).
+        if (hasPendingTransactions) {
+          await TransactionSyncService().flushPendingTransactions();
+        }
+      } else if ((hasPendingFirstCall || hasPendingTransactions) &&
+          periodicTickCount % 3 == 0) {
+        // Pending First Call or Transactions waiting: check free HTTP 204 every 3 mins.
         if (await ConnectivityCheckService.hasInternetConnection()) {
           await flushPendingBatch(prefs, firestoreService);
+          if (hasPendingTransactions) {
+            await TransactionSyncService().flushPendingTransactions();
+          }
         }
       } else if (lastFlushFailed && periodicTickCount % 5 == 0) {
         // Previous 20-min batch missed its window while offline: check free
         // HTTP 204 every 5 mins and flush once when back online.
         if (await ConnectivityCheckService.hasInternetConnection()) {
           await flushPendingBatch(prefs, firestoreService);
+          if (hasPendingTransactions) {
+            await TransactionSyncService().flushPendingTransactions();
+          }
         }
       }
     });
@@ -569,20 +609,19 @@ class BackgroundLocationService {
         imageFile = File(fallbackPath);
       }
 
-      if (imageFile == null) {
-        debugPrint(
-          '[BackgroundLocationService] Pending first call image file missing; clearing corrupted entry.',
-        );
-        await prefs.remove('pending_first_call_v2');
-        return false;
-      }
-
       final salesmanId = map['salesmanId'] as String;
       final timestamp = map['timestamp'] as String;
 
       // Upload image (unless we already cached an uploaded URL on a partial retry)
       String imageUrl = (map['uploadedImageUrl'] as String?) ?? '';
       if (imageUrl.isEmpty) {
+        if (imageFile == null) {
+          debugPrint(
+            '[BackgroundLocationService] Pending first call image file missing and no uploaded URL; clearing entry.',
+          );
+          await prefs.remove('pending_first_call_v2');
+          return false;
+        }
         imageUrl = await storage.uploadRouteImage(
           imageFile,
           salesmanId,
@@ -639,6 +678,12 @@ class BackgroundLocationService {
       await prefs.remove('pending_first_call_v2');
       debugPrint(
         '[BackgroundLocationService] Successfully flushed pending_first_call_v2 for route $routeId ($date).',
+      );
+      unawaited(
+        TransactionSyncService().flushPendingTransactions(
+          knownRouteId: routeId,
+          knownRouteDate: date,
+        ).catchError((_) => <String>{}),
       );
       return true;
     } catch (e) {
@@ -729,10 +774,10 @@ class BackgroundLocationService {
 
       await prefs.reload();
 
-      // Cross-isolate lock (expires after 25s in case an isolate was killed mid-flush)
+      // Cross-isolate lock (expires after 90s to cover slow First Call Storage+Firestore retries)
       final nowMs = DateTime.now().millisecondsSinceEpoch;
       final lockMs = prefs.getInt(_flushLockKey) ?? 0;
-      if (nowMs - lockMs < 25000) {
+      if (nowMs - lockMs < 90000) {
         debugPrint(
           '[BackgroundLocationService] Another isolate is currently flushing; skipping duplicate flush.',
         );
@@ -985,11 +1030,13 @@ class BackgroundLocationService {
       'has_migrated_v216',
       'has_migrated_v219',
       'last_app_version',
-      // Also preserve any unuploaded call/checkpoint queues across updates
+      // Also preserve any unuploaded call/checkpoint/transaction queues across updates
       'pending_first_call_v2',
       'active_first_call_cache_v1',
       _batchPrefsKey,
       'batch_pending_count',
+      'pending_transactions_count_v1',
+      'virtual_printer_enabled_v1',
     };
 
     final allKeys = prefs.getKeys().toList();
@@ -1045,6 +1092,10 @@ class BackgroundLocationService {
         final fs = FirestoreService();
         await CheckpointQueueService().flush(fs.appendRouteCheckpoint);
       } catch (_) {}
+
+      try {
+        await TransactionSyncService().flushPendingTransactions();
+      } catch (_) {}
     }
 
     try {
@@ -1070,6 +1121,7 @@ class BackgroundLocationService {
   /// Deletes call image files older than [retentionDays] from the app-private
   /// `call_images/` cache. Gallery copies and Firebase Storage are never touched.
   static Future<void> _cleanupOldCallImages({int retentionDays = 7}) async {
+    if (kIsWeb) return;
     try {
       final appDir = await getApplicationDocumentsDirectory();
       final callImagesDir = Directory('${appDir.path}/call_images');

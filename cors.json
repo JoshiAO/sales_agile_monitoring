@@ -1,6 +1,12 @@
 [
   {
-    "origin": ["*"],
+    "origin": [
+      "https://sales-agile-monitoring.web.app",
+      "https://sales-agile-monitoring.firebaseapp.com",
+      "https://sales-team-stream-monitoring.web.app",
+      "https://sales-team-stream-monitoring.firebaseapp.com",
+      "http://localhost:8080"
+    ],
     "method": ["GET", "HEAD"],
     "maxAgeSeconds": 3600,
     "responseHeader": ["Content-Type", "Authorization", "Content-Length", "User-Agent"]

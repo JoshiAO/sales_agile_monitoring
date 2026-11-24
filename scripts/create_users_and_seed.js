@@ -10,7 +10,11 @@ admin.initializeApp({ credential: admin.credential.applicationDefault() });
 const auth = admin.auth();
 const db = admin.firestore();
 
-const DEFAULT_PASSWORD = process.env.SEED_DEFAULT_PASSWORD || 'ChangeMe123!';
+const DEFAULT_PASSWORD = process.env.SEED_DEFAULT_PASSWORD;
+if (!DEFAULT_PASSWORD || DEFAULT_PASSWORD.length < 8) {
+  console.error('Missing or weak SEED_DEFAULT_PASSWORD env var (min 8 chars).');
+  process.exit(1);
+}
 
 // Supervisor UIDs will be resolved after auth creation
 // supervisorEmail field is used as a placeholder; replaced with UID below

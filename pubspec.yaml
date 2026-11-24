@@ -1,7 +1,7 @@
 name: compact_sales_monitoring
 description: "Multi-role sales monitoring app with Firebase and OpenStreetMap."
 publish_to: 'none'
-version: 2.2.7+19
+version: 2.3.0+20
 
 environment:
   sdk: ^3.11.4
@@ -32,10 +32,10 @@ dependencies:
   cached_network_image: ^3.3.1
 
   # HTTP & Networking
-  http: ^1.2.0
   dio: ^5.4.0
   archive: ^3.6.1
   excel: ^4.0.6
+  pdf: ^3.11.1
 
   # UI & UX
   image_picker: ^1.1.0

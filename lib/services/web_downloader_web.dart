@@ -16,7 +16,7 @@ void downloadFile(String filename, List<int> bytes) {
   js_util.setProperty(anchor, 'href', url);
   js_util.setProperty(anchor, 'download', filename);
   js_util.callMethod(body, 'appendChild', [anchor]);
-  js_util.callMethod(anchor, 'click', []);
+  js_util.callMethod(anchor, 'click', const <Object?>[]);
   js_util.callMethod(body, 'removeChild', [anchor]);
   js_util.callMethod(js_util.getProperty(js_util.globalThis, 'URL'), 'revokeObjectURL', [url]);
 }

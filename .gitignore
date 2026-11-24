@@ -4,12 +4,14 @@ lib/firebase_keys.dart
 # Miscellaneous
 *.class
 *.log
+logcat.txt
 *.pyc
 *.swp
 .DS_Store
 .atom/
 .build/
 .buildlog/
+.firebase/
 .history
 .svn/
 .swiftpm/

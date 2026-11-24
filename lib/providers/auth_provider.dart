@@ -12,7 +12,7 @@ class AuthProvider extends ChangeNotifier {
   final AuthService _authService = AuthService();
   final PushNotificationService _pushNotificationService =
       PushNotificationService();
-  StreamSubscription? _authSubscription;
+  StreamSubscription<dynamic>? _authSubscription;
 
   AppUser? _currentUser;
   bool _isLoading = false;

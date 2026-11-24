@@ -7,6 +7,7 @@ import 'package:compact_sales_monitoring/models/agile_model.dart';
 import 'package:compact_sales_monitoring/models/company_branding_model.dart';
 import 'package:compact_sales_monitoring/models/user_model.dart';
 import 'package:compact_sales_monitoring/models/route_model.dart';
+import 'package:compact_sales_monitoring/models/transaction_model.dart';
 import 'package:uuid/uuid.dart';
 import 'firebase_service.dart';
 
@@ -37,6 +38,9 @@ class FirestoreService {
     required String email,
     required UserRole role,
     String? supervisorId,
+    String? encoderId,
+    SalesmanClassification salesmanClassification =
+        SalesmanClassification.booking,
     String? name,
     String? fsName,
     bool active = false,
@@ -49,6 +53,9 @@ class FirestoreService {
       'role': roleToString(role),
       'active': active,
       'supervisorId': supervisorId,
+      'encoderId': encoderId,
+      'salesmanClassification':
+          classificationToString(salesmanClassification),
       'profilePic': null,
       'logoutRequestPending': false,
       'logoutRequestApproved': false,
@@ -349,6 +356,51 @@ class FirestoreService {
         .toList();
   }
 
+  Future<List<AppUser>> getSalesmenByEncoder(
+    String encoderId, {
+    String? companyId,
+  }) async {
+    Query<Map<String, dynamic>> query = _firebaseService.firestore
+        .collection('users')
+        .where('encoderId', isEqualTo: encoderId)
+        .where('role', isEqualTo: 'salesman');
+    if (companyId != null && companyId.isNotEmpty) {
+      query = query.where('company_ID', isEqualTo: companyId);
+    }
+    final querySnapshot = await query.get();
+    return querySnapshot.docs
+        .map((doc) => AppUser.fromMap(doc.data(), uid: doc.id))
+        .toList();
+  }
+
+  Future<List<SalesRoute>> getRoutesBySalesmenAndDateRange({
+    required List<String> salesmanIds,
+    required String startDate,
+    required String endDate,
+  }) async {
+    final uniqueIds = salesmanIds
+        .where((id) => id.trim().isNotEmpty)
+        .toSet()
+        .toList();
+    if (uniqueIds.isEmpty) return const [];
+
+    final routesMap = <String, SalesRoute>{};
+    for (var i = 0; i < uniqueIds.length; i += 30) {
+      final batch = uniqueIds.sublist(i, min(i + 30, uniqueIds.length));
+      final snapshot = await _firebaseService.firestore
+          .collection('routes')
+          .where('salesmanId', whereIn: batch)
+          .where('date', isGreaterThanOrEqualTo: startDate)
+          .where('date', isLessThanOrEqualTo: endDate)
+          .get();
+
+      for (final doc in snapshot.docs) {
+        routesMap[doc.id] = SalesRoute.fromMap(doc.data(), routeId: doc.id);
+      }
+    }
+    return routesMap.values.toList();
+  }
+
   Future<List<AppUser>> getSupervisorTeam(String supervisorId) async {
     final querySnapshot = await _firebaseService.firestore
         .collection('users')
@@ -600,6 +652,32 @@ class FirestoreService {
     }).timeout(const Duration(seconds: 12));
   }
 
+  /// Appends captured invoice transactions to `routes/{routeId}.transactions`.
+  /// Uses a direct update (0 reads) so missing route documents fail fast with
+  /// `not-found` and keep transactions safely queued until First Call creates the route.
+  Future<void> appendRouteTransactionsBatch(
+    String routeId,
+    List<RouteTransaction> transactions, {
+    String? expectedRouteDate,
+  }) async {
+    if (transactions.isEmpty) return;
+
+    final validTransactions = transactions.where((tx) {
+      if (expectedRouteDate == null || expectedRouteDate.isEmpty) return true;
+      return tx.routeDate == expectedRouteDate;
+    }).toList();
+
+    if (validTransactions.isEmpty) return;
+
+    final docRef = _firebaseService.firestore.collection('routes').doc(routeId);
+
+    await docRef.update({
+      'transactions': FieldValue.arrayUnion(
+        validTransactions.map((tx) => tx.toFirestoreMap()).toList(),
+      ),
+    }).timeout(const Duration(seconds: 12));
+  }
+
   /// Writes a heartbeat timestamp to the route document.
   /// Used by the background service alive-ping to prove the OS hasn't killed it.
   /// Check 'last_ping' in Firestore console after testing.
@@ -669,6 +747,33 @@ class FirestoreService {
     }
   }
 
+  /// Clears stored First/Last Call image URLs on routes without deleting
+  /// checkpoints, timestamps, or captured transactions.
+  Future<void> clearRouteImageUrls(List<SalesRoute> routes) async {
+    if (routes.isEmpty) return;
+
+    final firestore = _firebaseService.firestore;
+    for (var index = 0; index < routes.length; index += 400) {
+      final end = min(index + 400, routes.length);
+      final batch = firestore.batch();
+      for (final route in routes.sublist(index, end)) {
+        final updates = <String, dynamic>{
+          'imagesDeletedAt': FieldValue.serverTimestamp(),
+        };
+        if (route.first.imageUrl.trim().isNotEmpty) {
+          updates['first.imageUrl'] = '';
+        }
+        if (route.hasLastCall && route.last.imageUrl.trim().isNotEmpty) {
+          updates['last.imageUrl'] = '';
+        }
+        if (updates.length > 1) {
+          batch.update(firestore.collection('routes').doc(route.routeId), updates);
+        }
+      }
+      await batch.commit();
+    }
+  }
+
   Future<void> deleteUserData({
     required String uid,
     required UserRole role,
@@ -694,6 +799,17 @@ class FirestoreService {
           .get();
       for (final doc in teamSnapshot.docs) {
         await doc.reference.update({'supervisorId': null});
+      }
+    }
+
+    // If an encoder is removed, clear encoder assignments from salesmen.
+    if (role == UserRole.encoder) {
+      final assignedSnapshot = await firestore
+          .collection('users')
+          .where('encoderId', isEqualTo: uid)
+          .get();
+      for (final doc in assignedSnapshot.docs) {
+        await doc.reference.update({'encoderId': null});
       }
     }
 
@@ -882,28 +998,30 @@ class FirestoreService {
     final docRef = _firebaseService.firestore
         .collection('agile_submissions')
         .doc(docId);
-    final existingDoc = await docRef.get();
 
-    if (existingDoc.exists) {
-      final existing = AgileSubmission.fromMap(existingDoc.data() ?? {});
-      if (existing.submitted) {
-        throw StateError(
-          'Agile submission is already finalized for this date.',
-        );
+    await _firebaseService.firestore.runTransaction((tx) async {
+      final existingDoc = await tx.get(docRef);
+      if (existingDoc.exists) {
+        final existing = AgileSubmission.fromMap(existingDoc.data() ?? {});
+        if (existing.submitted) {
+          throw StateError(
+            'Agile submission is already finalized for this date.',
+          );
+        }
       }
-    }
 
-    await docRef.set({
-      'supervisorId': supervisorId,
-      'salesmanId': salesmanId,
-      'date': date,
-      'totalCalls': totalCalls,
-      'productiveCalls': productiveCalls,
-      'sttActual': sttActual,
-      'lastCallCompleted': lastCallCompleted,
-      'submitted': true,
-      'submittedAt': FieldValue.serverTimestamp(),
-    }, SetOptions(merge: true));
+      tx.set(docRef, {
+        'supervisorId': supervisorId,
+        'salesmanId': salesmanId,
+        'date': date,
+        'totalCalls': totalCalls,
+        'productiveCalls': productiveCalls,
+        'sttActual': sttActual,
+        'lastCallCompleted': lastCallCompleted,
+        'submitted': true,
+        'submittedAt': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
+    });
   }
 
   Future<AgileSubmission?> getAgileSubmissionForSalesmanByDate({
@@ -1070,6 +1188,12 @@ class FirestoreService {
     };
 
     final recipientIds = <String>{};
+    String? creatorCompanyId;
+    if (creatorRole != UserRole.supervisor) {
+      final creatorSnap = await firestore.collection('users').doc(createdBy).get();
+      creatorCompanyId = creatorSnap.data()?['company_ID'] as String?;
+    }
+
     if (creatorRole == UserRole.supervisor) {
       final team = await firestore
           .collection('users')
@@ -1077,6 +1201,19 @@ class FirestoreService {
           .where('supervisorId', isEqualTo: createdBy)
           .get();
       recipientIds.addAll(team.docs.map((doc) => doc.id));
+    } else if (creatorCompanyId != null && creatorCompanyId.isNotEmpty) {
+      final salesmen = await firestore
+          .collection('users')
+          .where('role', isEqualTo: 'salesman')
+          .where('company_ID', isEqualTo: creatorCompanyId)
+          .get();
+      final supervisors = await firestore
+          .collection('users')
+          .where('role', isEqualTo: 'supervisor')
+          .where('company_ID', isEqualTo: creatorCompanyId)
+          .get();
+      recipientIds.addAll(salesmen.docs.map((doc) => doc.id));
+      recipientIds.addAll(supervisors.docs.map((doc) => doc.id));
     } else {
       final salesmen = await firestore
           .collection('users')
@@ -1090,34 +1227,48 @@ class FirestoreService {
       recipientIds.addAll(supervisors.docs.map((doc) => doc.id));
     }
 
-    final batch = firestore.batch();
-    batch.set(
+    final announcementBatch = firestore.batch();
+    announcementBatch.set(
       firestore.collection('announcements').doc(announcementId),
-      announcementData,
+      {
+        ...announcementData,
+        if (creatorCompanyId != null && creatorCompanyId.isNotEmpty)
+          'company_ID': creatorCompanyId,
+      },
     );
+    await announcementBatch.commit();
 
-    for (final recipientId in recipientIds) {
-      final notificationRef = firestore
-          .collection('users')
-          .doc(recipientId)
-          .collection('notifications')
-          .doc();
-      batch.set(notificationRef, {
-        'announcementId': announcementId,
-        'title': trimmedTitle,
-        'message': trimmedMessage,
-        'status': 'info',
-        'occurrence': occurrence,
-        'imageUrl': imageUrl?.trim() ?? '',
-        'startAt': Timestamp.fromDate(startAt),
-        'endAt': Timestamp.fromDate(endAt),
-        'createdAt': FieldValue.serverTimestamp(),
-        'publishedAt': Timestamp.fromDate(now),
-        'readAt': null,
-      });
+    // Chunk notification writes to stay safely below Firestore's 500-write batch limit.
+    final recipientList = recipientIds.toList();
+    const chunkSize = 400;
+    for (var i = 0; i < recipientList.length; i += chunkSize) {
+      final chunk = recipientList.sublist(
+        i,
+        (i + chunkSize).clamp(0, recipientList.length),
+      );
+      final batch = firestore.batch();
+      for (final recipientId in chunk) {
+        final notificationRef = firestore
+            .collection('users')
+            .doc(recipientId)
+            .collection('notifications')
+            .doc();
+        batch.set(notificationRef, {
+          'announcementId': announcementId,
+          'title': trimmedTitle,
+          'message': trimmedMessage,
+          'status': 'info',
+          'occurrence': occurrence,
+          'imageUrl': imageUrl?.trim() ?? '',
+          'startAt': Timestamp.fromDate(startAt),
+          'endAt': Timestamp.fromDate(endAt),
+          'createdAt': FieldValue.serverTimestamp(),
+          'publishedAt': Timestamp.fromDate(now),
+          'readAt': null,
+        });
+      }
+      await batch.commit();
     }
-
-    await batch.commit();
   }
 
   Future<void> updateAnnouncement({
