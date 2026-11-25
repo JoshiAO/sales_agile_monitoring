@@ -4,11 +4,13 @@ Sales Agile Monitoring is a multi-role Flutter + Firebase app for field sales op
 
 ## Overview
 
-The app supports three roles:
+The app supports five roles across Android and Web:
 
-- **Salesman** — capture first and last calls, upload stamped photos, and submit daily Agile actuals.
-- **Supervisor** — monitor assigned salesmen, review routes on the map, set daily Agile targets, and compare targets vs actuals.
-- **Superuser** — view all teams, manage users, review global route activity, inspect Agile summaries, and archive route data.
+- **Salesman (Android)** — capture first and last calls with biometric selfie guidance, intercept/import SFA PDF invoices, track daily transactions, and submit daily Agile actuals.
+- **Supervisor (Web)** — monitor assigned salesmen, review routes on the map, inspect weekly calls grids, review transactions, set daily Agile targets, and compare targets vs actuals.
+- **Manager (Web)** — oversee company-wide teams, routes, transactions, and Agile summaries.
+- **Encoder (Web)** — access the dedicated Encoder Portal to review assigned salesmen's transactions and itemized invoices.
+- **Superuser (Web)** — view all teams, manage users (including profile photos, classifications, and assignments), review global route activity, inspect Agile summaries, manage database/app versions, and archive route data.
 
 Company-aware behavior is enforced across startup branding and user management:
 
@@ -21,9 +23,11 @@ Company-aware behavior is enforced across startup branding and user management:
 
 ### Salesman
 
-- Email/password authentication.
-- Calls tab for first-call and last-call capture.
+- Email/password authentication with Android-only role enforcement.
+- **Modern Field Dashboard (Calls tab)** for first-call and last-call capture, route progress, and salesman classification badges (`Booking`, `Van Ex-Truck`).
+- **Biometric Selfie Capture UI** with circular face alignment ring, sweeping auto-capture countdown arc, Screen Fill Light, and bottom shutter controls.
 - GPS-tagged photo capture with overlay details and QR map link.
+- **Transactions tab** with Android SFA PDF Invoice Interceptor, manual PDF import, itemized invoice parsing, and Firestore/Storage sync.
 - Firebase Storage upload plus Firestore route persistence.
 - Checkpoint capture during the workday.
 - Retake request and approval flow for call images.
@@ -39,9 +43,10 @@ Company-aware behavior is enforced across startup branding and user management:
 ### Supervisor
 
 - Home tab showing assigned salesmen and latest call status for the selected day.
-- Map tab with date-based filtering of team routes.
-- Interactive map markers and route detail previews.
+- Weekly tabular **Calls Grid** view with month/week filtering, sortable headers, and formatted Excel export.
+- Map tab with date-based filtering of team routes, interactive markers, and route/transaction detail previews.
 - Road-aware polylines with cached fallback behavior for offline or failed route resolution.
+- Transactions review with itemized invoice lightbox and daily PDF export.
 - Agile tab for daily target management per salesman:
   - productive calls target
   - STT target
@@ -51,6 +56,11 @@ Company-aware behavior is enforced across startup branding and user management:
   - Audience targeting: own team only, or all staff.
 - **Feeds tab** — same timeline view as salesman, with two-way heart toggle.
 
+### Manager & Encoder
+
+- **Manager** — company-scoped dashboard for reviewing team summaries, maps, transactions, and Agile performance.
+- **Encoder** — dedicated Web Encoder Portal displaying assigned salesmen's transactions and itemized SFA invoices.
+
 ### Superuser
 
 - Home tab showing supervisor team summaries.
@@ -59,12 +69,14 @@ Company-aware behavior is enforced across startup branding and user management:
 - Agile tab showing supervisor-level rollups of targets and actuals.
 - Preview pages for drilling into team and salesman performance.
 - User management:
-  - creating users
+  - creating users and assigning supervisors, encoders, and salesman classifications
+  - uploading profile pictures with an interactive circular crop dialog and automatic 512×512 JPEG compression (≤ 150 KB)
   - editing user assignments
   - activating or deactivating accounts
   - deleting accounts
   - updating authentication credentials via Cloud Functions
   - automatic `company_ID` inheritance for newly created users
+- **Database & App Version** management tools for data administration and force-update control.
 - **Announcements tab** — full announcement management across all teams.
 - **Feeds tab** — global timeline with two-way heart toggle.
 
@@ -187,6 +199,8 @@ lib/
   models/
   providers/
   screens/
+    encoder/
+    manager/
     salesman/
     supervisor/
     superuser/
@@ -304,9 +318,12 @@ Useful targets:
 
 ```
 flutter run -d android
-flutter run -d windows
-flutter build apk
+flutter run -d chrome
+flutter build apk --split-per-abi
+flutter build web --release
 ```
+
+> **Note:** `flutter build apk --split-per-abi` generates three smaller, architecture-specific release APKs (`armeabi-v7a`, `arm64-v8a`, `x86_64`) in `build/app/outputs/flutter-apk/`.
 
 ## Setup Notes
 
@@ -334,6 +351,29 @@ flutter build apk
 ```
 
 ## Changelog
+
+### v3.0.0 — November 25, 2026
+
+- **Transactions & SFA PDF Invoice Interceptor**: Enabled full Transactions feature for salesmen and re-enabled Android PDF invoice interception for automatic parsing and cloud sync.
+- **Redesigned Salesman Calls & Selfie Capture UI**:
+  - Upgraded the Calls page to a Modern Field Dashboard layout with route progress timeline and salesman classification badges.
+  - Redesigned the Selfie Capture screen with a circular biometric alignment ring, sweeping countdown arc, Screen Fill Light toggle, and bottom shutter button.
+- **Profile Image Management**:
+  - Added admin/superuser profile picture uploads in Manage Users with an interactive circular crop dialog and automatic 512×512 JPEG compression (≤ 150 KB).
+  - Updated Firebase Storage rules to support authenticated profile picture uploads.
+- **Encoder & Manager Web Access**:
+  - Enabled `encoder` and `manager` roles to sign in to the Web app and route directly to their respective portals (`EncoderTabsScreen` / `ManagerTabsScreen`).
+- **Bug Fixes & Security Hardening**:
+  - Fixed persistent rejected logout notification dialog by permitting safe resolution-field clearing in Firestore rules.
+  - Fixed Firestore permission-denied errors during salesman login and superuser collection queries.
+  - Fixed CTA button `TextStyle` interpolation crash on the Calls page.
+- **Release Packaging**: Split Android release builds by ABI (`armeabi-v7a`, `arm64-v8a`, `x86_64`) for significantly smaller APK downloads.
+
+### v2.3.0 — November 24, 2026
+
+- Migrated Firebase Storage to the US bucket and updated Android package ID to `com.agile.app.jao`.
+- Added Database management screen, Encoder role & portal, Salesman Classification (`Booking` / `Van Ex-Truck`), and weekly Calls Grid with Excel export.
+- Hardened Firestore and Storage security rules.
 
 ### v2.1.0 — May 14, 2026
 
