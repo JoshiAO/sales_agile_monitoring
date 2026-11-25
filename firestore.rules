@@ -92,12 +92,27 @@ service cloud.firestore {
         'logoutRequestPending',
         'logoutRequestApproved',
         'logoutRequestStatus',
-        'logoutRequestedAt'
+        'logoutRequestedAt',
+        'logoutResolvedAt',
+        'logoutResolvedBy',
+        'logoutResolvedByName'
       ];
-      return request.resource.data.diff(resource.data).affectedKeys().hasOnly(allowedKeys) &&
-        request.resource.data.logoutRequestApproved == false &&
-        (request.resource.data.logoutRequestStatus == null ||
-          request.resource.data.logoutRequestStatus == 'pending');
+      let affected = request.resource.data.diff(resource.data).affectedKeys();
+      let safeLogoutApproval =
+        !affected.hasAny(['logoutRequestApproved']) ||
+        request.resource.data.logoutRequestApproved == false;
+      let safeLogoutStatus =
+        !affected.hasAny(['logoutRequestStatus']) ||
+        request.resource.data.logoutRequestStatus == null ||
+        request.resource.data.logoutRequestStatus == 'pending';
+      let safeResolutionClear =
+        (!affected.hasAny(['logoutResolvedAt']) || request.resource.data.logoutResolvedAt == null) &&
+        (!affected.hasAny(['logoutResolvedBy']) || request.resource.data.logoutResolvedBy == null) &&
+        (!affected.hasAny(['logoutResolvedByName']) || request.resource.data.logoutResolvedByName == null);
+      return affected.hasOnly(allowedKeys) &&
+        safeLogoutApproval &&
+        safeLogoutStatus &&
+        safeResolutionClear;
     }
 
     function isSafeSalesmanRouteUpdate() {

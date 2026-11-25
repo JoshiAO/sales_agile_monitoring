@@ -15,7 +15,7 @@ class AppConstants {
   static const String dateFormat = 'yyyy-MM-dd';
 
   // Feature Flags
-  static const bool enableTransactionsFeature = false;
+  static const bool enableTransactionsFeature = true;
 
   // OpenStreetMap Tiles
   static const bool useOfflineTiles = false;

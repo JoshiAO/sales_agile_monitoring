@@ -31,6 +31,7 @@ import 'package:compact_sales_monitoring/services/background_location_service.da
 import 'package:compact_sales_monitoring/services/connectivity_check_service.dart';
 import 'package:compact_sales_monitoring/services/transaction_sync_service.dart';
 import 'package:compact_sales_monitoring/screens/troubleshooting_screen.dart';
+import 'package:compact_sales_monitoring/widgets/user_avatar.dart';
 import 'package:flutter_background_service/flutter_background_service.dart';
 
 class SalesmanHomeScreen extends StatefulWidget {
@@ -1838,48 +1839,50 @@ class _SalesmanHomeScreenState extends State<SalesmanHomeScreen>
         (!lastCallTaken || _lastRetakeApproved);
     final currentUser = context.watch<AuthProvider>().currentUser;
     final displayName = (currentUser?.name?.trim().isNotEmpty ?? false)
-      ? currentUser!.name!.trim()
-      : currentUser?.email ?? '';
+        ? currentUser!.name!.trim()
+        : currentUser?.email ?? 'Salesman';
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final formattedDate = DateFormat('EEEE, MMM d, yyyy').format(DateTime.now());
+    final completedSteps = (firstCallTaken ? 1 : 0) + (lastCallTaken ? 1 : 0);
 
     return Scaffold(
+      backgroundColor: colorScheme.surfaceContainerLowest,
       appBar: AppBar(
         title: GestureDetector(
-          onTap: (_firstRetakeRequested || _lastRetakeRequested) ? () async {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text('Synchronizing account status...')),
-            );
-            await context.read<AuthProvider>().checkCurrentUser();
-            await _loadTodayRoute();
-          } : null,
-          child: const Text('Sales Route'),
+          onTap: (_firstRetakeRequested || _lastRetakeRequested)
+              ? () async {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('Synchronizing account status...'),
+                    ),
+                  );
+                  await context.read<AuthProvider>().checkCurrentUser();
+                  await _loadTodayRoute();
+                }
+              : null,
+          child: const Text(
+            'Sales Route',
+            style: TextStyle(fontWeight: FontWeight.w700),
+          ),
         ),
         elevation: 0,
+        scrolledUnderElevation: 1,
         actions: [
-          IconButton(
-            icon: const Icon(Icons.help_outline),
-            tooltip: 'Troubleshooting Guide',
-            onPressed: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute<void>(
-                  builder: (_) => const TroubleshootingScreen(),
-                ),
-              );
-            },
-          ),
-          if (!kIsWeb) ...[
+          if (kIsWeb)
             IconButton(
-              tooltip: 'Debug Dashboard',
-              icon: const Icon(Icons.bug_report),
+              icon: const Icon(Icons.help_outline),
+              tooltip: 'Troubleshooting Guide',
               onPressed: () {
                 Navigator.push(
                   context,
                   MaterialPageRoute<void>(
-                    builder: (_) => const SalesmanDebugScreen(),
+                    builder: (_) => const TroubleshootingScreen(),
                   ),
                 );
               },
             ),
+          if (!kIsWeb) ...[
             StreamBuilder<int>(
               stream: currentUser == null
                   ? const Stream<int>.empty()
@@ -1889,258 +1892,963 @@ class _SalesmanHomeScreenState extends State<SalesmanHomeScreen>
               initialData: 0,
               builder: (context, snapshot) {
                 final unread = snapshot.data ?? 0;
-                return Padding(
-                  padding: const EdgeInsets.only(right: 8),
-                  child: Stack(
-                    alignment: Alignment.center,
-                    children: [
-                      IconButton(
-                        tooltip: 'Notifications',
-                        icon: const Icon(Icons.notifications_outlined),
-                        onPressed: _showAlertsModal,
-                      ),
-                      if (unread > 0)
-                        Positioned(
-                          top: 8,
-                          right: 4,
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 4,
-                              vertical: 1,
-                            ),
-                            decoration: BoxDecoration(
-                              color: Colors.red,
-                              borderRadius: BorderRadius.circular(999),
-                            ),
-                            constraints: const BoxConstraints(minWidth: 16),
-                            child: Text(
-                              unread > 99 ? '99+' : '$unread',
-                              textAlign: TextAlign.center,
-                              style: const TextStyle(
-                                color: Colors.white,
-                                fontSize: 10,
-                                fontWeight: FontWeight.w700,
-                              ),
+                return Stack(
+                  alignment: Alignment.center,
+                  children: [
+                    IconButton(
+                      tooltip: 'Notifications',
+                      icon: const Icon(Icons.notifications_outlined),
+                      onPressed: _showAlertsModal,
+                    ),
+                    if (unread > 0)
+                      Positioned(
+                        top: 8,
+                        right: 6,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 4,
+                            vertical: 1,
+                          ),
+                          decoration: BoxDecoration(
+                            color: Colors.red,
+                            borderRadius: BorderRadius.circular(999),
+                          ),
+                          constraints: const BoxConstraints(minWidth: 16),
+                          child: Text(
+                            unread > 99 ? '99+' : '$unread',
+                            textAlign: TextAlign.center,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 10,
+                              fontWeight: FontWeight.w700,
                             ),
                           ),
                         ),
-                    ],
-                  ),
+                      ),
+                  ],
                 );
               },
             ),
-            Padding(
-              padding: const EdgeInsets.only(right: 8),
-              child: TextButton.icon(
-                onPressed: _handleLogoutTapped,
-                icon: const Icon(Icons.logout),
-                label: const Text('Logout'),
-              ),
+            TextButton.icon(
+              onPressed: _handleLogoutTapped,
+              icon: const Icon(Icons.logout, size: 18),
+              label: const Text('Logout'),
+            ),
+            PopupMenuButton<String>(
+              tooltip: 'More options',
+              onSelected: (value) {
+                if (value == 'troubleshooting') {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute<void>(
+                      builder: (_) => const TroubleshootingScreen(),
+                    ),
+                  );
+                } else if (value == 'debug') {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute<void>(
+                      builder: (_) => const SalesmanDebugScreen(),
+                    ),
+                  );
+                }
+              },
+              itemBuilder: (context) => const [
+                PopupMenuItem<String>(
+                  value: 'troubleshooting',
+                  child: ListTile(
+                    dense: true,
+                    contentPadding: EdgeInsets.zero,
+                    leading: Icon(Icons.help_outline, size: 20),
+                    title: Text('Troubleshooting Guide'),
+                  ),
+                ),
+                PopupMenuItem<String>(
+                  value: 'debug',
+                  child: ListTile(
+                    dense: true,
+                    contentPadding: EdgeInsets.zero,
+                    leading: Icon(Icons.bug_report_outlined, size: 20),
+                    title: Text('Debug Dashboard'),
+                  ),
+                ),
+              ],
             ),
           ],
         ],
       ),
       body: SafeArea(
-        child: Stack(
-          children: [
-            Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  const Spacer(),
-              // Title
-              const Text(
-                'Daily Route Tracker',
-                style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
-              ),
-              const SizedBox(height: 8),
-              Text(
-                _todayDate,
-                style: const TextStyle(fontSize: 16, color: Colors.grey),
-              ),
-              if (!kIsWeb && currentUser != null) ...[
-                const SizedBox(height: 10),
-                Text(
-                  displayName,
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(fontSize: 16, color: Colors.grey),
+        child: RefreshIndicator(
+          onRefresh: () async {
+            await context.read<AuthProvider>().checkCurrentUser();
+            await _loadTodayRoute();
+          },
+          child: SingleChildScrollView(
+            physics: const AlwaysScrollableScrollPhysics(),
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                if (widget.logoutStatusPill != null) ...[
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: widget.logoutStatusPill!,
+                  ),
+                  const SizedBox(height: 12),
+                ],
+
+                // ── Welcome / Profile Header Card ──
+                _buildWelcomeHeaderCard(
+                  context: context,
+                  displayName: displayName,
+                  email: currentUser?.email ?? '',
+                  profilePicUrl: currentUser?.profilePic,
+                  isVanExTruck: currentUser?.isVanExTruck ?? false,
+                  formattedDate: formattedDate,
+                  firstCallTaken: firstCallTaken,
+                  lastCallTaken: lastCallTaken,
                 ),
-                const SizedBox(height: 2),
-                Text(
-                  currentUser.email,
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(fontSize: 13, color: Colors.grey),
+                const SizedBox(height: 20),
+
+                // ── Section Header ──
+                Row(
+                  children: [
+                    Text(
+                      "TODAY'S ROUTE",
+                      style: theme.textTheme.labelMedium?.copyWith(
+                        letterSpacing: 0.9,
+                        fontWeight: FontWeight.w700,
+                        color: colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                    const Spacer(),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 4,
+                      ),
+                      decoration: BoxDecoration(
+                        color: completedSteps == 2
+                            ? Colors.green.shade50
+                            : colorScheme.surfaceContainerHigh,
+                        borderRadius: BorderRadius.circular(999),
+                      ),
+                      child: Text(
+                        '$completedSteps / 2 Completed',
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          color: completedSteps == 2
+                              ? Colors.green.shade800
+                              : colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+
+                // ── Step 1: First Call Timeline Card ──
+                _buildTimelineCallCard(
+                  context: context,
+                  stepNumber: 1,
+                  title: 'First Call',
+                  point: _firstPoint,
+                  localImagePath: _firstLocalImagePath,
+                  isComplete: firstCallTaken,
+                  isLocked: false,
+                  isActiveStep: !firstCallTaken || _firstRetakeApproved,
+                  showConnectorBelow: true,
+                  retakeRequested: _firstRetakeRequested,
+                  retakeApproved: _firstRetakeApproved,
+                  canRequestRetake:
+                      firstCallTaken && !lastCallTaken && !_firstRetakeRequested && !_firstRetakeApproved,
+                  emptyHint:
+                      'Capture your First Call photo to start today\'s live route tracking.',
+                  onPreview: !firstCallTaken
+                      ? null
+                      : () => _previewCallImage(
+                            isFirst: true,
+                            point: _firstPoint!,
+                          ),
+                  onRequestRetake: () => _requestRetake(true),
+                ),
+
+                // ── Step 2: Last Call Timeline Card ──
+                _buildTimelineCallCard(
+                  context: context,
+                  stepNumber: 2,
+                  title: 'Last Call',
+                  point: _lastPoint,
+                  localImagePath: _lastLocalImagePath,
+                  isComplete: lastCallTaken,
+                  isLocked: !firstCallTaken,
+                  isActiveStep:
+                      firstCallTaken && (!lastCallTaken || _lastRetakeApproved),
+                  showConnectorBelow: false,
+                  retakeRequested: _lastRetakeRequested,
+                  retakeApproved: _lastRetakeApproved,
+                  canRequestRetake:
+                      lastCallTaken && !_lastRetakeRequested && !_lastRetakeApproved,
+                  emptyHint: firstCallTaken
+                      ? 'Ready to capture when you wrap up your route for the day.'
+                      : 'Complete First Call to unlock Last Call.',
+                  onPreview: !lastCallTaken
+                      ? null
+                      : () => _previewCallImage(
+                            isFirst: false,
+                            point: _lastPoint!,
+                          ),
+                  onRequestRetake: () => _requestRetake(false),
+                ),
+
+                const SizedBox(height: 24),
+
+                // ── Single Smart Primary CTA Button ──
+                _buildSmartPrimaryCta(
+                  context: context,
+                  firstCallTaken: firstCallTaken,
+                  lastCallTaken: lastCallTaken,
+                  canTakeFirstCall: canTakeFirstCall,
+                  canTakeLastCall: canTakeLastCall,
+                ),
+
+                const SizedBox(height: 28),
+
+                // ── App Version Footer ──
+                Center(
+                  child: FutureBuilder<PackageInfo>(
+                    future: PackageInfo.fromPlatform(),
+                    builder: (context, snapshot) {
+                      final version = snapshot.data?.version ?? '';
+                      final build = snapshot.data?.buildNumber ?? '';
+                      final text = version.isNotEmpty ? 'v$version+$build' : '';
+                      return Text(
+                        text,
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: colorScheme.onSurfaceVariant.withValues(
+                            alpha: 0.7,
+                          ),
+                        ),
+                      );
+                    },
+                  ),
                 ),
               ],
-              const SizedBox(height: 48),
-
-              // Status Cards
-              _buildStatusCard(
-                title: 'First Call',
-                isComplete: firstCallTaken,
-                subtitle: firstCallTaken
-                    ? '${_firstPoint!.lat.toStringAsFixed(4)}, ${_firstPoint!.lon.toStringAsFixed(4)}'
-                    : 'Not taken',
-                onTap: !firstCallTaken
-                    ? null
-                    : () =>
-                          _previewCallImage(isFirst: true, point: _firstPoint!),
-              ),
-              if (firstCallTaken)
-                TextButton.icon(
-                  onPressed: (lastCallTaken || _firstRetakeRequested)
-                      ? null
-                      : () => _requestRetake(true),
-                  icon: const Icon(Icons.refresh),
-                  label: Text(
-                    _firstRetakeRequested
-                        ? 'First call retake requested'
-                        : _firstRetakeApproved
-                        ? 'First call retake approved'
-                        : 'Request first call retake',
-                  ),
-                ),
-              const SizedBox(height: 16),
-              _buildStatusCard(
-                title: 'Last Call',
-                isComplete: lastCallTaken,
-                subtitle: lastCallTaken
-                    ? '${_lastPoint!.lat.toStringAsFixed(4)}, ${_lastPoint!.lon.toStringAsFixed(4)}'
-                    : 'Not taken',
-                onTap: !lastCallTaken
-                    ? null
-                    : () =>
-                          _previewCallImage(isFirst: false, point: _lastPoint!),
-              ),
-              if (_lastPoint != null)
-                TextButton.icon(
-                  onPressed: _lastRetakeRequested
-                      ? null
-                      : () => _requestRetake(false),
-                  icon: const Icon(Icons.refresh),
-                  label: Text(
-                    _lastRetakeRequested
-                        ? 'Last call retake requested'
-                        : _lastRetakeApproved
-                        ? 'Last call retake approved'
-                        : 'Request last call retake',
-                  ),
-                ),
-              const SizedBox(height: 48),
-
-              // Buttons
-              SizedBox(
-                width: 280,
-                height: 56,
-                child: ElevatedButton.icon(
-                  icon: const Icon(Icons.camera_alt),
-                  label: const Text('Take First Call'),
-                  onPressed: canTakeFirstCall ? () => _takePhoto(true) : null,
-                ),
-              ),
-              const SizedBox(height: 16),
-              SizedBox(
-                width: 280,
-                height: 56,
-                child: ElevatedButton.icon(
-                  icon: const Icon(Icons.camera_alt),
-                  label: const Text('Take Last Call'),
-                  onPressed: canTakeLastCall ? () => _takePhoto(false) : null,
-                ),
-              ),
-
-              if (_isUploading)
-                const Padding(
-                  padding: EdgeInsets.only(top: 32),
-                  child: CircularProgressIndicator(),
-                ),
-              
-              const Spacer(),
-              FutureBuilder<PackageInfo>(
-                future: PackageInfo.fromPlatform(),
-                builder: (context, snapshot) {
-                  final version = snapshot.data?.version ?? '';
-                  final build = snapshot.data?.buildNumber ?? '';
-                  final text = version.isNotEmpty ? 'v$version+$build' : '';
-                  return Padding(
-                    padding: const EdgeInsets.only(bottom: 16),
-                    child: Text(
-                      text,
-                      style: const TextStyle(fontSize: 10, color: Colors.grey),
-                    ),
-                  );
-                },
-              ),
-            ],
+            ),
           ),
         ),
-        if (widget.logoutStatusPill != null)
-          Positioned(
-            top: 8,
-            left: 12,
-            child: widget.logoutStatusPill!,
-          ),
-      ],
-    ),
       ),
     );
   }
 
-  Widget _buildStatusCard({
-    required String title,
-    required bool isComplete,
-    required String subtitle,
-    VoidCallback? onTap,
+  Widget _buildWelcomeHeaderCard({
+    required BuildContext context,
+    required String displayName,
+    required String email,
+    required String? profilePicUrl,
+    required bool isVanExTruck,
+    required String formattedDate,
+    required bool firstCallTaken,
+    required bool lastCallTaken,
   }) {
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(12),
-      child: Container(
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(
-            color: isComplete ? Colors.green : Colors.grey.shade300,
-            width: 2,
-          ),
-          color: isComplete ? Colors.green.shade50 : Colors.grey.shade50,
+    final colorScheme = Theme.of(context).colorScheme;
+
+    final String trackingLabel;
+    final Color trackingBg;
+    final Color trackingFg;
+    final IconData trackingIcon;
+
+    if (lastCallTaken) {
+      trackingLabel = 'Route Completed';
+      trackingBg = Colors.green.shade50;
+      trackingFg = Colors.green.shade800;
+      trackingIcon = Icons.check_circle_rounded;
+    } else if (firstCallTaken) {
+      trackingLabel = 'Tracking Active';
+      trackingBg = Colors.blue.shade50;
+      trackingFg = Colors.blue.shade800;
+      trackingIcon = Icons.my_location_rounded;
+    } else {
+      trackingLabel = 'Not Started';
+      trackingBg = Colors.grey.shade200;
+      trackingFg = Colors.grey.shade700;
+      trackingIcon = Icons.schedule_rounded;
+    }
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: colorScheme.surface,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(
+          color: colorScheme.outlineVariant.withValues(alpha: 0.7),
         ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(
-              isComplete ? Icons.check_circle : Icons.radio_button_unchecked,
-              color: isComplete ? Colors.green : Colors.grey,
-              size: 28,
-            ),
-            const SizedBox(width: 16),
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  title,
-                  style: const TextStyle(
-                    fontSize: 16,
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.04),
+            blurRadius: 10,
+            offset: const Offset(0, 3),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(
+                Icons.calendar_today_rounded,
+                size: 14,
+                color: colorScheme.primary,
+              ),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  formattedDate,
+                  style: TextStyle(
+                    fontSize: 12,
                     fontWeight: FontWeight.w600,
+                    color: colorScheme.onSurfaceVariant,
                   ),
                 ),
-                Text(
-                  subtitle,
-                  style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 4,
                 ),
-              ],
-            ),
-            if (onTap != null) ...[
-              const SizedBox(width: 12),
-              Column(
-                children: const [
-                  Icon(Icons.image_outlined, size: 20),
-                  SizedBox(height: 2),
-                  Text('Preview', style: TextStyle(fontSize: 10)),
-                ],
+                decoration: BoxDecoration(
+                  color: trackingBg,
+                  borderRadius: BorderRadius.circular(999),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(trackingIcon, size: 13, color: trackingFg),
+                    const SizedBox(width: 4),
+                    Text(
+                      trackingLabel,
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w700,
+                        color: trackingFg,
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ],
+          ),
+          const SizedBox(height: 14),
+          Row(
+            children: [
+              UserAvatar(
+                profilePicUrl: profilePicUrl,
+                displayName: displayName,
+                radius: 24,
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      displayName,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontSize: 17,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    if (email.isNotEmpty) ...[
+                      const SizedBox(height: 2),
+                      Text(
+                        email,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
+                decoration: BoxDecoration(
+                  color: isVanExTruck
+                      ? Colors.indigo.shade50
+                      : Colors.teal.shade50,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(
+                    color: isVanExTruck
+                        ? Colors.indigo.shade200
+                        : Colors.teal.shade200,
+                  ),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      isVanExTruck
+                          ? Icons.local_shipping_outlined
+                          : Icons.assignment_outlined,
+                      size: 13,
+                      color: isVanExTruck
+                          ? Colors.indigo.shade700
+                          : Colors.teal.shade700,
+                    ),
+                    const SizedBox(width: 4),
+                    Text(
+                      isVanExTruck ? 'Van Ex-Truck' : 'Booking',
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w700,
+                        color: isVanExTruck
+                            ? Colors.indigo.shade700
+                            : Colors.teal.shade700,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildTimelineCallCard({
+    required BuildContext context,
+    required int stepNumber,
+    required String title,
+    required RoutePoint? point,
+    required String? localImagePath,
+    required bool isComplete,
+    required bool isLocked,
+    required bool isActiveStep,
+    required bool showConnectorBelow,
+    required bool retakeRequested,
+    required bool retakeApproved,
+    required bool canRequestRetake,
+    required String emptyHint,
+    required VoidCallback? onPreview,
+    required VoidCallback onRequestRetake,
+  }) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final Color accentColor = isComplete
+        ? Colors.green.shade600
+        : isActiveStep
+            ? colorScheme.primary
+            : Colors.grey.shade400;
+
+    final String statusText;
+    final Color statusBg;
+    final Color statusFg;
+    if (retakeApproved) {
+      statusText = 'Retake Approved';
+      statusBg = Colors.orange.shade50;
+      statusFg = Colors.orange.shade800;
+    } else if (retakeRequested) {
+      statusText = 'Retake Pending';
+      statusBg = Colors.amber.shade50;
+      statusFg = Colors.amber.shade900;
+    } else if (isComplete) {
+      statusText = 'Completed';
+      statusBg = Colors.green.shade50;
+      statusFg = Colors.green.shade800;
+    } else if (isLocked) {
+      statusText = 'Locked';
+      statusBg = Colors.grey.shade200;
+      statusFg = Colors.grey.shade600;
+    } else {
+      statusText = 'Pending';
+      statusBg = colorScheme.primaryContainer.withValues(alpha: 0.55);
+      statusFg = colorScheme.primary;
+    }
+
+    return IntrinsicHeight(
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          // Timeline Rail
+          SizedBox(
+            width: 30,
+            child: Column(
+              children: [
+                const SizedBox(height: 14),
+                Container(
+                  width: 26,
+                  height: 26,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: isComplete
+                        ? Colors.green.shade600
+                        : isActiveStep
+                            ? colorScheme.primary
+                            : Colors.grey.shade300,
+                  ),
+                  alignment: Alignment.center,
+                  child: isComplete
+                      ? const Icon(Icons.check, size: 15, color: Colors.white)
+                      : Text(
+                          '$stepNumber',
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w700,
+                            color: isActiveStep
+                                ? Colors.white
+                                : Colors.grey.shade700,
+                          ),
+                        ),
+                ),
+                if (showConnectorBelow)
+                  Expanded(
+                    child: Container(
+                      width: 2,
+                      margin: const EdgeInsets.symmetric(vertical: 4),
+                      color: isComplete
+                          ? Colors.green.shade300
+                          : Colors.grey.shade300,
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 10),
+
+          // Card Content
+          Expanded(
+            child: Padding(
+              padding: EdgeInsets.only(bottom: showConnectorBelow ? 14 : 0),
+              child: Container(
+                decoration: BoxDecoration(
+                  color: isLocked
+                      ? colorScheme.surfaceContainerLow
+                      : colorScheme.surface,
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(
+                    color: retakeApproved
+                        ? Colors.orange.shade300
+                        : isComplete
+                            ? Colors.green.shade200
+                            : isActiveStep
+                                ? accentColor.withValues(alpha: 0.45)
+                                : colorScheme.outlineVariant.withValues(
+                                    alpha: 0.6,
+                                  ),
+                    width: isActiveStep || retakeApproved ? 1.5 : 1,
+                  ),
+                  boxShadow: isLocked
+                      ? null
+                      : [
+                          BoxShadow(
+                            color: Colors.black.withValues(alpha: 0.03),
+                            blurRadius: 8,
+                            offset: const Offset(0, 2),
+                          ),
+                        ],
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(14, 14, 14, 12),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              Text(
+                                title,
+                                style: TextStyle(
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.w700,
+                                  color: isLocked
+                                      ? colorScheme.onSurfaceVariant
+                                      : colorScheme.onSurface,
+                                ),
+                              ),
+                              const Spacer(),
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 9,
+                                  vertical: 3,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: statusBg,
+                                  borderRadius: BorderRadius.circular(999),
+                                ),
+                                child: Text(
+                                  statusText,
+                                  style: TextStyle(
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w700,
+                                    color: statusFg,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 10),
+                          if (isComplete && point != null)
+                            InkWell(
+                              onTap: onPreview,
+                              borderRadius: BorderRadius.circular(12),
+                              child: Row(
+                                children: [
+                                  _buildCallThumbnail(
+                                    localImagePath: localImagePath,
+                                    imageUrl: point.imageUrl,
+                                  ),
+                                  const SizedBox(width: 12),
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        Row(
+                                          children: [
+                                            Icon(
+                                              Icons.access_time_rounded,
+                                              size: 14,
+                                              color:
+                                                  colorScheme.onSurfaceVariant,
+                                            ),
+                                            const SizedBox(width: 5),
+                                            Text(
+                                              DateFormat('h:mm a').format(
+                                                point.timestamp.toLocal(),
+                                              ),
+                                              style: const TextStyle(
+                                                fontSize: 14,
+                                                fontWeight: FontWeight.w600,
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                        const SizedBox(height: 4),
+                                        Row(
+                                          children: [
+                                            Icon(
+                                              Icons.location_on_outlined,
+                                              size: 14,
+                                              color:
+                                                  colorScheme.onSurfaceVariant,
+                                            ),
+                                            const SizedBox(width: 5),
+                                            Expanded(
+                                              child: Text(
+                                                '${point.lat.toStringAsFixed(4)}, ${point.lon.toStringAsFixed(4)}',
+                                                maxLines: 1,
+                                                overflow: TextOverflow.ellipsis,
+                                                style: TextStyle(
+                                                  fontSize: 12,
+                                                  color: colorScheme
+                                                      .onSurfaceVariant,
+                                                ),
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                        const SizedBox(height: 6),
+                                        Text(
+                                          'Tap thumbnail to preview photo',
+                                          style: TextStyle(
+                                            fontSize: 11,
+                                            fontWeight: FontWeight.w500,
+                                            color: colorScheme.primary,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            )
+                          else
+                            Text(
+                              emptyHint,
+                              style: TextStyle(
+                                fontSize: 13,
+                                color: colorScheme.onSurfaceVariant,
+                                height: 1.35,
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
+
+                    // Inline Retake Footer (only when call is taken)
+                    if (isComplete) ...[
+                      Divider(
+                        height: 1,
+                        color: colorScheme.outlineVariant.withValues(
+                          alpha: 0.5,
+                        ),
+                      ),
+                      Padding(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 14,
+                          vertical: 8,
+                        ),
+                        child: Row(
+                          children: [
+                            if (retakeRequested) ...[
+                              Icon(
+                                Icons.hourglass_top_rounded,
+                                size: 15,
+                                color: Colors.amber.shade800,
+                              ),
+                              const SizedBox(width: 6),
+                              Expanded(
+                                child: Text(
+                                  'Retake requested — awaiting approval',
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w600,
+                                    color: Colors.amber.shade900,
+                                  ),
+                                ),
+                              ),
+                            ] else if (retakeApproved) ...[
+                              Icon(
+                                Icons.check_circle_outline_rounded,
+                                size: 15,
+                                color: Colors.orange.shade800,
+                              ),
+                              const SizedBox(width: 6),
+                              Expanded(
+                                child: Text(
+                                  'Retake approved — use button below',
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w600,
+                                    color: Colors.orange.shade900,
+                                  ),
+                                ),
+                              ),
+                            ] else ...[
+                              const Spacer(),
+                              TextButton.icon(
+                                style: TextButton.styleFrom(
+                                  visualDensity: VisualDensity.compact,
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 10,
+                                    vertical: 4,
+                                  ),
+                                ),
+                                onPressed:
+                                    canRequestRetake ? onRequestRetake : null,
+                                icon: const Icon(Icons.refresh, size: 16),
+                                label: const Text(
+                                  'Request Retake',
+                                  style: TextStyle(fontSize: 12),
+                                ),
+                              ),
+                            ],
+                          ],
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildCallThumbnail({
+    required String? localImagePath,
+    required String imageUrl,
+  }) {
+    final hasLocalFile =
+        !kIsWeb &&
+        localImagePath != null &&
+        localImagePath.isNotEmpty &&
+        File(localImagePath).existsSync();
+
+    Widget imageWidget;
+    if (hasLocalFile) {
+      imageWidget = Image.file(
+        File(localImagePath),
+        fit: BoxFit.cover,
+        errorBuilder: (_, _, _) => _buildThumbnailFallback(),
+      );
+    } else if (imageUrl.isNotEmpty) {
+      imageWidget = Image.network(
+        imageUrl,
+        fit: BoxFit.cover,
+        loadingBuilder: (context, child, progress) {
+          if (progress == null) return child;
+          return const Center(
+            child: SizedBox(
+              width: 18,
+              height: 18,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            ),
+          );
+        },
+        errorBuilder: (_, _, _) => _buildThumbnailFallback(),
+      );
+    } else {
+      imageWidget = _buildThumbnailFallback();
+    }
+
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(12),
+      child: Stack(
+        children: [
+          Container(
+            width: 68,
+            height: 68,
+            color: Colors.grey.shade200,
+            child: imageWidget,
+          ),
+          Positioned(
+            right: 4,
+            bottom: 4,
+            child: Container(
+              padding: const EdgeInsets.all(3),
+              decoration: BoxDecoration(
+                color: Colors.black.withValues(alpha: 0.55),
+                borderRadius: BorderRadius.circular(6),
+              ),
+              child: const Icon(
+                Icons.open_in_full_rounded,
+                size: 11,
+                color: Colors.white,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildThumbnailFallback() {
+    return Center(
+      child: Icon(
+        Icons.image_outlined,
+        size: 26,
+        color: Colors.grey.shade500,
+      ),
+    );
+  }
+
+  Widget _buildSmartPrimaryCta({
+    required BuildContext context,
+    required bool firstCallTaken,
+    required bool lastCallTaken,
+    required bool canTakeFirstCall,
+    required bool canTakeLastCall,
+  }) {
+    final colorScheme = Theme.of(context).colorScheme;
+
+    if (_isUploading || _isConnectivityChecking) {
+      return SizedBox(
+        key: const ValueKey('cta_loading'),
+        height: 54,
+        child: FilledButton(
+          onPressed: null,
+          style: FilledButton.styleFrom(
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(14),
+            ),
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const SizedBox(
+                width: 18,
+                height: 18,
+                child: CircularProgressIndicator(strokeWidth: 2.2),
+              ),
+              const SizedBox(width: 12),
+              Text(
+                _isUploading
+                    ? 'Uploading call photo...'
+                    : 'Checking connection...',
+                style: const TextStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    if (firstCallTaken && lastCallTaken && !_lastRetakeApproved) {
+      return Container(
+        key: const ValueKey('cta_completed'),
+        height: 54,
+        decoration: BoxDecoration(
+          color: Colors.green.shade50,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: Colors.green.shade300),
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.verified_rounded, color: Colors.green.shade700),
+            const SizedBox(width: 8),
+            Text(
+              'Route Completed for Today',
+              style: TextStyle(
+                fontSize: 15,
+                fontWeight: FontWeight.w700,
+                color: Colors.green.shade800,
+              ),
+            ),
           ],
+        ),
+      );
+    }
+
+    final bool isRetakeAction =
+        (_firstRetakeApproved && !lastCallTaken) || _lastRetakeApproved;
+    final bool isFirstCallAction = !firstCallTaken || (_firstRetakeApproved && !lastCallTaken);
+    final String label = isFirstCallAction
+        ? (_firstRetakeApproved ? 'Retake First Call' : 'Take First Call')
+        : (_lastRetakeApproved ? 'Retake Last Call' : 'Take Last Call');
+    final VoidCallback? onPressed = isFirstCallAction
+        ? (canTakeFirstCall ? () => _takePhoto(true) : null)
+        : (canTakeLastCall ? () => _takePhoto(false) : null);
+
+    return SizedBox(
+      key: const ValueKey('cta_action'),
+      height: 54,
+      child: FilledButton.icon(
+        onPressed: onPressed,
+        style: FilledButton.styleFrom(
+          backgroundColor:
+              isRetakeAction ? Colors.orange.shade700 : colorScheme.primary,
+          foregroundColor: Colors.white,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(14),
+          ),
+        ),
+        icon: Icon(
+          isRetakeAction ? Icons.camera_enhance_rounded : Icons.camera_alt_rounded,
+        ),
+        label: Text(
+          label,
+          style: const TextStyle(
+            fontSize: 16,
+            fontWeight: FontWeight.w700,
+          ),
         ),
       ),
     );

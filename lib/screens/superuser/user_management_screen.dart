@@ -1,11 +1,15 @@
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 
 import 'package:compact_sales_monitoring/models/user_model.dart';
 import 'package:compact_sales_monitoring/providers/auth_provider.dart';
 import 'package:compact_sales_monitoring/services/firestore_service.dart';
+import 'package:compact_sales_monitoring/services/storage_service.dart';
 import 'package:compact_sales_monitoring/services/user_provisioning_service.dart';
+import 'package:compact_sales_monitoring/widgets/profile_image_crop_dialog.dart';
+import 'package:compact_sales_monitoring/widgets/user_avatar.dart';
 
 class UserManagementScreen extends StatefulWidget {
   const UserManagementScreen({super.key});
@@ -16,6 +20,8 @@ class UserManagementScreen extends StatefulWidget {
 
 class _UserManagementScreenState extends State<UserManagementScreen> {
   final FirestoreService _firestoreService = FirestoreService();
+  final StorageService _storageService = StorageService();
+  final ImagePicker _imagePicker = ImagePicker();
   final UserProvisioningService _userProvisioningService =
       UserProvisioningService();
 
@@ -102,6 +108,83 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
       if (mounted) {
         setState(() => _isLoading = false);
       }
+    }
+  }
+
+  Future<String?> _pickCropAndUploadProfilePhoto(AppUser user) async {
+    final rootContext = context;
+    try {
+      final picked = await _imagePicker.pickImage(source: ImageSource.gallery);
+      if (picked == null) return null;
+
+      final sourceBytes = await picked.readAsBytes();
+      if (!mounted || !rootContext.mounted) return null;
+
+      final displayName = (user.name?.trim().isNotEmpty ?? false)
+          ? user.name!.trim()
+          : user.email;
+
+      final cropped = await ProfileImageCropDialog.show(
+        rootContext,
+        imageBytes: sourceBytes,
+        userDisplayName: displayName,
+      );
+      if (cropped == null || !mounted || !rootContext.mounted) return null;
+
+      late final String uploadedUrl;
+      await _runWithBlockingLoader(rootContext, () async {
+        uploadedUrl = await _storageService.uploadProfilePicBytes(
+          cropped.bytes,
+          user.uid,
+        );
+        await _firestoreService.updateUser(user.uid, {
+          'profilePic': uploadedUrl,
+        });
+      });
+
+      if (!mounted) return uploadedUrl;
+      await _loadUsers(silent: true);
+      if (rootContext.mounted) {
+        final kb = (cropped.bytes.length / 1024).toStringAsFixed(0);
+        ScaffoldMessenger.of(rootContext).showSnackBar(
+          SnackBar(content: Text('Profile photo updated ($kb KB)')),
+        );
+      }
+      return uploadedUrl;
+    } catch (e) {
+      if (mounted && rootContext.mounted) {
+        ScaffoldMessenger.of(rootContext).showSnackBar(
+          SnackBar(content: Text('Photo upload error: ${_formatError(e)}')),
+        );
+      }
+      return null;
+    }
+  }
+
+  Future<bool> _removeProfilePhoto(AppUser user) async {
+    final rootContext = context;
+    final existingUrl = user.profilePic;
+    if (existingUrl == null || existingUrl.isEmpty) return false;
+    try {
+      await _runWithBlockingLoader(rootContext, () async {
+        await _storageService.deleteImage(existingUrl);
+        await _firestoreService.updateUser(user.uid, {'profilePic': null});
+      });
+      if (!mounted) return true;
+      await _loadUsers(silent: true);
+      if (rootContext.mounted) {
+        ScaffoldMessenger.of(rootContext).showSnackBar(
+          const SnackBar(content: Text('Profile photo removed')),
+        );
+      }
+      return true;
+    } catch (e) {
+      if (mounted && rootContext.mounted) {
+        ScaffoldMessenger.of(rootContext).showSnackBar(
+          SnackBar(content: Text('Remove photo error: ${_formatError(e)}')),
+        );
+      }
+      return false;
     }
   }
 
@@ -257,16 +340,43 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+                  crossAxisAlignment: CrossAxisAlignment.center,
                   children: [
+                    Tooltip(
+                      message: 'Upload / Change Profile Photo',
+                      child: UserAvatar(
+                        profilePicUrl: user.profilePic,
+                        displayName: title,
+                        radius: 21,
+                        showEditBadge: true,
+                        onTap: () => _pickCropAndUploadProfilePhoto(user),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
                     Expanded(
-                      child: Text(
-                        title,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                          fontWeight: FontWeight.w700,
-                        ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            title,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                          if (showEmailLine) ...[
+                            const SizedBox(height: 2),
+                            Text(
+                              user.email,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                color: Colors.grey.shade600,
+                              ),
+                            ),
+                          ],
+                        ],
                       ),
                     ),
                     const SizedBox(width: 8),
@@ -277,17 +387,6 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
                     ),
                   ],
                 ),
-                if (showEmailLine) ...[
-                  const SizedBox(height: 4),
-                  Text(
-                    user.email,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: Theme.of(
-                      context,
-                    ).textTheme.bodySmall?.copyWith(color: Colors.grey.shade600),
-                  ),
-                ],
                 const SizedBox(height: 8),
                 Wrap(
                   spacing: 6,
@@ -366,6 +465,11 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
                             });
                           },
                         ),
+                      IconButton(
+                        tooltip: 'Upload Profile Photo',
+                        icon: const Icon(Icons.add_a_photo_outlined, size: 20),
+                        onPressed: () => _pickCropAndUploadProfilePhoto(user),
+                      ),
                       IconButton(
                         tooltip: 'Delete',
                         icon: const Icon(
@@ -791,6 +895,7 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
     SalesmanClassification selectedClassification = user.salesmanClassification;
     bool isActive = user.active;
     bool obscurePassword = true;
+    String? currentProfilePic = user.profilePic;
 
     try {
       await showDialog<void>(
@@ -803,6 +908,63 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
+                  UserAvatar(
+                    profilePicUrl: currentProfilePic,
+                    displayName: (user.name?.trim().isNotEmpty ?? false)
+                        ? user.name!.trim()
+                        : user.email,
+                    radius: 38,
+                    showEditBadge: true,
+                    onTap: () async {
+                      final updatedUrl = await _pickCropAndUploadProfilePhoto(
+                        user.copyWith(profilePic: currentProfilePic),
+                      );
+                      if (updatedUrl != null && dialogContext.mounted) {
+                        setState(() => currentProfilePic = updatedUrl);
+                      }
+                    },
+                  ),
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 8,
+                    alignment: WrapAlignment.center,
+                    children: [
+                      OutlinedButton.icon(
+                        onPressed: () async {
+                          final updatedUrl =
+                              await _pickCropAndUploadProfilePhoto(
+                                user.copyWith(profilePic: currentProfilePic),
+                              );
+                          if (updatedUrl != null && dialogContext.mounted) {
+                            setState(() => currentProfilePic = updatedUrl);
+                          }
+                        },
+                        icon: const Icon(Icons.photo_camera_outlined, size: 16),
+                        label: Text(
+                          currentProfilePic?.isNotEmpty == true
+                              ? 'Change Photo'
+                              : 'Upload Photo',
+                        ),
+                      ),
+                      if (currentProfilePic?.isNotEmpty == true)
+                        TextButton.icon(
+                          style: TextButton.styleFrom(
+                            foregroundColor: Colors.red,
+                          ),
+                          onPressed: () async {
+                            final removed = await _removeProfilePhoto(
+                              user.copyWith(profilePic: currentProfilePic),
+                            );
+                            if (removed && dialogContext.mounted) {
+                              setState(() => currentProfilePic = null);
+                            }
+                          },
+                          icon: const Icon(Icons.delete_outline, size: 16),
+                          label: const Text('Remove'),
+                        ),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
                   TextField(
                     controller: emailController,
                     decoration: const InputDecoration(

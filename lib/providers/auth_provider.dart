@@ -210,7 +210,11 @@ class AuthProvider extends ChangeNotifier {
         _currentUser = user;
         _error = null;
         await _cacheUser(_currentUser!);
-        await _pushNotificationService.bindUser(_currentUser);
+        try {
+          await _pushNotificationService.bindUser(_currentUser);
+        } catch (e) {
+          debugPrint('[AuthProvider] Non-fatal FCM bind error during login: $e');
+        }
       }
     } catch (e) {
       _error = e.toString().replaceFirst('Exception: ', '');

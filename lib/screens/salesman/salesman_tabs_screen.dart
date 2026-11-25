@@ -160,9 +160,7 @@ class _SalesmanTabsScreenState extends State<SalesmanTabsScreen> {
                 action: SnackBarAction(
                   label: 'Dismiss',
                   onPressed: () {
-                    _firestoreService
-                        .clearLogoutApproval(uid: user.uid)
-                        .catchError((_) {});
+                    _dismissLogoutRejection(user.uid);
                   },
                 ),
                 duration: const Duration(seconds: 6),
@@ -174,6 +172,33 @@ class _SalesmanTabsScreenState extends State<SalesmanTabsScreen> {
         });
 
     _currentLogoutRequestStatus = user.logoutRequestStatus;
+  }
+
+  Future<void> _dismissLogoutRejection(String uid) async {
+    try {
+      await _firestoreService.clearLogoutApproval(uid: uid);
+      if (mounted) {
+        setState(() {
+          _currentLogoutRequestStatus = null;
+          _lastLogoutRequestStatus = null;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Logout rejection message cleared.'),
+            duration: Duration(seconds: 2),
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Could not dismiss logout notice: $e'),
+            duration: const Duration(seconds: 3),
+          ),
+        );
+      }
+    }
   }
 
   Widget _buildLogoutStatusPill() {
@@ -212,18 +237,7 @@ class _SalesmanTabsScreenState extends State<SalesmanTabsScreen> {
         if (status == 'approved') {
           await _handleLogoutTapped();
         } else if (status == 'rejected' && user != null) {
-          await _firestoreService.clearLogoutApproval(uid: user.uid);
-          if (mounted) {
-            setState(() {
-              _currentLogoutRequestStatus = null;
-            });
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                content: Text('Logout rejection message cleared.'),
-                duration: Duration(seconds: 2),
-              ),
-            );
-          }
+          await _dismissLogoutRejection(user.uid);
         }
       },
       child: Container(

@@ -17,7 +17,7 @@ class _LoginScreenState extends State<LoginScreen> {
 
   String _platformHintMessage() {
     if (kIsWeb) {
-      return 'Web access: supervisor and superuser accounts';
+      return 'Web access: supervisor, manager, encoder, and superuser accounts';
     }
 
     if (defaultTargetPlatform == TargetPlatform.android) {

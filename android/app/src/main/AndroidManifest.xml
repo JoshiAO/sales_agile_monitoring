@@ -47,11 +47,11 @@
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
         </activity>
-        <!-- Disabled in v2.3.0 release (bucket migration); re-enable for v3 PDF interceptor rollout -->
+        <!-- Virtual PDF Printer Interceptor for Van Ex-Truck Sales Invoices -->
         <activity
             android:name=".PdfInvoiceOverlayActivity"
-            android:enabled="false"
-            android:exported="false"
+            android:enabled="true"
+            android:exported="true"
             android:launchMode="singleTop"
             android:taskAffinity=":invoice_overlay"
             android:excludeFromRecents="true"
@@ -59,7 +59,6 @@
             android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|locale|layoutDirection|fontScale|screenLayout|density|uiMode"
             android:hardwareAccelerated="true"
             android:windowSoftInputMode="adjustResize">
-            <!--
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
@@ -71,7 +70,6 @@
                 <category android:name="android.intent.category.DEFAULT" />
                 <data android:mimeType="application/pdf" />
             </intent-filter>
-            -->
         </activity>
 
         <provider

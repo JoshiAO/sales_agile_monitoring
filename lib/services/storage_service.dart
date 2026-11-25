@@ -93,6 +93,15 @@ class StorageService {
     );
   }
 
+  Future<String> uploadProfilePicBytes(Uint8List bytes, String userId) async {
+    return uploadImageBytes(
+      bytes: bytes,
+      folder: 'profile_pictures/$userId',
+      filename: '$userId.jpg',
+      contentType: 'image/jpeg',
+    );
+  }
+
   Future<String> uploadRouteImage(File file, String salesmanId, String timestamp) async {
     final safeTimestamp = timestamp.replaceAll(RegExp(r'[^a-zA-Z0-9._-]'), '_');
     return uploadImage(

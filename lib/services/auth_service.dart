@@ -70,7 +70,10 @@ class AuthService {
 
   bool _isRoleAllowedForCurrentPlatform(UserRole role) {
     if (kIsWeb) {
-      return role == UserRole.supervisor || role == UserRole.superuser;
+      return role == UserRole.supervisor ||
+          role == UserRole.superuser ||
+          role == UserRole.manager ||
+          role == UserRole.encoder;
     }
 
     if (defaultTargetPlatform == TargetPlatform.android) {
@@ -82,14 +85,14 @@ class AuthService {
 
   String _platformRoleAccessMessage() {
     if (kIsWeb) {
-      return 'This web app is for supervisor and superuser accounts only.';
+      return 'This web app is for supervisor, manager, encoder, and superuser accounts only.';
     }
 
     if (defaultTargetPlatform == TargetPlatform.android) {
       return 'This Android app is for salesman accounts only.';
     }
 
-    return 'This platform is not supported for this app. Use Android for salesman or Web for supervisor/superuser access.';
+    return 'This platform is not supported for this app. Use Android for salesman or Web for web portal access.';
   }
 
   Future<AppUser?> loginWithEmail(String email, String password) async {

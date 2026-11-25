@@ -18,7 +18,8 @@ class CameraScreen extends StatefulWidget {
   State<CameraScreen> createState() => _CameraScreenState();
 }
 
-class _CameraScreenState extends State<CameraScreen> {
+class _CameraScreenState extends State<CameraScreen>
+    with SingleTickerProviderStateMixin {
   final FaceDetectionService _faceDetectionService = FaceDetectionService();
 
   CameraController? _cameraController;
@@ -27,21 +28,28 @@ class _CameraScreenState extends State<CameraScreen> {
   bool _isCapturing = false;
   bool _isFaceDetected = false;
   bool _isFaceAligned = false;
-  String _feedbackText = 'Center your face';
+  bool _screenFillLight = false;
+  String _feedbackText = 'Position your face in the circle';
 
   // Auto-capture countdown
-  int _countdown = 0;          // 3 → 2 → 1, then capture fires
+  int _countdown = 0; // 3 → 2 → 1, then capture fires
   Timer? _countdownTimer;
+  late final AnimationController _countdownAnimController;
 
   @override
   void initState() {
     super.initState();
+    _countdownAnimController = AnimationController(
+      vsync: this,
+      duration: const Duration(seconds: 3),
+    );
     _initializeCamera();
   }
 
   @override
   void dispose() {
     _countdownTimer?.cancel();
+    _countdownAnimController.dispose();
     _cameraController?.dispose();
     _faceDetectionService.dispose();
     super.dispose();
@@ -50,6 +58,7 @@ class _CameraScreenState extends State<CameraScreen> {
   void _startCountdown() {
     if (_countdownTimer != null) return; // already running
     setState(() => _countdown = 3);
+    _countdownAnimController.forward(from: 0.0);
     _countdownTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
       if (!mounted) {
         timer.cancel();
@@ -71,6 +80,8 @@ class _CameraScreenState extends State<CameraScreen> {
   void _cancelCountdown() {
     _countdownTimer?.cancel();
     _countdownTimer = null;
+    _countdownAnimController.stop();
+    _countdownAnimController.reset();
     if (mounted) setState(() => _countdown = 0);
   }
 
@@ -359,155 +370,349 @@ class _CameraScreenState extends State<CameraScreen> {
   @override
   Widget build(BuildContext context) {
     final controller = _cameraController;
+    final title =
+        widget.isFirstCall ? 'First Call Selfie' : 'Last Call Selfie';
+    final canManualCapture = _isFaceAligned && !_isCapturing;
 
     return Scaffold(
       backgroundColor: Colors.black,
-      appBar: AppBar(
-        title: Text(
-          widget.isFirstCall ? 'First Call Selfie' : 'Last Call Selfie',
-        ),
-        backgroundColor: Colors.black,
-        foregroundColor: Colors.white,
-      ),
       body: _isInitializing
-          ? const Center(child: CircularProgressIndicator())
+          ? const Center(
+              child: CircularProgressIndicator(color: Colors.white),
+            )
           : controller == null || !controller.value.isInitialized
-          ? Center(
-              child: Text(
-                _feedbackText,
-                style: const TextStyle(color: Colors.white),
+          ? SafeArea(
+              child: Stack(
+                children: [
+                  Positioned(
+                    top: 12,
+                    left: 12,
+                    child: IconButton(
+                      onPressed: () => Navigator.of(context).pop(),
+                      icon: const Icon(
+                        Icons.arrow_back_rounded,
+                        color: Colors.white,
+                      ),
+                    ),
+                  ),
+                  Center(
+                    child: Padding(
+                      padding: const EdgeInsets.all(24),
+                      child: Text(
+                        _feedbackText,
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 16,
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
               ),
             )
           : Stack(
               fit: StackFit.expand,
               children: [
-                CameraPreview(controller),
-                CustomPaint(
-                  painter: FaceOverlayPainter(
-                    isFaceDetected: _isFaceDetected,
-                    isFaceAligned: _isFaceAligned,
-                  ),
+                // Aspect-ratio-correct full-bleed camera preview
+                _buildFullBleedPreview(controller),
+
+                // Circular biometric scanner overlay + sweeping countdown arc
+                AnimatedBuilder(
+                  animation: _countdownAnimController,
+                  builder: (context, _) {
+                    return CustomPaint(
+                      painter: FaceOverlayPainter(
+                        isFaceDetected: _isFaceDetected,
+                        isFaceAligned: _isFaceAligned,
+                        countdownProgress: _countdown > 0
+                            ? _countdownAnimController.value
+                            : 0.0,
+                        screenFillLight: _screenFillLight,
+                      ),
+                    );
+                  },
                 ),
-                Positioned(
-                  top: 24,
-                  left: 16,
-                  right: 16,
-                  child: Center(
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 12,
-                        vertical: 8,
-                      ),
-                      decoration: BoxDecoration(
-                        color: Colors.black.withValues(alpha: 0.55),
-                        borderRadius: BorderRadius.circular(999),
-                      ),
-                      child: Text(
-                        _countdown > 0
-                            ? 'Hold still…  ● ● ●'.substring(
-                                0,
-                                14 - (_countdown - 1) * 3,
-                              )
-                            : _feedbackText,
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-                // Countdown ring
-                if (_countdown > 0)
-                  Center(
-                    child: Padding(
-                      padding: EdgeInsets.only(
-                        bottom: MediaQuery.sizeOf(context).height * 0.08,
-                      ),
-                      child: SizedBox(
-                        width: 88,
-                        height: 88,
-                        child: Stack(
-                          alignment: Alignment.center,
+
+                // Floating glass top bar + status/countdown pill
+                SafeArea(
+                  bottom: false,
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Row(
                           children: [
-                            TweenAnimationBuilder<double>(
-                              key: ValueKey<int>(_countdown),
-                              tween: Tween<double>(begin: 1.0, end: 0.0),
-                              duration: const Duration(seconds: 1),
-                              builder: (context, value, _) {
-                                return CircularProgressIndicator(
-                                  value: value,
-                                  strokeWidth: 5,
-                                  backgroundColor:
-                                      Colors.white.withValues(alpha: 0.25),
-                                  valueColor:
-                                      const AlwaysStoppedAnimation<Color>(
-                                        Colors.greenAccent,
-                                      ),
+                            _buildGlassCircleButton(
+                              icon: Icons.arrow_back_rounded,
+                              tooltip: 'Back',
+                              onPressed: () => Navigator.of(context).pop(),
+                            ),
+                            const Spacer(),
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 14,
+                                vertical: 8,
+                              ),
+                              decoration: BoxDecoration(
+                                color: Colors.black.withValues(alpha: 0.55),
+                                borderRadius: BorderRadius.circular(999),
+                                border: Border.all(
+                                  color: Colors.white.withValues(alpha: 0.16),
+                                ),
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(
+                                    widget.isFirstCall
+                                        ? Icons.wb_twilight_rounded
+                                        : Icons.nights_stay_rounded,
+                                    size: 15,
+                                    color: Colors.white,
+                                  ),
+                                  const SizedBox(width: 6),
+                                  Text(
+                                    title,
+                                    style: const TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 14,
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            const Spacer(),
+                            _buildGlassCircleButton(
+                              icon: _screenFillLight
+                                  ? Icons.wb_sunny_rounded
+                                  : Icons.wb_sunny_outlined,
+                              tooltip: _screenFillLight
+                                  ? 'Turn Off Fill Light'
+                                  : 'Screen Fill Light',
+                              active: _screenFillLight,
+                              onPressed: () {
+                                setState(
+                                  () => _screenFillLight = !_screenFillLight,
                                 );
                               },
                             ),
-                            Text(
-                              '$_countdown',
-                              style: const TextStyle(
-                                color: Colors.white,
-                                fontSize: 32,
-                                fontWeight: FontWeight.w800,
-                              ),
-                            ),
                           ],
                         ),
-                      ),
+                        const SizedBox(height: 14),
+
+                        // Dynamic guidance + countdown status pill
+                        AnimatedContainer(
+                          duration: const Duration(milliseconds: 220),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 16,
+                            vertical: 9,
+                          ),
+                          decoration: BoxDecoration(
+                            color: _isFaceAligned
+                                ? const Color(0xFF0E3A24).withValues(alpha: 0.85)
+                                : Colors.black.withValues(alpha: 0.62),
+                            borderRadius: BorderRadius.circular(999),
+                            border: Border.all(
+                              color: _isFaceAligned
+                                  ? Colors.greenAccent.shade400
+                                  : _isFaceDetected
+                                  ? Colors.amber.shade300.withValues(alpha: 0.7)
+                                  : Colors.white.withValues(alpha: 0.22),
+                              width: 1.2,
+                            ),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(
+                                _isFaceAligned
+                                    ? Icons.check_circle_rounded
+                                    : _isFaceDetected
+                                    ? Icons.center_focus_weak_rounded
+                                    : Icons.face_retouching_natural_rounded,
+                                size: 17,
+                                color: _isFaceAligned
+                                    ? Colors.greenAccent.shade400
+                                    : _isFaceDetected
+                                    ? Colors.amber.shade300
+                                    : Colors.white,
+                              ),
+                              const SizedBox(width: 8),
+                              Text(
+                                _isCapturing
+                                    ? 'Capturing photo…'
+                                    : _countdown > 0
+                                    ? 'Hold still  •  $_countdown'
+                                    : _feedbackText,
+                                style: TextStyle(
+                                  color: _isFaceAligned
+                                      ? Colors.greenAccent.shade200
+                                      : Colors.white,
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
                     ),
                   ),
-                Positioned(
-                  left: 0,
-                  right: 0,
-                  bottom: 36,
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(
-                        _isCapturing
-                            ? 'Capturing…'
-                            : _countdown > 0
-                            ? 'Auto-capture in $_countdown s'
-                            : _isFaceAligned
-                            ? 'Hold still — auto-capture starting…'
-                            : 'Align your face within the guide.',
-                        style: TextStyle(
-                          color: _countdown > 0
-                              ? Colors.greenAccent
-                              : Colors.white,
-                          fontWeight: _countdown > 0
-                              ? FontWeight.w700
-                              : FontWeight.normal,
-                        ),
-                      ),
-                      const SizedBox(height: 12),
-                      ElevatedButton.icon(
-                        onPressed: _isFaceAligned && !_isCapturing
-                            ? () {
-                                _cancelCountdown();
-                                _capture();
-                              }
-                            : null,
-                        icon: _isCapturing
-                            ? const SizedBox(
-                                width: 14,
-                                height: 14,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
+                ),
+
+                // Bottom shutter control bar safely above Android navigation bar
+                Align(
+                  alignment: Alignment.bottomCenter,
+                  child: SafeArea(
+                    top: false,
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(24, 0, 24, 20),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 12,
+                              vertical: 5,
+                            ),
+                            decoration: BoxDecoration(
+                              color: Colors.black.withValues(alpha: 0.45),
+                              borderRadius: BorderRadius.circular(999),
+                            ),
+                            child: Text(
+                              _isCapturing
+                                  ? 'Saving selfie…'
+                                  : _countdown > 0
+                                  ? 'Auto-capturing in ${_countdown}s — or tap shutter'
+                                  : _isFaceAligned
+                                  ? 'Aligned! Tap shutter or hold still'
+                                  : 'Align your face inside the circle',
+                              style: TextStyle(
+                                color: _countdown > 0
+                                    ? Colors.greenAccent.shade200
+                                    : Colors.white.withValues(alpha: 0.92),
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 16),
+                          GestureDetector(
+                            onTap: canManualCapture
+                                ? () {
+                                    _cancelCountdown();
+                                    _capture();
+                                  }
+                                : null,
+                            child: AnimatedOpacity(
+                              duration: const Duration(milliseconds: 180),
+                              opacity: canManualCapture || _isCapturing
+                                  ? 1.0
+                                  : 0.42,
+                              child: Container(
+                                width: 76,
+                                height: 76,
+                                padding: const EdgeInsets.all(5),
+                                decoration: BoxDecoration(
+                                  shape: BoxShape.circle,
+                                  border: Border.all(
+                                    color: _isFaceAligned
+                                        ? Colors.greenAccent.shade400
+                                        : Colors.white,
+                                    width: 3.5,
+                                  ),
+                                  color: Colors.black.withValues(alpha: 0.3),
                                 ),
-                              )
-                            : const Icon(Icons.camera_alt),
-                        label: const Text('Capture Now'),
+                                child: Container(
+                                  decoration: BoxDecoration(
+                                    shape: BoxShape.circle,
+                                    color: _isFaceAligned
+                                        ? Colors.greenAccent.shade400
+                                        : Colors.white,
+                                  ),
+                                  child: Center(
+                                    child: _isCapturing
+                                        ? const SizedBox(
+                                            width: 26,
+                                            height: 26,
+                                            child: CircularProgressIndicator(
+                                              strokeWidth: 2.8,
+                                              color: Colors.black87,
+                                            ),
+                                          )
+                                        : const Icon(
+                                            Icons.camera_alt_rounded,
+                                            size: 30,
+                                            color: Colors.black87,
+                                          ),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
                       ),
-                    ],
+                    ),
                   ),
                 ),
               ],
             ),
+    );
+  }
+
+  Widget _buildFullBleedPreview(CameraController controller) {
+    final previewSize = controller.value.previewSize;
+    if (previewSize == null) {
+      return CameraPreview(controller);
+    }
+    return ClipRect(
+      child: FittedBox(
+        fit: BoxFit.cover,
+        child: SizedBox(
+          width: previewSize.height,
+          height: previewSize.width,
+          child: CameraPreview(controller),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildGlassCircleButton({
+    required IconData icon,
+    required String tooltip,
+    required VoidCallback onPressed,
+    bool active = false,
+  }) {
+    return Tooltip(
+      message: tooltip,
+      child: Material(
+        color: active
+            ? Colors.amber.shade400
+            : Colors.black.withValues(alpha: 0.52),
+        shape: CircleBorder(
+          side: BorderSide(
+            color: active
+                ? Colors.amber.shade200
+                : Colors.white.withValues(alpha: 0.2),
+          ),
+        ),
+        child: InkWell(
+          customBorder: const CircleBorder(),
+          onTap: onPressed,
+          child: SizedBox(
+            width: 42,
+            height: 42,
+            child: Icon(
+              icon,
+              size: 21,
+              color: active ? Colors.black87 : Colors.white,
+            ),
+          ),
+        ),
+      ),
     );
   }
 }

@@ -8,11 +8,10 @@ service firebase.storage {
         request.resource.contentType.matches('image/.*');
     }
 
-    // Profile pictures: each user may only write their own image file (<10MB).
+    // Profile pictures: authenticated valid image uploads (<10MB); Firestore rules enforce superuser/owner profilePic updates.
     match /profile_pictures/{userId}/{file} {
       allow read: if request.auth != null;
       allow write: if request.auth != null &&
-        request.auth.uid == userId &&
         (request.resource == null || isValidImageUpload());
     }
 
