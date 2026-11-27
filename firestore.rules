@@ -27,7 +27,12 @@ service cloud.firestore {
     }
 
     function myCompanyId() {
-      return myUserExists() && ('company_ID' in myUserData()) ? myUserData().company_ID : null;
+      return myUserExists()
+        ? (('company_ID' in myUserData()) ? myUserData().company_ID
+          : (('companyId' in myUserData()) ? myUserData().companyId
+          : (('company_id' in myUserData()) ? myUserData().company_id
+          : (('companyID' in myUserData()) ? myUserData().companyID : null))))
+        : null;
     }
 
     function isOwner(userId) {
@@ -227,9 +232,9 @@ service cloud.firestore {
 
       allow read: if isActiveUser() && (
         isSuperuserOrManager() ||
+        isEncoder() ||
         resource.data.salesmanId == request.auth.uid ||
-        (isSupervisor() && resource.data.supervisorId == request.auth.uid) ||
-        (isEncoderOf(resource.data.salesmanId))
+        (isSupervisor() && resource.data.supervisorId == request.auth.uid)
       );
 
       allow update: if isActiveUser() && (
