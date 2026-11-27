@@ -131,6 +131,28 @@ service cloud.firestore {
       return unchangedCore && noSelfRetakeApproval && validTransactions;
     }
 
+    function isSafeEncoderRouteUpdate() {
+      let unchangedCore = request.resource.data.salesmanId == resource.data.salesmanId &&
+        request.resource.data.supervisorId == resource.data.supervisorId &&
+        request.resource.data.date == resource.data.date;
+      let affected = request.resource.data.diff(resource.data).affectedKeys();
+      let validTransactions = request.resource.data.transactions is list &&
+        (!('transactions' in resource.data) ||
+          request.resource.data.transactions.size() == resource.data.transactions.size());
+      return unchangedCore && affected.hasOnly(['transactions']) && validTransactions;
+    }
+
+    function isSafeSalesmanBookletUpdate() {
+      let affected = request.resource.data.diff(resource.data).affectedKeys();
+      let unchangedIdentity = request.resource.data.salesmanId == resource.data.salesmanId &&
+        request.resource.data.revision == resource.data.revision &&
+        request.resource.data.booklets is list &&
+        (!('booklets' in resource.data) ||
+          request.resource.data.booklets.size() == resource.data.booklets.size());
+      return affected.hasOnly(['booklets', 'recentVoids', 'updatedAt']) &&
+        unchangedIdentity;
+    }
+
     match /users/{userId} {
       allow read: if signedIn();
 
@@ -216,7 +238,45 @@ service cloud.firestore {
           resource.data.supervisorId == request.auth.uid &&
           request.resource.data.salesmanId == resource.data.salesmanId &&
           request.resource.data.date == resource.data.date) ||
+        (isEncoderOf(resource.data.salesmanId) && isSafeEncoderRouteUpdate()) ||
         (resource.data.salesmanId == request.auth.uid && isSafeSalesmanRouteUpdate())
+      );
+
+      allow delete: if isSuperuser();
+    }
+
+    match /si_booklets/{salesmanId} {
+      allow read: if isActiveUser() && (
+        isSuperuserOrManager() ||
+        isOwner(salesmanId) ||
+        isSupervisorOf(salesmanId) ||
+        isEncoderOf(salesmanId)
+      );
+
+      allow create: if isActiveUser() && (
+        isSuperuser() ||
+        isEncoderOf(salesmanId)
+      );
+
+      allow update: if isActiveUser() && (
+        isSuperuser() ||
+        isEncoderOf(salesmanId) ||
+        (isOwner(salesmanId) && isSafeSalesmanBookletUpdate())
+      );
+
+      allow delete: if isSuperuser();
+    }
+
+    match /si_booklet_registry/{companyId} {
+      allow read: if isActiveUser() && (
+        isSuperuserOrManager() ||
+        (isEncoder() && myCompanyId() == companyId)
+      );
+
+      allow create, update: if isActiveUser() && (
+        isSuperuser() ||
+        (isEncoder() && myCompanyId() == companyId &&
+          request.resource.data.company_ID == companyId)
       );
 
       allow delete: if isSuperuser();

@@ -1,4 +1,6 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:compact_sales_monitoring/models/si_booklet_model.dart';
+import 'package:compact_sales_monitoring/services/si_series_engine.dart';
 
 DateTime? _parseDateTime(dynamic value) {
   if (value == null) return null;
@@ -167,9 +169,16 @@ class RouteTransaction {
   final bool? isMobileDataOn;
   final bool? isWifiOn;
 
+  // Sales Invoice booklet series metadata
+  final List<String?> pageSiNumbers;
+  final List<SiVoidEntry> voidedSiEntries;
+  final bool siConflict;
+  final int siRevision;
+
   // Local-only sync metadata
   final TransactionUploadStatus uploadStatus;
   final String? uploadedRouteId;
+  final bool needsRemoteUpdate;
 
   const RouteTransaction({
     required this.transactionId,
@@ -196,8 +205,13 @@ class RouteTransaction {
     this.batteryLevel,
     this.isMobileDataOn,
     this.isWifiOn,
+    this.pageSiNumbers = const [],
+    this.voidedSiEntries = const [],
+    this.siConflict = false,
+    this.siRevision = 0,
     this.uploadStatus = TransactionUploadStatus.uploaded,
     this.uploadedRouteId,
+    this.needsRemoteUpdate = false,
   });
 
   bool get isUploaded => uploadStatus == TransactionUploadStatus.uploaded;
@@ -209,6 +223,41 @@ class RouteTransaction {
     final diff = (totalAmount - printedGrandTotal!).abs();
     return diff > 0.005;
   }
+
+  /// Returns the assigned SI series number for 1-based [pageNo], or null.
+  String? siNumberForPage(int pageNo) {
+    final idx = pageNo - 1;
+    if (idx < 0 || idx >= pageSiNumbers.length) return null;
+    final val = pageSiNumbers[idx]?.trim();
+    return (val == null || val.isEmpty) ? null : val;
+  }
+
+  bool get hasAnySiAssigned =>
+      pageSiNumbers.any((s) => s != null && s.trim().isNotEmpty);
+
+  bool get hasMissingSiPages {
+    final count = pageCount > 0 ? pageCount : 1;
+    if (pageSiNumbers.length < count) return true;
+    for (var i = 0; i < count; i++) {
+      final v = pageSiNumbers[i]?.trim();
+      if (v == null || v.isEmpty) return true;
+    }
+    return false;
+  }
+
+  int? get firstAssignedSiNumeric {
+    for (final s in pageSiNumbers) {
+      final parsed = int.tryParse(s?.trim() ?? '');
+      if (parsed != null) return parsed;
+    }
+    return null;
+  }
+
+  String get formattedSiSeriesSummary =>
+      SiSeriesEngine.formatSeriesSummary(pageSiNumbers);
+
+  String get formattedVoidedSiSummary =>
+      SiSeriesEngine.formatVoidedSummary(voidedSiEntries);
 
   RouteTransaction copyWith({
     String? transactionId,
@@ -235,8 +284,13 @@ class RouteTransaction {
     int? batteryLevel,
     bool? isMobileDataOn,
     bool? isWifiOn,
+    List<String?>? pageSiNumbers,
+    List<SiVoidEntry>? voidedSiEntries,
+    bool? siConflict,
+    int? siRevision,
     TransactionUploadStatus? uploadStatus,
     String? uploadedRouteId,
+    bool? needsRemoteUpdate,
   }) {
     return RouteTransaction(
       transactionId: transactionId ?? this.transactionId,
@@ -263,8 +317,13 @@ class RouteTransaction {
       batteryLevel: batteryLevel ?? this.batteryLevel,
       isMobileDataOn: isMobileDataOn ?? this.isMobileDataOn,
       isWifiOn: isWifiOn ?? this.isWifiOn,
+      pageSiNumbers: pageSiNumbers ?? this.pageSiNumbers,
+      voidedSiEntries: voidedSiEntries ?? this.voidedSiEntries,
+      siConflict: siConflict ?? this.siConflict,
+      siRevision: siRevision ?? this.siRevision,
       uploadStatus: uploadStatus ?? this.uploadStatus,
       uploadedRouteId: uploadedRouteId ?? this.uploadedRouteId,
+      needsRemoteUpdate: needsRemoteUpdate ?? this.needsRemoteUpdate,
     );
   }
 
@@ -276,6 +335,21 @@ class RouteTransaction {
     final items = rawItems
         .whereType<Map<String, dynamic>>()
         .map(InvoiceLineItem.fromMap)
+        .toList();
+
+    final rawPageSi = (data['pageSiNumbers'] as List<dynamic>?) ?? const [];
+    final pageSiNumbers = rawPageSi
+        .map((e) {
+          if (e == null) return null;
+          final s = e.toString().trim();
+          return s.isEmpty ? null : s;
+        })
+        .toList();
+
+    final rawVoidedSi = (data['voidedSiEntries'] as List<dynamic>?) ?? const [];
+    final voidedSiEntries = rawVoidedSi
+        .whereType<Map<String, dynamic>>()
+        .map(SiVoidEntry.fromMap)
         .toList();
 
     final statusStr = data['uploadStatus'] as String?;
@@ -311,8 +385,13 @@ class RouteTransaction {
       batteryLevel: (data['batteryLevel'] as num?)?.toInt(),
       isMobileDataOn: data['isMobileDataOn'] as bool?,
       isWifiOn: data['isWifiOn'] as bool?,
+      pageSiNumbers: pageSiNumbers,
+      voidedSiEntries: voidedSiEntries,
+      siConflict: data['siConflict'] as bool? ?? false,
+      siRevision: (data['siRevision'] as num?)?.toInt() ?? 0,
       uploadStatus: status,
       uploadedRouteId: data['uploadedRouteId'] as String?,
+      needsRemoteUpdate: data['needsRemoteUpdate'] as bool? ?? false,
     );
   }
 
@@ -343,6 +422,11 @@ class RouteTransaction {
       if (batteryLevel != null) 'batteryLevel': batteryLevel,
       if (isMobileDataOn != null) 'isMobileDataOn': isMobileDataOn,
       if (isWifiOn != null) 'isWifiOn': isWifiOn,
+      if (pageSiNumbers.isNotEmpty) 'pageSiNumbers': pageSiNumbers,
+      if (voidedSiEntries.isNotEmpty)
+        'voidedSiEntries': voidedSiEntries.map((v) => v.toFirestoreMap()).toList(),
+      if (siConflict) 'siConflict': true,
+      if (siRevision > 0) 'siRevision': siRevision,
     };
   }
 
@@ -350,10 +434,17 @@ class RouteTransaction {
   Map<String, dynamic> toLocalJson() {
     final map = toFirestoreMap();
     map['capturedAt'] = capturedAt.millisecondsSinceEpoch;
+    if (voidedSiEntries.isNotEmpty) {
+      map['voidedSiEntries'] =
+          voidedSiEntries.map((v) => v.toLocalJson()).toList();
+    }
     map['uploadStatus'] =
         uploadStatus == TransactionUploadStatus.pending ? 'pending' : 'uploaded';
     if (uploadedRouteId != null) {
       map['uploadedRouteId'] = uploadedRouteId;
+    }
+    if (needsRemoteUpdate) {
+      map['needsRemoteUpdate'] = true;
     }
     return map;
   }

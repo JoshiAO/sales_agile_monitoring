@@ -7,10 +7,13 @@ import 'package:flutter/foundation.dart';
 import 'package:geolocator/geolocator.dart' as geo;
 import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:compact_sales_monitoring/models/si_booklet_model.dart';
 import 'package:compact_sales_monitoring/models/transaction_model.dart';
 import 'package:compact_sales_monitoring/services/connectivity_check_service.dart';
 import 'package:compact_sales_monitoring/services/daily_invoice_pdf_service.dart';
 import 'package:compact_sales_monitoring/services/firestore_service.dart';
+import 'package:compact_sales_monitoring/services/si_booklet_storage_service.dart';
+import 'package:compact_sales_monitoring/services/si_series_engine.dart';
 import 'package:compact_sales_monitoring/services/transaction_storage_service.dart';
 import 'package:compact_sales_monitoring/services/virtual_printer/sfa_invoice_parser.dart';
 
@@ -21,6 +24,8 @@ class CapturedTransactionResult {
   final DailyPdfSaveResult? pdfSaveResult;
   final bool uploadedNow;
   final bool hasIntegrityWarning;
+  final bool siExhausted;
+  final bool hasNoSiBooklets;
 
   const CapturedTransactionResult({
     required this.transaction,
@@ -29,22 +34,72 @@ class CapturedTransactionResult {
     this.pdfSaveResult,
     this.uploadedNow = false,
     this.hasIntegrityWarning = false,
+    this.siExhausted = false,
+    this.hasNoSiBooklets = false,
   });
 }
 
-/// Coordinates GPS capture, daily deduplication, combined PDF generation,
-/// and Firestore upload/retry for captured SFA transactions.
+/// Coordinates GPS capture, daily deduplication, live SI booklet allocation,
+/// combined PDF generation, and Firestore upload/retry for captured SFA transactions.
 class TransactionSyncService {
   static bool _isFlushing = false;
 
   final TransactionStorageService _storage;
   final FirestoreService _firestore;
+  final SiBookletStorageService _bookletStorage;
 
   TransactionSyncService({
     TransactionStorageService? storage,
     FirestoreService? firestore,
+    SiBookletStorageService? bookletStorage,
   }) : _storage = storage ?? TransactionStorageService(),
-       _firestore = firestore ?? FirestoreService();
+       _firestore = firestore ?? FirestoreService(),
+       _bookletStorage = bookletStorage ?? SiBookletStorageService();
+
+  Future<String?> _resolveCurrentUid() async {
+    var uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid != null && uid.isNotEmpty) return uid;
+    try {
+      final restored = await FirebaseAuth.instance
+          .authStateChanges()
+          .first
+          .timeout(const Duration(seconds: 3));
+      uid = restored?.uid;
+    } catch (_) {}
+    return uid;
+  }
+
+  /// Pulls the salesman's SI booklets from Firestore (1 read) and reconciles
+  /// with the local cache safely under the shared exclusive lock.
+  Future<SalesmanSiBookletState?> refreshBookletsFromFirestore(
+    String salesmanId, {
+    String? companyId,
+  }) async {
+    if (kIsWeb || salesmanId.trim().isEmpty) return null;
+    try {
+      final isOnline = await ConnectivityCheckService.hasInternetConnection();
+      if (!isOnline) {
+        return _bookletStorage.getBookletState(salesmanId);
+      }
+
+      final remote = await _firestore
+          .getSalesmanSiBooklets(salesmanId, fallbackCompanyId: companyId)
+          .timeout(const Duration(seconds: 8));
+
+      return _bookletStorage.withSharedLock(() async {
+        final local = await _bookletStorage.readUnlocked(salesmanId);
+        final reconciled = SiSeriesEngine.reconcileBookletStates(
+          local: local,
+          remote: remote,
+        );
+        await _bookletStorage.writeUnlocked(reconciled);
+        return reconciled;
+      });
+    } catch (e) {
+      debugPrint('[TransactionSyncService] Booklet refresh failed: $e');
+      return _bookletStorage.getBookletState(salesmanId);
+    }
+  }
 
   /// Captures the best available GPS fix + battery/connectivity snapshot.
   static Future<({
@@ -135,7 +190,12 @@ class TransactionSyncService {
       uploadStatus: TransactionUploadStatus.pending,
     );
 
-    final saveResult = await _storage.saveOrFindExisting(parsed.transaction);
+    final currentUid = await _resolveCurrentUid();
+    final saveResult = await _storage.saveOrFindExistingWithSiAllocation(
+      candidate: parsed.transaction,
+      salesmanId: currentUid,
+      bookletStorage: _bookletStorage,
+    );
 
     final dayTransactions = await _storage.getTransactionsForDate(
       saveResult.transaction.routeDate,
@@ -170,6 +230,9 @@ class TransactionSyncService {
         isDuplicate: true,
         pdfSaveResult: pdfResult,
         hasIntegrityWarning: parsed.hasIntegrityWarning,
+        siExhausted: saveResult.transaction.hasMissingSiPages &&
+            saveResult.transaction.hasAnySiAssigned,
+        hasNoSiBooklets: !saveResult.transaction.hasAnySiAssigned,
       );
     }
 
@@ -202,7 +265,63 @@ class TransactionSyncService {
       pdfSaveResult: pdfResult,
       uploadedNow: uploadedNow,
       hasIntegrityWarning: parsed.hasIntegrityWarning,
+      siExhausted: saveResult.siExhausted,
+      hasNoSiBooklets: saveResult.hasNoSiBooklets,
     );
+  }
+
+  /// Salesman live void: voids [pageNo] on [transaction], shifts remaining pages
+  /// forward by 1 from the local booklet pool, rebuilds today's Daily PDF so it
+  /// reflects the new SI numbers, and flushes updates safely in-place.
+  Future<SalesmanVoidResult> voidPageAsSalesman({
+    required RouteTransaction transaction,
+    required int pageNo,
+    String? reason,
+    String? salesmanName,
+    String? fallbackSalesmanCode,
+  }) async {
+    final currentUid = await _resolveCurrentUid();
+    if (currentUid == null || currentUid.isEmpty) {
+      throw StateError('Please sign in before voiding a Sales Invoice page.');
+    }
+
+    final voidResult = await _storage.voidPageLocally(
+      salesmanId: currentUid,
+      transaction: transaction,
+      pageNo: pageNo,
+      bookletStorage: _bookletStorage,
+      reason: reason,
+      voidedBy: currentUid,
+      voidedByName: salesmanName,
+    );
+
+    // Rebuild daily PDF so saved PDF immediately matches updated SI numbers.
+    try {
+      final dayTransactions = await _storage.getTransactionsForDate(
+        transaction.routeDate,
+      );
+      final effectiveCode = transaction.salesRepCode.isNotEmpty
+          ? transaction.salesRepCode
+          : (fallbackSalesmanCode ?? 'REP');
+      if (dayTransactions.isNotEmpty) {
+        await DailyInvoicePdfService.rebuildAndSaveDailyPdf(
+          routeDate: transaction.routeDate,
+          salesmanCode: effectiveCode,
+          transactions: dayTransactions,
+        );
+      }
+    } catch (e) {
+      debugPrint('[TransactionSyncService] PDF rebuild after void failed: $e');
+    }
+
+    // Best-effort immediate flush (in-place update + booklet pointer sync).
+    try {
+      await flushPendingTransactions();
+    } catch (e) {
+      debugPrint('[TransactionSyncService] Flush after void deferred: $e');
+    }
+
+    return voidResult;
   }
 
   /// Flushes all locally pending transactions whose route document already exists.
@@ -217,7 +336,16 @@ class TransactionSyncService {
 
     try {
       final pending = await _storage.getAllPendingTransactions();
-      if (pending.isEmpty) {
+      final dirtyUpdates = await _storage.getTransactionsNeedingRemoteUpdate();
+      final currentUid = await _resolveCurrentUid();
+
+      SalesmanSiBookletState? localBooklets;
+      if (currentUid != null && currentUid.isNotEmpty) {
+        localBooklets = await _bookletStorage.getBookletState(currentUid);
+      }
+
+      final hasBookletPending = localBooklets?.hasPendingSync == true;
+      if (pending.isEmpty && dirtyUpdates.isEmpty && !hasBookletPending) {
         await _storage.refreshPendingCount();
         return uploadedIds;
       }
@@ -248,16 +376,37 @@ class TransactionSyncService {
         } catch (_) {}
       }
 
-      var currentUid = FirebaseAuth.instance.currentUser?.uid;
-      if (currentUid == null) {
-        try {
-          final restoredUser = await FirebaseAuth.instance
-              .authStateChanges()
-              .first
-              .timeout(const Duration(seconds: 3));
-          currentUid = restoredUser?.uid;
-        } catch (_) {}
+      Future<String?> resolveRouteIdForDate(
+        String routeDate, {
+        String? preferredRouteId,
+      }) async {
+        if (preferredRouteId != null && preferredRouteId.isNotEmpty) {
+          return preferredRouteId;
+        }
+        if (knownRouteId != null && knownRouteDate == routeDate) {
+          return knownRouteId;
+        }
+        if (activeRouteId != null && activeRouteDate == routeDate) {
+          return activeRouteId;
+        }
+        if (currentUid != null) {
+          try {
+            final routes = await _firestore
+                .getRoutesBySalesman(currentUid, routeDate)
+                .timeout(const Duration(seconds: 10));
+            if (routes.isNotEmpty) {
+              return routes.first.routeId;
+            }
+          } catch (e) {
+            debugPrint(
+              '[TransactionSyncService] Route lookup failed for $routeDate: $e',
+            );
+          }
+        }
+        return null;
       }
+
+      // 1. Flush brand-new pending transactions.
       final byDate = <String, List<RouteTransaction>>{};
       for (final tx in pending) {
         byDate.putIfAbsent(tx.routeDate, () => []).add(tx);
@@ -272,24 +421,7 @@ class TransactionSyncService {
           continue;
         }
 
-        String? targetRouteId;
-        if (knownRouteId != null && knownRouteDate == routeDate) {
-          targetRouteId = knownRouteId;
-        } else if (activeRouteId != null && activeRouteDate == routeDate) {
-          targetRouteId = activeRouteId;
-        } else if (currentUid != null) {
-          try {
-            final routes = await _firestore
-                .getRoutesBySalesman(currentUid, routeDate)
-                .timeout(const Duration(seconds: 10));
-            if (routes.isNotEmpty) {
-              targetRouteId = routes.first.routeId;
-            }
-          } catch (e) {
-            debugPrint('[TransactionSyncService] Route lookup failed for $routeDate: $e');
-          }
-        }
-
+        final targetRouteId = await resolveRouteIdForDate(routeDate);
         if (targetRouteId == null || targetRouteId.isEmpty) {
           // Pre-First-Call state: leave pending until First Call creates the route doc.
           continue;
@@ -312,6 +444,47 @@ class TransactionSyncService {
           debugPrint(
             '[TransactionSyncService] Upload failed for route $targetRouteId ($routeDate): $e',
           );
+        }
+      }
+
+      // 2. Flush in-place updates for already-uploaded transactions (e.g. offline voids)
+      //    using upsertRouteTransaction so arrayUnion never creates duplicates!
+      for (final dirtyTx in dirtyUpdates) {
+        if (pendingFirstCallDate == dirtyTx.routeDate) continue;
+        final targetRouteId = await resolveRouteIdForDate(
+          dirtyTx.routeDate,
+          preferredRouteId: dirtyTx.uploadedRouteId,
+        );
+        if (targetRouteId == null || targetRouteId.isEmpty) continue;
+
+        try {
+          await _firestore.upsertRouteTransaction(targetRouteId, dirtyTx);
+          await _storage.clearNeedsRemoteUpdate(
+            routeDate: dirtyTx.routeDate,
+            transactionId: dirtyTx.transactionId,
+            syncedSiRevision: dirtyTx.siRevision,
+            routeId: targetRouteId,
+          );
+          uploadedIds.add(dirtyTx.transactionId);
+        } catch (e) {
+          debugPrint(
+            '[TransactionSyncService] In-place SI update failed for ${dirtyTx.transactionId}: $e',
+          );
+        }
+      }
+
+      // 3. Sync salesman booklet pointer & voids ONCE per flush cycle (Spark quota optimized).
+      if (currentUid != null && currentUid.isNotEmpty) {
+        try {
+          final latestLocal = await _bookletStorage.getBookletState(currentUid);
+          if (latestLocal.hasPendingSync && latestLocal.hasBooklets) {
+            final reconciled = await _firestore.syncSalesmanBookletProgress(
+              latestLocal,
+            );
+            await _bookletStorage.saveBookletState(reconciled);
+          }
+        } catch (e) {
+          debugPrint('[TransactionSyncService] Booklet pointer sync failed: $e');
         }
       }
     } finally {

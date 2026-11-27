@@ -7,10 +7,14 @@ import 'package:compact_sales_monitoring/widgets/sales_invoice_viewer.dart';
 
 /// Displays a formatted 9-line BIR Sales Invoice floating directly over a
 /// full-screen dimmed overlay (no outer modal card background), with left/right
-/// navigation arrows and semi-transparent pagination dots.
+/// navigation arrows, semi-transparent pagination dots, and optional encoder
+/// Void / Un-Void actions.
 Future<void> showFullscreenInvoiceLightbox(
   BuildContext context, {
   required RouteTransaction transaction,
+  Future<RouteTransaction?> Function(int pageNo)? onVoidPageRequested,
+  Future<RouteTransaction?> Function(String voidedSiNumber)?
+      onUnvoidSiRequested,
 }) {
   return showGeneralDialog<void>(
     context: context,
@@ -19,7 +23,11 @@ Future<void> showFullscreenInvoiceLightbox(
     barrierColor: Colors.black.withValues(alpha: 0.74),
     transitionDuration: const Duration(milliseconds: 180),
     pageBuilder: (dialogContext, animation, secondaryAnimation) {
-      return FullscreenInvoiceLightbox(transaction: transaction);
+      return FullscreenInvoiceLightbox(
+        transaction: transaction,
+        onVoidPageRequested: onVoidPageRequested,
+        onUnvoidSiRequested: onUnvoidSiRequested,
+      );
     },
     transitionBuilder: (dialogContext, animation, secondaryAnimation, child) {
       return FadeTransition(opacity: animation, child: child);
@@ -29,10 +37,15 @@ Future<void> showFullscreenInvoiceLightbox(
 
 class FullscreenInvoiceLightbox extends StatefulWidget {
   final RouteTransaction transaction;
+  final Future<RouteTransaction?> Function(int pageNo)? onVoidPageRequested;
+  final Future<RouteTransaction?> Function(String voidedSiNumber)?
+      onUnvoidSiRequested;
 
   const FullscreenInvoiceLightbox({
     super.key,
     required this.transaction,
+    this.onVoidPageRequested,
+    this.onUnvoidSiRequested,
   });
 
   @override
@@ -41,20 +54,55 @@ class FullscreenInvoiceLightbox extends StatefulWidget {
 }
 
 class _FullscreenInvoiceLightboxState extends State<FullscreenInvoiceLightbox> {
-  late final List<InvoicePageData> _pages;
+  late RouteTransaction _transaction;
+  late List<InvoicePageData> _pages;
   late final PageController _pageController;
   final FocusNode _focusNode = FocusNode();
   int _currentPage = 0;
   bool _isZoomed = false;
+  bool _isMutating = false;
 
   @override
   void initState() {
     super.initState();
-    _pages = InvoicePaginator.paginate(widget.transaction.items);
+    _transaction = widget.transaction;
+    _pages = InvoicePaginator.paginate(_transaction.items);
     _pageController = PageController();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _focusNode.requestFocus();
     });
+  }
+
+  Future<void> _handleVoidCurrentPage() async {
+    if (_isMutating || widget.onVoidPageRequested == null) return;
+    setState(() => _isMutating = true);
+    try {
+      final updated = await widget.onVoidPageRequested!(_currentPage + 1);
+      if (updated != null && mounted) {
+        setState(() {
+          _transaction = updated;
+          _pages = InvoicePaginator.paginate(_transaction.items);
+        });
+      }
+    } finally {
+      if (mounted) setState(() => _isMutating = false);
+    }
+  }
+
+  Future<void> _handleUnvoidSi(String voidedSi) async {
+    if (_isMutating || widget.onUnvoidSiRequested == null) return;
+    setState(() => _isMutating = true);
+    try {
+      final updated = await widget.onUnvoidSiRequested!(voidedSi);
+      if (updated != null && mounted) {
+        setState(() {
+          _transaction = updated;
+          _pages = InvoicePaginator.paginate(_transaction.items);
+        });
+      }
+    } finally {
+      if (mounted) setState(() => _isMutating = false);
+    }
   }
 
   @override
@@ -89,8 +137,8 @@ class _FullscreenInvoiceLightboxState extends State<FullscreenInvoiceLightbox> {
   @override
   Widget build(BuildContext context) {
     final sheetDate = SfaInvoiceParser.formatSheetDate(
-      widget.transaction.invoiceDate,
-      fallback: widget.transaction.capturedAt,
+      _transaction.invoiceDate,
+      fallback: _transaction.capturedAt,
     );
     final size = MediaQuery.sizeOf(context);
     final isCompact = size.width < 720;
@@ -98,9 +146,14 @@ class _FullscreenInvoiceLightboxState extends State<FullscreenInvoiceLightbox> {
       280.0,
       780.0,
     );
-    final sheetMaxHeight = (size.height - 132).clamp(320.0, 820.0);
+    final sheetMaxHeight = (size.height - 175).clamp(320.0, 820.0);
     final canGoPrev = _currentPage > 0;
     final canGoNext = _currentPage < _pages.length - 1;
+    final currentPageNo = _currentPage + 1;
+    final currentPageSi = _transaction.siNumberForPage(currentPageNo);
+    final canVoidCurrent =
+        widget.onVoidPageRequested != null && currentPageSi != null;
+    final voidedEntries = _transaction.voidedSiEntries;
 
     return KeyboardListener(
       focusNode: _focusNode,
@@ -171,7 +224,7 @@ class _FullscreenInvoiceLightboxState extends State<FullscreenInvoiceLightbox> {
                                   },
                                   itemBuilder: (context, index) {
                                     return SalesInvoicePageCard(
-                                      transaction: widget.transaction,
+                                      transaction: _transaction,
                                       page: _pages[index],
                                       sheetDate: sheetDate,
                                       onZoomChanged: (zoomed) {
@@ -269,6 +322,102 @@ class _FullscreenInvoiceLightboxState extends State<FullscreenInvoiceLightbox> {
                           ],
                         ),
                       ),
+                      if (canVoidCurrent || voidedEntries.isNotEmpty) ...[
+                        const SizedBox(height: 10),
+                        GestureDetector(
+                          onTap: () {},
+                          child: Wrap(
+                            alignment: WrapAlignment.center,
+                            crossAxisAlignment: WrapCrossAlignment.center,
+                            spacing: 8,
+                            runSpacing: 6,
+                            children: [
+                              if (canVoidCurrent)
+                                FilledButton.tonalIcon(
+                                  style: FilledButton.styleFrom(
+                                    backgroundColor: Colors.red.shade700,
+                                    foregroundColor: Colors.white,
+                                    visualDensity: VisualDensity.compact,
+                                  ),
+                                  onPressed:
+                                      _isMutating ? null : _handleVoidCurrentPage,
+                                  icon: _isMutating
+                                      ? const SizedBox(
+                                          width: 14,
+                                          height: 14,
+                                          child: CircularProgressIndicator(
+                                            strokeWidth: 2,
+                                            color: Colors.white,
+                                          ),
+                                        )
+                                      : const Icon(Icons.block, size: 16),
+                                  label: Text('Void SI $currentPageSi (Page $currentPageNo)'),
+                                ),
+                              for (final v in voidedEntries)
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 10,
+                                    vertical: 5,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: Colors.black.withValues(alpha: 0.55),
+                                    borderRadius: BorderRadius.circular(999),
+                                    border: Border.all(
+                                      color: Colors.red.shade300.withValues(alpha: 0.7),
+                                    ),
+                                  ),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Icon(
+                                        Icons.block,
+                                        size: 13,
+                                        color: Colors.red.shade200,
+                                      ),
+                                      const SizedBox(width: 5),
+                                      Text(
+                                        'Voided: ${v.siNumber}'
+                                        '${v.reason != null && v.reason!.isNotEmpty ? ' (${v.reason})' : ''}',
+                                        style: const TextStyle(
+                                          color: Colors.white,
+                                          fontSize: 11.5,
+                                          fontWeight: FontWeight.w600,
+                                        ),
+                                      ),
+                                      if (widget.onUnvoidSiRequested != null) ...[
+                                        const SizedBox(width: 6),
+                                        InkWell(
+                                          onTap: _isMutating
+                                              ? null
+                                              : () => _handleUnvoidSi(v.siNumber),
+                                          borderRadius: BorderRadius.circular(999),
+                                          child: Container(
+                                            padding: const EdgeInsets.symmetric(
+                                              horizontal: 6,
+                                              vertical: 2,
+                                            ),
+                                            decoration: BoxDecoration(
+                                              color: Colors.white.withValues(alpha: 0.18),
+                                              borderRadius: BorderRadius.circular(999),
+                                            ),
+                                            child: const Text(
+                                              'Un-Void',
+                                              style: TextStyle(
+                                                color: Colors.amberAccent,
+                                                fontSize: 10.5,
+                                                fontWeight: FontWeight.w700,
+                                              ),
+                                            ),
+                                          ),
+                                        ),
+                                      ],
+                                    ],
+                                  ),
+                                ),
+                            ],
+                          ),
+                        ),
+                      ],
                     ],
                   ),
                 ),

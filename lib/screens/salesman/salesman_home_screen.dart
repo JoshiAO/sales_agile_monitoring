@@ -589,6 +589,17 @@ class _SalesmanHomeScreenState extends State<SalesmanHomeScreen>
       TransactionSyncService().flushPendingTransactions().catchError(
         (_) => <String>{},
       );
+      final currentUser = mounted
+          ? context.read<AuthProvider>().currentUser
+          : null;
+      if (currentUser != null && currentUser.isVanExTruck) {
+        TransactionSyncService()
+            .refreshBookletsFromFirestore(
+              currentUser.uid,
+              companyId: currentUser.companyId,
+            )
+            .catchError((_) => null);
+      }
       if (mounted) {
         _loadTodayRoute();
       }

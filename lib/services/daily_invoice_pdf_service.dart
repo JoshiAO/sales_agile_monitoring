@@ -173,6 +173,17 @@ class DailyInvoicePdfService {
                     'Date: $sheetDate',
                     style: const pw.TextStyle(fontSize: 10),
                   ),
+                  if (tx.siNumberForPage(page.pageNo) != null) ...[
+                    pw.SizedBox(height: 4),
+                    pw.Text(
+                      'SI No. ${_sanitizePdfText(tx.siNumberForPage(page.pageNo)!)}',
+                      style: pw.TextStyle(
+                        fontSize: 11,
+                        fontWeight: pw.FontWeight.bold,
+                        color: PdfColors.red900,
+                      ),
+                    ),
+                  ],
                 ],
               ),
             ],

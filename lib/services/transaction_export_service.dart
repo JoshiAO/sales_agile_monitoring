@@ -85,6 +85,8 @@ class TransactionExportService {
       TextCellValue('Vatable Sales'),
       TextCellValue('VAT (12%)'),
       TextCellValue('Total Amount'),
+      TextCellValue('SI Series'),
+      TextCellValue('Voided SI'),
     ]);
 
     itemizedSheet.appendRow([
@@ -101,6 +103,7 @@ class TransactionExportService {
       TextCellValue('UOM'),
       TextCellValue('Unit Price'),
       TextCellValue('Line Amount'),
+      TextCellValue('SI Series'),
     ]);
 
     final sortedRecords = List<SalesmanTransactionExportRecord>.from(records)
@@ -140,6 +143,8 @@ class TransactionExportService {
         DoubleCellValue(vatable),
         DoubleCellValue(vat),
         DoubleCellValue(totalAmount),
+        TextCellValue(tx.formattedSiSeriesSummary),
+        TextCellValue(tx.formattedVoidedSiSummary),
       ]);
 
       for (final item in tx.items) {
@@ -157,6 +162,7 @@ class TransactionExportService {
           TextCellValue(item.uom),
           DoubleCellValue(_round2(item.unitPrice)),
           DoubleCellValue(_round2(item.totalAmount)),
+          TextCellValue(tx.siNumberForPage(item.pageNo) ?? ''),
         ]);
       }
     }

@@ -9,7 +9,9 @@ import 'package:compact_sales_monitoring/models/user_model.dart';
 import 'package:compact_sales_monitoring/providers/auth_provider.dart';
 import 'package:compact_sales_monitoring/services/firestore_service.dart';
 import 'package:compact_sales_monitoring/services/transaction_export_service.dart';
+import 'package:compact_sales_monitoring/widgets/encoder_si_cascade_dialog.dart';
 import 'package:compact_sales_monitoring/widgets/fullscreen_invoice_lightbox.dart';
+import 'package:compact_sales_monitoring/widgets/si_booklet_manager_dialog.dart';
 
 enum _SalesmanSortOption {
   nameAsc,
@@ -47,6 +49,7 @@ class _WebTransactionsPageState extends State<WebTransactionsPage> {
 
   List<AppUser> _coveredSalesmen = [];
   Map<String, List<RouteTransaction>> _transactionsBySalesman = {};
+  Map<String, List<SalesRoute>> _routesBySalesman = {};
   String? _selectedSalesmanId;
   bool _isLoading = true;
   bool _isExporting = false;
@@ -190,9 +193,15 @@ class _WebTransactionsPageState extends State<WebTransactionsPage> {
       final grouped = <String, List<RouteTransaction>>{
         for (final s in vanSalesmen) s.uid: <RouteTransaction>[],
       };
+      final groupedRoutes = <String, List<SalesRoute>>{
+        for (final s in vanSalesmen) s.uid: <SalesRoute>[],
+      };
 
       for (final route in routes) {
         if (!allowedSet.contains(route.salesmanId)) continue;
+        groupedRoutes
+            .putIfAbsent(route.salesmanId, () => <SalesRoute>[])
+            .add(route);
         final list = grouped.putIfAbsent(
           route.salesmanId,
           () => <RouteTransaction>[],
@@ -208,6 +217,7 @@ class _WebTransactionsPageState extends State<WebTransactionsPage> {
       setState(() {
         _coveredSalesmen = vanSalesmen;
         _transactionsBySalesman = grouped;
+        _routesBySalesman = groupedRoutes;
         if (_selectedSalesmanId == null ||
             !vanSalesmen.any((u) => u.uid == _selectedSalesmanId)) {
           final sorted = _sortedFilteredSalesmen(
@@ -803,9 +813,16 @@ class _WebTransactionsPageState extends State<WebTransactionsPage> {
   }
 
   Widget _buildRightPane(AppUser? activeSalesman) {
+    final currentUser = context.read<AuthProvider>().currentUser;
+    final canManageSiBooklets = currentUser != null &&
+        (currentUser.role == UserRole.encoder ||
+            currentUser.role == UserRole.superuser);
     final txs = activeSalesman == null
         ? const <RouteTransaction>[]
         : (_transactionsBySalesman[activeSalesman.uid] ?? const []);
+    final salesmanRoutes = activeSalesman == null
+        ? const <SalesRoute>[]
+        : (_routesBySalesman[activeSalesman.uid] ?? const []);
     final totalSales = txs.fold<double>(0.0, (sum, tx) => sum + tx.totalAmount);
     final totalCs = txs.fold<double>(0.0, (sum, tx) => sum + tx.csQty);
     final totalSc = txs.fold<double>(0.0, (sum, tx) => sum + tx.scQty);
@@ -855,6 +872,24 @@ class _WebTransactionsPageState extends State<WebTransactionsPage> {
                 spacing: 8,
                 runSpacing: 8,
                 children: [
+                  if (canManageSiBooklets && activeSalesman != null)
+                    OutlinedButton.icon(
+                      onPressed: () async {
+                        final changed = await showSiBookletManagerDialog(
+                          context,
+                          salesman: activeSalesman,
+                          actor: currentUser,
+                          hasActiveRouteToday: txs.any(
+                            (t) => t.routeDate == _dateFormat.format(DateTime.now()),
+                          ),
+                        );
+                        if (changed && mounted) {
+                          _loadData();
+                        }
+                      },
+                      icon: const Icon(Icons.menu_book_outlined, size: 18),
+                      label: const Text('Manage SI Booklets'),
+                    ),
                   OutlinedButton.icon(
                     onPressed: (_isExporting || activeSalesman == null || txs.isEmpty)
                         ? null
@@ -969,6 +1004,40 @@ class _WebTransactionsPageState extends State<WebTransactionsPage> {
                           onTap: () => showFullscreenInvoiceLightbox(
                             context,
                             transaction: tx,
+                            onVoidPageRequested: canManageSiBooklets
+                                ? (pageNo) async {
+                                    final updated =
+                                        await showEncoderSiCascadeDialog(
+                                      context,
+                                      salesman: activeSalesman,
+                                      actor: currentUser,
+                                      salesmanRoutes: salesmanRoutes,
+                                      targetTransaction: tx,
+                                      voidPageNo: pageNo,
+                                    );
+                                    if (updated != null && mounted) {
+                                      await _loadData();
+                                    }
+                                    return updated;
+                                  }
+                                : null,
+                            onUnvoidSiRequested: canManageSiBooklets
+                                ? (voidedSi) async {
+                                    final updated =
+                                        await showEncoderSiCascadeDialog(
+                                      context,
+                                      salesman: activeSalesman,
+                                      actor: currentUser,
+                                      salesmanRoutes: salesmanRoutes,
+                                      targetTransaction: tx,
+                                      unvoidSiNumber: voidedSi,
+                                    );
+                                    if (updated != null && mounted) {
+                                      await _loadData();
+                                    }
+                                    return updated;
+                                  }
+                                : null,
                           ),
                         );
                       },
@@ -1270,6 +1339,65 @@ class _FullWidthTransactionCard extends StatelessWidget {
                             color: Colors.grey.shade800,
                           ),
                         ),
+                        if (transaction.formattedSiSeriesSummary.isNotEmpty)
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 7,
+                              vertical: 2,
+                            ),
+                            decoration: BoxDecoration(
+                              color: Colors.red.shade50,
+                              borderRadius: BorderRadius.circular(6),
+                              border: Border.all(color: Colors.red.shade200),
+                            ),
+                            child: Text(
+                              'SI: ${transaction.formattedSiSeriesSummary}',
+                              style: TextStyle(
+                                fontSize: 11.5,
+                                fontWeight: FontWeight.w800,
+                                color: Colors.red.shade900,
+                              ),
+                            ),
+                          ),
+                        if (transaction.formattedVoidedSiSummary.isNotEmpty)
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 7,
+                              vertical: 2,
+                            ),
+                            decoration: BoxDecoration(
+                              color: Colors.orange.shade50,
+                              borderRadius: BorderRadius.circular(6),
+                              border: Border.all(color: Colors.orange.shade300),
+                            ),
+                            child: Text(
+                              'Voided: ${transaction.formattedVoidedSiSummary}',
+                              style: TextStyle(
+                                fontSize: 11,
+                                fontWeight: FontWeight.w700,
+                                color: Colors.orange.shade900,
+                              ),
+                            ),
+                          ),
+                        if (transaction.siConflict)
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 7,
+                              vertical: 2,
+                            ),
+                            decoration: BoxDecoration(
+                              color: Colors.red.shade700,
+                              borderRadius: BorderRadius.circular(6),
+                            ),
+                            child: const Text(
+                              'SI Conflict',
+                              style: TextStyle(
+                                fontSize: 11,
+                                fontWeight: FontWeight.w700,
+                                color: Colors.white,
+                              ),
+                            ),
+                          ),
                         Text(
                           '• ${transaction.routeDate} ${timeFormat.format(transaction.capturedAt.toLocal())}',
                           style: TextStyle(

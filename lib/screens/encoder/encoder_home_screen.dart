@@ -3,10 +3,12 @@ import 'package:compact_sales_monitoring/widgets/device_activation_banner.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 import 'package:compact_sales_monitoring/models/route_model.dart';
+import 'package:compact_sales_monitoring/models/si_booklet_model.dart';
 import 'package:compact_sales_monitoring/models/transaction_model.dart';
 import 'package:compact_sales_monitoring/models/user_model.dart';
 import 'package:compact_sales_monitoring/providers/auth_provider.dart';
 import 'package:compact_sales_monitoring/services/firestore_service.dart';
+import 'package:compact_sales_monitoring/widgets/si_booklet_manager_dialog.dart';
 
 class EncoderHomeScreen extends StatefulWidget {
   final ValueChanged<String>? onOpenSalesmanTransactions;
@@ -31,6 +33,7 @@ class _EncoderHomeScreenState extends State<EncoderHomeScreen> {
   String? _errorMessage;
   List<AppUser> _assignedSalesmen = [];
   Map<String, List<RouteTransaction>> _todayTransactionsBySalesman = {};
+  CompanySiRegistry _companyRegistry = const CompanySiRegistry(companyId: '');
 
   String get _todayStr => _dateFormat.format(DateTime.now());
 
@@ -75,13 +78,23 @@ class _EncoderHomeScreenState extends State<EncoderHomeScreen> {
 
       final ids = assigned.map((u) => u.uid).toList();
       final today = _todayStr;
-      final routes = ids.isEmpty
-          ? const <SalesRoute>[]
-          : await _firestoreService.getRoutesBySalesmenAndDateRange(
-              salesmanIds: ids,
-              startDate: today,
-              endDate: today,
-            );
+      final companyId = currentUser.companyId?.trim() ?? '';
+      final results = await Future.wait<dynamic>([
+        ids.isEmpty
+            ? Future.value(const <SalesRoute>[])
+            : _firestoreService.getRoutesBySalesmenAndDateRange(
+                salesmanIds: ids,
+                startDate: today,
+                endDate: today,
+              ),
+        companyId.isEmpty
+            ? Future.value(const CompanySiRegistry(companyId: ''))
+            : _firestoreService
+                .getCompanySiRegistry(companyId)
+                .catchError((_) => CompanySiRegistry(companyId: companyId)),
+      ]);
+      final routes = results[0] as List<SalesRoute>;
+      final registry = results[1] as CompanySiRegistry;
 
       final grouped = <String, List<RouteTransaction>>{
         for (final s in assigned) s.uid: <RouteTransaction>[],
@@ -99,6 +112,7 @@ class _EncoderHomeScreenState extends State<EncoderHomeScreen> {
       setState(() {
         _assignedSalesmen = assigned;
         _todayTransactionsBySalesman = grouped;
+        _companyRegistry = registry;
         _isLoading = false;
       });
     } catch (e) {
@@ -248,6 +262,17 @@ class _EncoderHomeScreenState extends State<EncoderHomeScreen> {
                               final latestSync =
                                   txs.isNotEmpty ? txs.first.capturedAt : null;
                               final isSynced = txs.isNotEmpty;
+                              final bookletEntries = _companyRegistry
+                                  .entriesForSalesman(salesman.uid);
+                              final remainingSi = bookletEntries.fold<int>(
+                                0,
+                                (sum, e) => sum + e.remainingPages,
+                              );
+                              final activeEntry = bookletEntries
+                                  .where((e) => !e.isExhausted)
+                                  .firstOrNull;
+                              final currentUser =
+                                  context.read<AuthProvider>().currentUser;
 
                               return SizedBox(
                                 width: cardWidth,
@@ -373,6 +398,85 @@ class _EncoderHomeScreenState extends State<EncoderHomeScreen> {
                                                     fontSize: 12,
                                                     fontWeight: FontWeight.w700,
                                                     color: Colors.teal.shade700,
+                                                  ),
+                                                ),
+                                            ],
+                                          ),
+                                          const SizedBox(height: 10),
+                                          const Divider(height: 1),
+                                          const SizedBox(height: 8),
+                                          Row(
+                                            children: [
+                                              Expanded(
+                                                child: Container(
+                                                  padding: const EdgeInsets
+                                                      .symmetric(
+                                                    horizontal: 8,
+                                                    vertical: 4,
+                                                  ),
+                                                  decoration: BoxDecoration(
+                                                    color: activeEntry != null
+                                                        ? Colors.teal.shade50
+                                                        : Colors.amber.shade50,
+                                                    borderRadius:
+                                                        BorderRadius.circular(6),
+                                                  ),
+                                                  child: Text(
+                                                    activeEntry != null
+                                                        ? 'SI: ${activeEntry.nextFormatted} ($remainingSi left)'
+                                                        : (bookletEntries
+                                                                .isEmpty
+                                                            ? 'No SI Booklet'
+                                                            : 'SI Exhausted'),
+                                                    maxLines: 1,
+                                                    overflow:
+                                                        TextOverflow.ellipsis,
+                                                    style: TextStyle(
+                                                      fontSize: 11,
+                                                      fontWeight:
+                                                          FontWeight.w700,
+                                                      color: activeEntry != null
+                                                          ? Colors.teal.shade900
+                                                          : Colors
+                                                              .amber.shade900,
+                                                    ),
+                                                  ),
+                                                ),
+                                              ),
+                                              const SizedBox(width: 8),
+                                              if (currentUser != null)
+                                                OutlinedButton.icon(
+                                                  style: OutlinedButton.styleFrom(
+                                                    padding: const EdgeInsets
+                                                        .symmetric(
+                                                      horizontal: 10,
+                                                      vertical: 4,
+                                                    ),
+                                                    visualDensity:
+                                                        VisualDensity.compact,
+                                                  ),
+                                                  onPressed: () async {
+                                                    final changed =
+                                                        await showSiBookletManagerDialog(
+                                                      context,
+                                                      salesman: salesman,
+                                                      actor: currentUser,
+                                                      hasActiveRouteToday:
+                                                          isSynced,
+                                                    );
+                                                    if (changed && mounted) {
+                                                      _loadData();
+                                                    }
+                                                  },
+                                                  icon: const Icon(
+                                                    Icons.menu_book_outlined,
+                                                    size: 15,
+                                                  ),
+                                                  label: const Text(
+                                                    'SI Booklets',
+                                                    style: TextStyle(
+                                                      fontSize: 11.5,
+                                                    ),
                                                   ),
                                                 ),
                                             ],

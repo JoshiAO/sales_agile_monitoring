@@ -5,9 +5,11 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:intl/intl.dart';
 import 'package:compact_sales_monitoring/models/agile_model.dart';
 import 'package:compact_sales_monitoring/models/company_branding_model.dart';
+import 'package:compact_sales_monitoring/models/si_booklet_model.dart';
 import 'package:compact_sales_monitoring/models/user_model.dart';
 import 'package:compact_sales_monitoring/models/route_model.dart';
 import 'package:compact_sales_monitoring/models/transaction_model.dart';
+import 'package:compact_sales_monitoring/services/si_series_engine.dart';
 import 'package:uuid/uuid.dart';
 import 'firebase_service.dart';
 
@@ -1570,6 +1572,528 @@ class FirestoreService {
       'latest_version': latestVersion,
       'download_url': downloadUrl,
     });
+  }
+
+  // =========================================================================
+  // Sales Invoice (SI) Booklet Series Management (Spark Free-Tier Optimized)
+  // =========================================================================
+
+  /// 1 Firestore read: fetches a salesman's consolidated booklet state doc.
+  Future<SalesmanSiBookletState> getSalesmanSiBooklets(
+    String salesmanId, {
+    String? fallbackCompanyId,
+  }) async {
+    final doc = await _firebaseService.firestore
+        .collection('si_booklets')
+        .doc(salesmanId)
+        .get();
+    if (!doc.exists || doc.data() == null) {
+      return SalesmanSiBookletState.empty(
+        salesmanId,
+        companyId: fallbackCompanyId,
+      );
+    }
+    return SalesmanSiBookletState.fromMap(doc.data()!, salesmanId: salesmanId);
+  }
+
+  /// 1 Firestore read: fetches the lightweight company-wide SI booklet registry
+  /// for fast overlap checks and Encoder Home summaries.
+  Future<CompanySiRegistry> getCompanySiRegistry(String companyId) async {
+    final trimmed = companyId.trim();
+    if (trimmed.isEmpty) {
+      return const CompanySiRegistry(companyId: '');
+    }
+    final doc = await _firebaseService.firestore
+        .collection('si_booklet_registry')
+        .doc(trimmed)
+        .get();
+    if (!doc.exists || doc.data() == null) {
+      return CompanySiRegistry(companyId: trimmed);
+    }
+    return CompanySiRegistry.fromMap(doc.data()!, companyId: trimmed);
+  }
+
+  /// Atomically validates company-wide non-overlap and adds a new SI booklet
+  /// to both `si_booklets/{salesmanId}` and `si_booklet_registry/{companyId}`.
+  Future<SalesmanSiBookletState> addSiBookletTransactional({
+    required String salesmanId,
+    required String? salesmanName,
+    required String companyId,
+    required ParsedBookletRange range,
+    String? actorUid,
+    String? actorName,
+  }) async {
+    final db = _firebaseService.firestore;
+    final bookletRef = db.collection('si_booklets').doc(salesmanId);
+    final registryRef = companyId.trim().isNotEmpty
+        ? db.collection('si_booklet_registry').doc(companyId.trim())
+        : null;
+
+    return db.runTransaction<SalesmanSiBookletState>((tx) async {
+      final bookletSnap = await tx.get(bookletRef);
+      final registrySnap =
+          registryRef != null ? await tx.get(registryRef) : null;
+
+      final currentState = bookletSnap.exists && bookletSnap.data() != null
+          ? SalesmanSiBookletState.fromMap(
+              bookletSnap.data()!,
+              salesmanId: salesmanId,
+            )
+          : SalesmanSiBookletState.empty(
+              salesmanId,
+              companyId: companyId.trim().isEmpty ? null : companyId.trim(),
+            );
+
+      final currentRegistry =
+          registrySnap != null && registrySnap.exists && registrySnap.data() != null
+              ? CompanySiRegistry.fromMap(
+                  registrySnap.data()!,
+                  companyId: companyId.trim(),
+                )
+              : CompanySiRegistry(companyId: companyId.trim());
+
+      // Check overlap against company registry first (covers all salesmen).
+      final companyOverlap = currentRegistry.findOverlap(
+        range.startNumber,
+        range.endNumber,
+      );
+      if (companyOverlap != null) {
+        final owner = (companyOverlap.salesmanName?.isNotEmpty == true)
+            ? companyOverlap.salesmanName!
+            : companyOverlap.salesmanId;
+        throw StateError(
+          'Series ${range.startFormatted}–${range.endFormatted} overlaps with '
+          'existing booklet ${companyOverlap.startFormatted}–${companyOverlap.endFormatted} '
+          'assigned to $owner.',
+        );
+      }
+
+      // Defensive local check against salesman's own booklets as well.
+      for (final b in currentState.booklets) {
+        if (b.overlapsRange(range.startNumber, range.endNumber)) {
+          throw StateError(
+            'Series ${range.startFormatted}–${range.endFormatted} overlaps with '
+            'existing booklet ${b.rangeLabel}.',
+          );
+        }
+      }
+
+      final now = DateTime.now();
+      final newBooklet = SiBooklet(
+        id: uuid.v4(),
+        startNumber: range.startNumber,
+        endNumber: range.endNumber,
+        padWidth: range.padWidth,
+        nextNumber: range.startNumber,
+        createdAt: now,
+        createdBy: actorUid,
+        createdByName: actorName,
+        updatedAt: now,
+      );
+
+      final updatedState = currentState.copyWith(
+        companyId: companyId.trim().isEmpty ? currentState.companyId : companyId.trim(),
+        revision: currentState.revision + 1,
+        booklets: [...currentState.booklets, newBooklet],
+        updatedAt: now,
+        hasPendingSync: false,
+      );
+
+      tx.set(bookletRef, updatedState.toFirestoreMap());
+
+      if (registryRef != null) {
+        final updatedEntries = Map<String, SiRegistryEntry>.from(
+          currentRegistry.entries,
+        );
+        updatedEntries[newBooklet.id] = SiRegistryEntry(
+          bookletId: newBooklet.id,
+          salesmanId: salesmanId,
+          salesmanName: salesmanName,
+          startNumber: newBooklet.startNumber,
+          endNumber: newBooklet.endNumber,
+          padWidth: newBooklet.padWidth,
+          nextNumber: newBooklet.nextNumber,
+        );
+        tx.set(
+          registryRef,
+          CompanySiRegistry(
+            companyId: companyId.trim(),
+            entries: updatedEntries,
+          ).toFirestoreMap(),
+        );
+      }
+
+      return updatedState;
+    });
+  }
+
+  /// Atomically edits an existing SI booklet:
+  /// - Unused booklets: both first page and last page can be modified.
+  /// - Partially used booklets: first page is locked; last page must be >= lastUsedNumber.
+  Future<SalesmanSiBookletState> updateSiBookletTransactional({
+    required String salesmanId,
+    required String? salesmanName,
+    required String companyId,
+    required String bookletId,
+    required ParsedBookletRange newRange,
+  }) async {
+    final db = _firebaseService.firestore;
+    final bookletRef = db.collection('si_booklets').doc(salesmanId);
+    final registryRef = companyId.trim().isNotEmpty
+        ? db.collection('si_booklet_registry').doc(companyId.trim())
+        : null;
+
+    return db.runTransaction<SalesmanSiBookletState>((tx) async {
+      final bookletSnap = await tx.get(bookletRef);
+      final registrySnap =
+          registryRef != null ? await tx.get(registryRef) : null;
+
+      if (!bookletSnap.exists || bookletSnap.data() == null) {
+        throw StateError('Booklet record not found for this salesman.');
+      }
+
+      final currentState = SalesmanSiBookletState.fromMap(
+        bookletSnap.data()!,
+        salesmanId: salesmanId,
+      );
+      final targetIdx = currentState.booklets.indexWhere((b) => b.id == bookletId);
+      if (targetIdx < 0) {
+        throw StateError('Selected booklet no longer exists.');
+      }
+
+      final existing = currentState.booklets[targetIdx];
+      if (!existing.isUnused) {
+        if (newRange.startNumber != existing.startNumber) {
+          throw StateError(
+            'Cannot change the first page of a booklet that is already in use.',
+          );
+        }
+        final lastUsed = existing.lastUsedNumber!;
+        if (newRange.endNumber < lastUsed) {
+          throw StateError(
+            'Last page cannot be less than the last used SI number '
+            '(${existing.formatValue(lastUsed)}).',
+          );
+        }
+      }
+
+      final currentRegistry =
+          registrySnap != null && registrySnap.exists && registrySnap.data() != null
+              ? CompanySiRegistry.fromMap(
+                  registrySnap.data()!,
+                  companyId: companyId.trim(),
+                )
+              : CompanySiRegistry(companyId: companyId.trim());
+
+      final companyOverlap = currentRegistry.findOverlap(
+        newRange.startNumber,
+        newRange.endNumber,
+        excludeBookletId: bookletId,
+      );
+      if (companyOverlap != null) {
+        final owner = (companyOverlap.salesmanName?.isNotEmpty == true)
+            ? companyOverlap.salesmanName!
+            : companyOverlap.salesmanId;
+        throw StateError(
+          'Updated range ${newRange.startFormatted}–${newRange.endFormatted} '
+          'overlaps with ${companyOverlap.startFormatted}–${companyOverlap.endFormatted} '
+          'assigned to $owner.',
+        );
+      }
+
+      for (final b in currentState.booklets) {
+        if (b.id == bookletId) continue;
+        if (b.overlapsRange(newRange.startNumber, newRange.endNumber)) {
+          throw StateError(
+            'Updated range overlaps with existing booklet ${b.rangeLabel}.',
+          );
+        }
+      }
+
+      final now = DateTime.now();
+      final updatedBooklet = existing.copyWith(
+        startNumber: newRange.startNumber,
+        endNumber: newRange.endNumber,
+        padWidth: existing.isUnused ? newRange.padWidth : existing.padWidth,
+        nextNumber: existing.isUnused
+            ? newRange.startNumber
+            : existing.nextNumber.clamp(
+                newRange.startNumber,
+                newRange.endNumber + 1,
+              ),
+        updatedAt: now,
+      );
+
+      final updatedList = List<SiBooklet>.from(currentState.booklets);
+      updatedList[targetIdx] = updatedBooklet;
+
+      final updatedState = currentState.copyWith(
+        revision: currentState.revision + 1,
+        booklets: updatedList,
+        updatedAt: now,
+        hasPendingSync: false,
+      );
+
+      tx.set(bookletRef, updatedState.toFirestoreMap());
+
+      if (registryRef != null) {
+        final updatedEntries = Map<String, SiRegistryEntry>.from(
+          currentRegistry.entries,
+        );
+        updatedEntries[updatedBooklet.id] = SiRegistryEntry(
+          bookletId: updatedBooklet.id,
+          salesmanId: salesmanId,
+          salesmanName: salesmanName,
+          startNumber: updatedBooklet.startNumber,
+          endNumber: updatedBooklet.endNumber,
+          padWidth: updatedBooklet.padWidth,
+          nextNumber: updatedBooklet.nextNumber,
+        );
+        tx.set(
+          registryRef,
+          CompanySiRegistry(
+            companyId: companyId.trim(),
+            entries: updatedEntries,
+          ).toFirestoreMap(),
+        );
+      }
+
+      return updatedState;
+    });
+  }
+
+  /// Atomically deletes a completely unused SI booklet from both documents.
+  Future<SalesmanSiBookletState> deleteSiBookletTransactional({
+    required String salesmanId,
+    required String companyId,
+    required String bookletId,
+  }) async {
+    final db = _firebaseService.firestore;
+    final bookletRef = db.collection('si_booklets').doc(salesmanId);
+    final registryRef = companyId.trim().isNotEmpty
+        ? db.collection('si_booklet_registry').doc(companyId.trim())
+        : null;
+
+    return db.runTransaction<SalesmanSiBookletState>((tx) async {
+      final bookletSnap = await tx.get(bookletRef);
+      final registrySnap =
+          registryRef != null ? await tx.get(registryRef) : null;
+
+      if (!bookletSnap.exists || bookletSnap.data() == null) {
+        throw StateError('Booklet record not found.');
+      }
+
+      final currentState = SalesmanSiBookletState.fromMap(
+        bookletSnap.data()!,
+        salesmanId: salesmanId,
+      );
+      final target = currentState.booklets.firstWhere(
+        (b) => b.id == bookletId,
+        orElse: () => throw StateError('Booklet not found.'),
+      );
+
+      if (!target.isUnused) {
+        throw StateError(
+          'Cannot delete booklet ${target.rangeLabel} because it already has '
+          '${target.usedPages} used page(s).',
+        );
+      }
+
+      final now = DateTime.now();
+      final updatedState = currentState.copyWith(
+        revision: currentState.revision + 1,
+        booklets: currentState.booklets.where((b) => b.id != bookletId).toList(),
+        updatedAt: now,
+        hasPendingSync: false,
+      );
+
+      tx.set(bookletRef, updatedState.toFirestoreMap());
+
+      if (registryRef != null && registrySnap != null && registrySnap.exists && registrySnap.data() != null) {
+        final currentRegistry = CompanySiRegistry.fromMap(
+          registrySnap.data()!,
+          companyId: companyId.trim(),
+        );
+        final updatedEntries = Map<String, SiRegistryEntry>.from(
+          currentRegistry.entries,
+        )..remove(bookletId);
+        tx.set(
+          registryRef,
+          CompanySiRegistry(
+            companyId: companyId.trim(),
+            entries: updatedEntries,
+          ).toFirestoreMap(),
+        );
+      }
+
+      return updatedState;
+    });
+  }
+
+  /// Syncs a salesman's locally advanced booklet pointers and voids back to
+  /// `si_booklets/{salesmanId}` safely via Firestore transaction without ever
+  /// clobbering an encoder's higher `revision`.
+  Future<SalesmanSiBookletState> syncSalesmanBookletProgress(
+    SalesmanSiBookletState localState,
+  ) async {
+    final db = _firebaseService.firestore;
+    final bookletRef = db.collection('si_booklets').doc(localState.salesmanId);
+
+    return db.runTransaction<SalesmanSiBookletState>((tx) async {
+      final snap = await tx.get(bookletRef);
+      if (!snap.exists || snap.data() == null) {
+        return localState.copyWith(hasPendingSync: false);
+      }
+
+      final remote = SalesmanSiBookletState.fromMap(
+        snap.data()!,
+        salesmanId: localState.salesmanId,
+      );
+
+      // If an encoder modified/cascaded booklets remotely, adopt remote state.
+      if (remote.revision > localState.revision) {
+        return remote.copyWith(hasPendingSync: false);
+      }
+
+      final reconciled = SiSeriesEngine.reconcileBookletStates(
+        local: localState,
+        remote: remote,
+      ).copyWith(hasPendingSync: false);
+
+      // Write ONLY the fields permitted by `isSafeSalesmanBookletUpdate()`
+      tx.update(bookletRef, {
+        'booklets': reconciled.sortedBooklets
+            .map((b) => b.toFirestoreMap())
+            .toList(),
+        'recentVoids': reconciled.recentVoids
+            .map((v) => v.toFirestoreMap())
+            .toList(),
+        'updatedAt': reconciled.updatedAt,
+      });
+
+      return reconciled;
+    }).timeout(const Duration(seconds: 12));
+  }
+
+  /// Updates an existing transaction inside `routes/{routeId}.transactions`
+  /// in-place (by `transactionId`) using a Firestore Transaction so voiding an
+  /// already-uploaded transaction NEVER creates a duplicate array element.
+  Future<void> upsertRouteTransaction(
+    String routeId,
+    RouteTransaction updatedTx,
+  ) async {
+    final db = _firebaseService.firestore;
+    final routeRef = db.collection('routes').doc(routeId);
+
+    await db.runTransaction<void>((tx) async {
+      final snap = await tx.get(routeRef);
+      if (!snap.exists || snap.data() == null) {
+        throw StateError('Route document $routeId not found.');
+      }
+
+      final data = snap.data()!;
+      final rawList = List<dynamic>.from(
+        (data['transactions'] as List<dynamic>?) ?? const [],
+      );
+
+      var found = false;
+      for (var i = 0; i < rawList.length; i++) {
+        final item = rawList[i];
+        if (item is Map<String, dynamic> &&
+            (item['transactionId'] as String?)?.trim() ==
+                updatedTx.transactionId) {
+          rawList[i] = updatedTx.toFirestoreMap();
+          found = true;
+          break;
+        }
+      }
+
+      if (!found) {
+        rawList.add(updatedTx.toFirestoreMap());
+      }
+
+      tx.update(routeRef, {'transactions': rawList});
+    }).timeout(const Duration(seconds: 12));
+  }
+
+  /// Atomically applies an Encoder/Superuser void or un-void cascade across
+  /// affected route documents, `si_booklets/{salesmanId}`, and
+  /// `si_booklet_registry/{companyId}` in a single Firestore batch.
+  Future<void> applyEncoderSiCascade({
+    required String salesmanId,
+    required String? salesmanName,
+    required String? companyId,
+    required List<SalesRoute> affectedRoutes,
+    required EncoderCascadePreview preview,
+  }) async {
+    final db = _firebaseService.firestore;
+    final updatedById = {
+      for (final diff in preview.diffs) diff.after.transactionId: diff.after,
+    };
+
+    // Fetch latest route docs and update transactions in-place inside a batch.
+    final batch = db.batch();
+    for (final route in affectedRoutes) {
+      final routeRef = db.collection('routes').doc(route.routeId);
+      final snap = await routeRef.get();
+      if (!snap.exists || snap.data() == null) continue;
+
+      final rawList = List<dynamic>.from(
+        (snap.data()!['transactions'] as List<dynamic>?) ?? const [],
+      );
+      var changed = false;
+      for (var i = 0; i < rawList.length; i++) {
+        final item = rawList[i];
+        if (item is Map<String, dynamic>) {
+          final id = (item['transactionId'] as String?)?.trim();
+          final replacement = id != null ? updatedById[id] : null;
+          if (replacement != null) {
+            rawList[i] = replacement.toFirestoreMap();
+            changed = true;
+          }
+        }
+      }
+      if (changed) {
+        batch.update(routeRef, {'transactions': rawList});
+      }
+    }
+
+    final bookletRef = db.collection('si_booklets').doc(salesmanId);
+    batch.set(bookletRef, preview.updatedState.toFirestoreMap());
+
+    if (companyId != null && companyId.trim().isNotEmpty) {
+      final registryRef = db
+          .collection('si_booklet_registry')
+          .doc(companyId.trim());
+      final regSnap = await registryRef.get();
+      if (regSnap.exists && regSnap.data() != null) {
+        final reg = CompanySiRegistry.fromMap(
+          regSnap.data()!,
+          companyId: companyId.trim(),
+        );
+        final updatedEntries = Map<String, SiRegistryEntry>.from(reg.entries);
+        for (final b in preview.updatedState.booklets) {
+          updatedEntries[b.id] = SiRegistryEntry(
+            bookletId: b.id,
+            salesmanId: salesmanId,
+            salesmanName: salesmanName ?? updatedEntries[b.id]?.salesmanName,
+            startNumber: b.startNumber,
+            endNumber: b.endNumber,
+            padWidth: b.padWidth,
+            nextNumber: b.nextNumber,
+          );
+        }
+        batch.set(
+          registryRef,
+          CompanySiRegistry(
+            companyId: companyId.trim(),
+            entries: updatedEntries,
+          ).toFirestoreMap(),
+        );
+      }
+    }
+
+    await batch.commit().timeout(const Duration(seconds: 15));
   }
 }
 // roleToString is defined in user_model.dart and imported above.

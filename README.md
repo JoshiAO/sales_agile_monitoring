@@ -6,11 +6,11 @@ Sales Agile Monitoring is a multi-role Flutter + Firebase app for field sales op
 
 The app supports five roles across Android and Web:
 
-- **Salesman (Android)** — capture first and last calls with biometric selfie guidance, intercept/import SFA PDF invoices, track daily transactions, and submit daily Agile actuals.
+- **Salesman (Android)** — capture first and last calls with biometric selfie guidance, intercept/import SFA PDF invoices, track daily transactions with automatic Sales Invoice (SI) booklet series numbering and live page voiding, and submit daily Agile actuals.
 - **Supervisor (Web)** — monitor assigned salesmen, review routes on the map, inspect weekly calls grids, review transactions, set daily Agile targets, and compare targets vs actuals.
 - **Manager (Web)** — oversee company-wide teams, routes, transactions, and Agile summaries.
-- **Encoder (Web)** — access the dedicated Encoder Portal to review assigned salesmen's transactions and itemized invoices.
-- **Superuser (Web)** — view all teams, manage users (including profile photos, classifications, and assignments), review global route activity, inspect Agile summaries, manage database/app versions, and archive route data.
+- **Encoder (Web)** — access the dedicated Encoder Portal to configure Sales Invoice (SI) booklets per salesman, review assigned salesmen's transactions and itemized invoices, manage void/un-void cascades, and export Excel reports with SI series tracking.
+- **Superuser (Web)** — view all teams, manage users (including profile photos, classifications, assignments, and SI booklets), review global route activity, inspect Agile summaries, manage database/app versions, and archive route data.
 
 Company-aware behavior is enforced across startup branding and user management:
 
@@ -27,7 +27,7 @@ Company-aware behavior is enforced across startup branding and user management:
 - **Modern Field Dashboard (Calls tab)** for first-call and last-call capture, route progress, and salesman classification badges (`Booking`, `Van Ex-Truck`).
 - **Biometric Selfie Capture UI** with circular face alignment ring, sweeping auto-capture countdown arc, Screen Fill Light, and bottom shutter controls.
 - GPS-tagged photo capture with overlay details and QR map link.
-- **Transactions tab** with Android SFA PDF Invoice Interceptor, manual PDF import, itemized invoice parsing, and Firestore/Storage sync.
+- **Transactions tab** with Android SFA PDF Invoice Interceptor, manual PDF import, itemized invoice parsing, automatic **Sales Invoice (SI) Booklet Series** numbering (offline-capable across multiple booklets from smallest to highest), live **Void Page** shifting, Daily PDF generation with `SI No.` headers, and Firestore/Storage sync.
 - Firebase Storage upload plus Firestore route persistence.
 - Checkpoint capture during the workday.
 - Retake request and approval flow for call images.
@@ -59,7 +59,10 @@ Company-aware behavior is enforced across startup branding and user management:
 ### Manager & Encoder
 
 - **Manager** — company-scoped dashboard for reviewing team summaries, maps, transactions, and Agile performance.
-- **Encoder** — dedicated Web Encoder Portal displaying assigned salesmen's transactions and itemized SFA invoices.
+- **Encoder** — dedicated Web Encoder Portal displaying assigned salesmen's transactions and itemized SFA invoices, plus:
+  - **SI Booklet Management**: Manually configure one or more Sales Invoice booklets (first page to last page, preserving leading zeros) per assigned salesman with atomic company-wide overlap prevention.
+  - **SI Preview & Void / Un-Void Cascades**: Inspect `SI No.` on every invoice page, mark voided pages or un-void mistakes with a Before → After chronological cascade diff preview.
+  - **Excel Export with SI Series**: Exports `SI Series` (e.g., `1223456-461` or `123456-458,123460-461`) and `Voided SI` in `Transactions Summary`, plus per-page `SI Series` in `Itemized Details`.
 
 ### Superuser
 
@@ -241,7 +244,9 @@ storage.rules
 | Collection | Description |
 |---|---|
 | `users` | User profiles, roles, and supervisor assignments |
-| `routes` | Daily route documents with call images and checkpoints |
+| `routes` | Daily route documents with call images, checkpoints, and captured transactions (including `pageSiNumbers` & `voidedSiEntries`) |
+| `si_booklets` | Per-salesman consolidated SI booklet series state (`si_booklets/{salesmanId}`), pointers, and recent void logs |
+| `si_booklet_registry` | Lightweight per-company booklet range index (`si_booklet_registry/{companyId}`) for atomic overlap checks |
 | `agile_targets` | Daily supervisor-entered targets per salesman |
 | `agile_submissions` | Daily salesman-entered actuals and submission status |
 | `announcements` | Active announcements with audience, schedule, and optional image URL |

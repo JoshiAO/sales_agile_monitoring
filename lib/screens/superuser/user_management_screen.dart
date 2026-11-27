@@ -10,6 +10,7 @@ import 'package:compact_sales_monitoring/services/firestore_service.dart';
 import 'package:compact_sales_monitoring/services/storage_service.dart';
 import 'package:compact_sales_monitoring/services/user_provisioning_service.dart';
 import 'package:compact_sales_monitoring/widgets/profile_image_crop_dialog.dart';
+import 'package:compact_sales_monitoring/widgets/si_booklet_manager_dialog.dart';
 import 'package:compact_sales_monitoring/widgets/user_avatar.dart';
 
 class UserManagementScreen extends StatefulWidget {
@@ -464,6 +465,25 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
                                   ? null
                                   : user.uid;
                             });
+                          },
+                        ),
+                      if (user.role == UserRole.salesman && user.isVanExTruck)
+                        IconButton(
+                          tooltip: 'Manage SI Booklets',
+                          icon: Icon(
+                            Icons.menu_book_outlined,
+                            color: Colors.teal.shade700,
+                            size: 20,
+                          ),
+                          onPressed: () {
+                            final actor =
+                                context.read<AuthProvider>().currentUser;
+                            if (actor == null) return;
+                            showSiBookletManagerDialog(
+                              context,
+                              salesman: user,
+                              actor: actor,
+                            );
                           },
                         ),
                       IconButton(

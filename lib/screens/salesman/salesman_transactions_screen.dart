@@ -6,6 +6,7 @@ import 'package:intl/intl.dart';
 import 'package:open_filex/open_filex.dart';
 import 'package:provider/provider.dart';
 import 'package:compact_sales_monitoring/constants/app_constants.dart';
+import 'package:compact_sales_monitoring/models/si_booklet_model.dart';
 import 'package:compact_sales_monitoring/models/transaction_model.dart';
 import 'package:compact_sales_monitoring/providers/auth_provider.dart';
 import 'package:compact_sales_monitoring/services/daily_invoice_pdf_service.dart';
@@ -42,6 +43,7 @@ class _SalesmanTransactionsScreenState extends State<SalesmanTransactionsScreen>
   final FirestoreService _firestore = FirestoreService();
 
   List<RouteTransaction> _transactions = const [];
+  SalesmanSiBookletState? _bookletState;
   bool _isLoading = true;
   bool _isSyncing = false;
   bool _isOpeningPdf = false;
@@ -102,7 +104,12 @@ class _SalesmanTransactionsScreenState extends State<SalesmanTransactionsScreen>
     final localBefore = await _storage.getTransactionsForDate(todayStr);
     var merged = localBefore;
 
+    SalesmanSiBookletState? refreshedBooklets;
     if (user != null) {
+      refreshedBooklets = await _syncService.refreshBookletsFromFirestore(
+        user.uid,
+        companyId: user.companyId,
+      );
       try {
         final routes = await _firestore
             .getRoutesBySalesman(user.uid, todayStr)
@@ -142,6 +149,7 @@ class _SalesmanTransactionsScreenState extends State<SalesmanTransactionsScreen>
     if (!mounted || gen != _loadGeneration) return;
     setState(() {
       _transactions = merged;
+      _bookletState = refreshedBooklets ?? _bookletState;
       _isLoading = false;
     });
     widget.onPendingCountChanged?.call();
@@ -344,24 +352,59 @@ Grand total = 1107.47
   }
 
   Future<void> _openInvoiceModal(RouteTransaction tx) async {
+    final user = context.read<AuthProvider>().currentUser;
+    var currentTx = tx;
+    var didMutate = false;
     await showDialog<void>(
       context: context,
-      builder: (dialogCtx) => Dialog(
-        insetPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 20),
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 600, maxHeight: 740),
-          child: Padding(
-            padding: const EdgeInsets.all(14),
-            child: SalesInvoiceViewer(
-              transaction: tx,
-              confirmOnClose: false,
-              showCloseButton: true,
-              onCloseRequested: () => Navigator.pop(dialogCtx),
+      builder: (dialogCtx) => StatefulBuilder(
+        builder: (dialogCtx, setDialogState) => Dialog(
+          insetPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 20),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 600, maxHeight: 760),
+            child: Padding(
+              padding: const EdgeInsets.all(14),
+              child: SalesInvoiceViewer(
+                transaction: currentTx,
+                confirmOnClose: false,
+                showCloseButton: true,
+                onCloseRequested: () => Navigator.pop(dialogCtx),
+                onVoidPageRequested: (pageNo, reason) async {
+                  final voidResult = await _syncService.voidPageAsSalesman(
+                    transaction: currentTx,
+                    pageNo: pageNo,
+                    reason: reason,
+                    salesmanName: user?.name ?? user?.email,
+                    fallbackSalesmanCode: user?.fsName ?? user?.name,
+                  );
+                  didMutate = true;
+                  setDialogState(() {
+                    currentTx = voidResult.updatedTransaction;
+                  });
+                  if (mounted) {
+                    final nextSi =
+                        voidResult.updatedTransaction.siNumberForPage(pageNo);
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text(
+                          nextSi != null
+                              ? 'Voided SI ${voidResult.voidedEntry.siNumber}. Page $pageNo is now SI No. $nextSi.'
+                              : 'Voided SI ${voidResult.voidedEntry.siNumber}. Booklet exhausted.',
+                        ),
+                      ),
+                    );
+                  }
+                  return voidResult.updatedTransaction;
+                },
+              ),
             ),
           ),
         ),
       ),
     );
+    if (didMutate && mounted) {
+      await _loadData();
+    }
   }
 
   @override
@@ -581,24 +624,66 @@ Grand total = 1107.47
 
   Widget _buildTodayHeaderStrip() {
     final todayLabel = DateFormat('EEE, MMM d, yyyy').format(_today);
+    final booklet = _bookletState;
+    final nextSi = booklet?.nextAvailableFormatted;
+    final remaining = booklet?.totalRemainingPages ?? 0;
+
     return Padding(
       padding: const EdgeInsets.fromLTRB(14, 10, 14, 2),
-      child: Row(
+      child: Wrap(
+        spacing: 8,
+        runSpacing: 4,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        alignment: WrapAlignment.spaceBetween,
         children: [
-          Icon(
-            Icons.today_rounded,
-            size: 16,
-            color: Colors.deepPurple.shade700,
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                Icons.today_rounded,
+                size: 16,
+                color: Colors.deepPurple.shade700,
+              ),
+              const SizedBox(width: 6),
+              Text(
+                'Today  •  $todayLabel',
+                style: TextStyle(
+                  fontSize: 12.5,
+                  fontWeight: FontWeight.w700,
+                  color: Colors.grey.shade800,
+                ),
+              ),
+            ],
           ),
-          const SizedBox(width: 6),
-          Text(
-            'Today  •  $todayLabel',
-            style: TextStyle(
-              fontSize: 12.5,
-              fontWeight: FontWeight.w700,
-              color: Colors.grey.shade800,
+          if (booklet != null)
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+              decoration: BoxDecoration(
+                color: nextSi != null
+                    ? Colors.teal.shade50
+                    : Colors.amber.shade50,
+                borderRadius: BorderRadius.circular(999),
+                border: Border.all(
+                  color: nextSi != null
+                      ? Colors.teal.shade200
+                      : Colors.amber.shade300,
+                ),
+              ),
+              child: Text(
+                nextSi != null
+                    ? 'Next SI: $nextSi ($remaining left)'
+                    : (booklet.hasBooklets
+                        ? 'SI Booklet Exhausted'
+                        : 'No SI Booklet Assigned'),
+                style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w700,
+                  color: nextSi != null
+                      ? Colors.teal.shade900
+                      : Colors.amber.shade900,
+                ),
+              ),
             ),
-          ),
         ],
       ),
     );
@@ -749,6 +834,17 @@ class _TransactionCard extends StatelessWidget {
                           color: Color(0xFF3D356B),
                         ),
                       ),
+                      if (transaction.formattedSiSeriesSummary.isNotEmpty) ...[
+                        const SizedBox(height: 2),
+                        Text(
+                          'SI: ${transaction.formattedSiSeriesSummary}',
+                          style: TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w800,
+                            color: Colors.red.shade800,
+                          ),
+                        ),
+                      ],
                       const SizedBox(height: 4),
                       Container(
                         padding: const EdgeInsets.symmetric(
@@ -760,7 +856,11 @@ class _TransactionCard extends StatelessWidget {
                           borderRadius: BorderRadius.circular(999),
                         ),
                         child: Text(
-                          isUploaded ? 'Uploaded' : 'Pending',
+                          isUploaded
+                              ? (transaction.needsRemoteUpdate
+                                  ? 'Sync Pending'
+                                  : 'Uploaded')
+                              : 'Pending',
                           style: TextStyle(
                             color: badgeFg,
                             fontSize: 10.5,
