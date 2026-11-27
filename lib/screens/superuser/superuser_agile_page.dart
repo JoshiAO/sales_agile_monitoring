@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:compact_sales_monitoring/widgets/device_activation_banner.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/foundation.dart';
 import 'package:android_intent_plus/android_intent.dart';
@@ -360,7 +361,8 @@ class _SuperuserAgilePageState extends State<SuperuserAgilePage> {
           ),
         ],
       ),
-      body: FutureBuilder<_SuperuserAgileData>(
+      body: DeviceActivationBannerWrapper(
+        child: FutureBuilder<_SuperuserAgileData>(
         future: _pageFuture,
         builder: (context, snapshot) {
           if (snapshot.connectionState == ConnectionState.waiting) {
@@ -621,6 +623,7 @@ class _SuperuserAgilePageState extends State<SuperuserAgilePage> {
             },
           );
         },
+      ),
       ),
     );
   }

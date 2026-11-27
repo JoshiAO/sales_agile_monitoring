@@ -10,6 +10,7 @@ class ActivationProvider extends ChangeNotifier {
   String? _error;
   int _daysSinceLastLeaseCheck = 0;
   String? _leaseStatusMessage;
+  bool _isLeaseBannerDismissed = false;
 
   bool get isChecking => _isChecking;
   bool get isActivating => _isActivating;
@@ -18,13 +19,27 @@ class ActivationProvider extends ChangeNotifier {
   int get daysSinceLastLeaseCheck => _daysSinceLastLeaseCheck;
   String? get leaseStatusMessage => _leaseStatusMessage;
   bool get isLeaseStatusUrgent => _daysSinceLastLeaseCheck >= 14;
+  bool get isLeaseBannerDismissed => _isLeaseBannerDismissed;
+  bool get shouldShowLeaseBanner =>
+      _isActivated &&
+      !_isLeaseBannerDismissed &&
+      _leaseStatusMessage != null &&
+      _leaseStatusMessage!.isNotEmpty;
+
+  void dismissLeaseBanner() {
+    if (_isLeaseBannerDismissed) return;
+    _isLeaseBannerDismissed = true;
+    notifyListeners();
+  }
 
   Future<void> _updateLeaseStatus() async {
+    final previousMessage = _leaseStatusMessage;
     _daysSinceLastLeaseCheck =
         await _activationService.daysSinceLastSuccessfulLeaseCheck();
 
     if (!_isActivated) {
       _leaseStatusMessage = null;
+      _isLeaseBannerDismissed = false;
       return;
     }
 
@@ -41,10 +56,14 @@ class ActivationProvider extends ChangeNotifier {
         _leaseStatusMessage =
             'Day $_daysSinceLastLeaseCheck/20 reached. Manual reactivation is now required.';
       }
+      if (_leaseStatusMessage != previousMessage) {
+        _isLeaseBannerDismissed = false;
+      }
       return;
     }
 
     _leaseStatusMessage = null;
+    _isLeaseBannerDismissed = false;
   }
 
   Future<void> initialize() async {

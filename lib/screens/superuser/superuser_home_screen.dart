@@ -12,6 +12,7 @@ import 'package:compact_sales_monitoring/services/firestore_service.dart';
 import 'package:compact_sales_monitoring/services/salesman_performance_helper.dart';
 import 'package:compact_sales_monitoring/widgets/date_selector_widget.dart';
 import 'package:compact_sales_monitoring/widgets/loading_skeletons.dart';
+import 'package:compact_sales_monitoring/widgets/device_activation_banner.dart';
 
 enum _SuperuserCardMode { wide, compact }
 
@@ -199,7 +200,8 @@ class _SuperuserHomeScreenState extends State<SuperuserHomeScreen> {
             ),
         ],
       ),
-      body: FutureBuilder<_SuperuserHomeData>(
+      body: DeviceActivationBannerWrapper(
+        child: FutureBuilder<_SuperuserHomeData>(
         future: _homeDataFuture,
         builder: (context, snapshot) {
           if (snapshot.connectionState == ConnectionState.waiting) {
@@ -343,6 +345,7 @@ class _SuperuserHomeScreenState extends State<SuperuserHomeScreen> {
             },
           );
         },
+      ),
       ),
     );
   }

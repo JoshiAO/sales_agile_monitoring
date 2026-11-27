@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:compact_sales_monitoring/widgets/device_activation_banner.dart';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
@@ -1978,7 +1979,8 @@ class _SalesmanHomeScreenState extends State<SalesmanHomeScreen>
         ],
       ),
       body: SafeArea(
-        child: RefreshIndicator(
+        child: DeviceActivationBannerWrapper(
+          child: RefreshIndicator(
           onRefresh: () async {
             await context.read<AuthProvider>().checkCurrentUser();
             await _loadTodayRoute();
@@ -2138,6 +2140,7 @@ class _SalesmanHomeScreenState extends State<SalesmanHomeScreen>
               ],
             ),
           ),
+        ),
         ),
       ),
     );

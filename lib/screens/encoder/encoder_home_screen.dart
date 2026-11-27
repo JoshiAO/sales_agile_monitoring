@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:compact_sales_monitoring/widgets/device_activation_banner.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 import 'package:compact_sales_monitoring/models/route_model.dart';
@@ -135,7 +136,8 @@ class _EncoderHomeScreenState extends State<EncoderHomeScreen> {
           const SizedBox(width: 8),
         ],
       ),
-      body: _isLoading
+      body: DeviceActivationBannerWrapper(
+        child: _isLoading
           ? const Center(child: CircularProgressIndicator())
           : _errorMessage != null
               ? Center(
@@ -387,6 +389,7 @@ class _EncoderHomeScreenState extends State<EncoderHomeScreen> {
                       ),
                   ],
                 ),
+      ),
     );
   }
 }

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:compact_sales_monitoring/widgets/device_activation_banner.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
@@ -1271,7 +1272,8 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
         onPressed: _showAddUserDialog,
         child: const Icon(Icons.add),
       ),
-      body: _isLoading
+      body: DeviceActivationBannerWrapper(
+        child: _isLoading
           ? const Center(child: CircularProgressIndicator())
           : Builder(
               builder: (context) {
@@ -1376,6 +1378,7 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
                 );
               },
             ),
+      ),
     );
   }
 }

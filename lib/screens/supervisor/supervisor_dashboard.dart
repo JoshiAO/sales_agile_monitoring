@@ -16,6 +16,7 @@ import 'package:compact_sales_monitoring/models/route_model.dart';
 import 'package:compact_sales_monitoring/models/transaction_model.dart';
 import 'package:compact_sales_monitoring/widgets/transaction_map_marker.dart';
 import 'package:compact_sales_monitoring/widgets/web_transaction_detail_modal.dart';
+import 'package:compact_sales_monitoring/widgets/device_activation_banner.dart';
 
 class SupervisorDashboard extends StatefulWidget {
   const SupervisorDashboard({super.key});
@@ -640,6 +641,7 @@ class _SupervisorDashboardState extends State<SupervisorDashboard> {
       ),
       body: Column(
         children: [
+          const DeviceActivationBanner(),
           // Date Selector
           Padding(
             padding: const EdgeInsets.all(16.0),

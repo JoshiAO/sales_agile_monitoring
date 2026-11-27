@@ -50,60 +50,6 @@ class _AppRouterState extends State<AppRouter> {
     return base.runtimeType.toString();
   }
 
-  Widget _buildLeaseStatusBanner(ActivationProvider activationProvider) {
-    final message = activationProvider.leaseStatusMessage;
-    if (message == null || message.isEmpty || !activationProvider.isActivated) {
-      return const SizedBox.shrink();
-    }
-
-    final urgent = activationProvider.isLeaseStatusUrgent;
-    final background = urgent
-        ? const Color(0xFFFDE7E9)
-        : const Color(0xFFFFF7E0);
-    final border = urgent ? const Color(0xFFF28B95) : const Color(0xFFF0C36A);
-    final textColor = urgent
-        ? const Color(0xFF7A1F28)
-        : const Color(0xFF6A4A00);
-
-    return SafeArea(
-      child: Align(
-        alignment: Alignment.topCenter,
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(12, 10, 12, 0),
-          child: Container(
-            constraints: const BoxConstraints(maxWidth: 760),
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-            decoration: BoxDecoration(
-              color: background,
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: border),
-            ),
-            child: Row(
-              children: [
-                Icon(
-                  urgent
-                      ? Icons.warning_amber_rounded
-                      : Icons.info_outline_rounded,
-                  color: textColor,
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    'Device Activation Status: $message',
-                    style: TextStyle(
-                      color: textColor,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
   Widget _resolveBase(
     AuthProvider authProvider,
     ActivationProvider activationProvider,
@@ -200,7 +146,6 @@ class _AppRouterState extends State<AppRouter> {
               },
               child: KeyedSubtree(key: ValueKey<String>(baseKey), child: base),
             ),
-            _buildLeaseStatusBanner(activationProvider),
             // Show the wave curtain during:
             //  - launch validation   (isInitializing)
             //  - activation check    (isChecking)

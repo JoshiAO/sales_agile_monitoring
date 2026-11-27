@@ -10,6 +10,7 @@ import 'package:compact_sales_monitoring/screens/salesman/salesman_transactions_
 import 'package:compact_sales_monitoring/services/firestore_service.dart';
 import 'package:compact_sales_monitoring/services/transaction_storage_service.dart';
 import 'package:compact_sales_monitoring/widgets/agile_call_form_card.dart';
+import 'package:compact_sales_monitoring/widgets/device_activation_banner.dart';
 import 'package:compact_sales_monitoring/services/telemetry_service.dart';
 
 class SalesmanTabsScreen extends StatefulWidget {
@@ -639,20 +640,22 @@ class _AgileTab extends StatelessWidget {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('Agile')),
-      body: LayoutBuilder(
-        builder: (context, constraints) {
-          final maxContentWidth = constraints.maxWidth >= 900 ? 760.0 : 680.0;
+      body: DeviceActivationBannerWrapper(
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final maxContentWidth = constraints.maxWidth >= 900 ? 760.0 : 680.0;
 
-          return Center(
-            child: ConstrainedBox(
-              constraints: BoxConstraints(maxWidth: maxContentWidth),
-              child: SizedBox(
-                height: constraints.maxHeight,
-                child: AgileCallFormCard(refreshTrigger: refreshTrigger),
+            return Center(
+              child: ConstrainedBox(
+                constraints: BoxConstraints(maxWidth: maxContentWidth),
+                child: SizedBox(
+                  height: constraints.maxHeight,
+                  child: AgileCallFormCard(refreshTrigger: refreshTrigger),
+                ),
               ),
-            ),
-          );
-        },
+            );
+          },
+        ),
       ),
     );
   }

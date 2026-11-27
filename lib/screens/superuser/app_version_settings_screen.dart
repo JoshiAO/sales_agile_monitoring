@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:compact_sales_monitoring/services/firestore_service.dart';
+import 'package:compact_sales_monitoring/widgets/device_activation_banner.dart';
 
 class AppVersionSettingsScreen extends StatefulWidget {
   const AppVersionSettingsScreen({super.key});
@@ -85,7 +86,8 @@ class _AppVersionSettingsScreenState extends State<AppVersionSettingsScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('App Version Settings')),
-      body: _isLoading
+      body: DeviceActivationBannerWrapper(
+        child: _isLoading
           ? const Center(child: CircularProgressIndicator())
           : Padding(
               padding: const EdgeInsets.all(24.0),
@@ -142,6 +144,7 @@ class _AppVersionSettingsScreenState extends State<AppVersionSettingsScreen> {
                 ),
               ),
             ),
+      ),
     );
   }
 }

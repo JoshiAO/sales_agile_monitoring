@@ -1,4 +1,5 @@
 import 'package:flutter/foundation.dart';
+import 'package:compact_sales_monitoring/widgets/device_activation_banner.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
@@ -346,7 +347,8 @@ class _DatabaseManagementScreenState extends State<DatabaseManagementScreen> {
           const SizedBox(width: 8),
         ],
       ),
-      body: Center(
+      body: DeviceActivationBannerWrapper(
+        child: Center(
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 920),
           child: ListView(
@@ -627,6 +629,7 @@ class _DatabaseManagementScreenState extends State<DatabaseManagementScreen> {
             ],
           ),
         ),
+      ),
       ),
     );
   }

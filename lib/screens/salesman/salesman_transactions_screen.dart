@@ -13,6 +13,7 @@ import 'package:compact_sales_monitoring/services/firestore_service.dart';
 import 'package:compact_sales_monitoring/services/transaction_storage_service.dart';
 import 'package:compact_sales_monitoring/services/transaction_sync_service.dart';
 import 'package:compact_sales_monitoring/widgets/sales_invoice_viewer.dart';
+import 'package:compact_sales_monitoring/widgets/device_activation_banner.dart';
 
 class SalesmanTransactionsScreen extends StatefulWidget {
   final int refreshTrigger;
@@ -368,7 +369,8 @@ Grand total = 1107.47
     if (!AppConstants.enableTransactionsFeature) {
       return Scaffold(
         appBar: AppBar(title: const Text('Transactions')),
-        body: Center(
+        body: DeviceActivationBannerWrapper(
+          child: Center(
           child: Padding(
             padding: const EdgeInsets.all(24),
             child: Column(
@@ -397,6 +399,7 @@ Grand total = 1107.47
               ],
             ),
           ),
+        ),
         ),
       );
     }
@@ -462,6 +465,7 @@ Grand total = 1107.47
       ),
       body: Column(
         children: [
+          const DeviceActivationBanner(),
           if (!kIsWeb && Platform.isAndroid) _buildStatusBar(pendingCount),
           _buildTodayHeaderStrip(),
           _buildDailySummaryStrip(

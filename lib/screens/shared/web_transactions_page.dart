@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:compact_sales_monitoring/widgets/device_activation_banner.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 import 'package:compact_sales_monitoring/constants/app_constants.dart';
@@ -982,7 +983,8 @@ class _WebTransactionsPageState extends State<WebTransactionsPage> {
     if (!AppConstants.enableTransactionsFeature) {
       return Scaffold(
         appBar: AppBar(title: const Text('Transactions')),
-        body: Center(
+        body: DeviceActivationBannerWrapper(
+          child: Center(
           child: Padding(
             padding: const EdgeInsets.all(24),
             child: ConstrainedBox(
@@ -1035,6 +1037,7 @@ class _WebTransactionsPageState extends State<WebTransactionsPage> {
             ),
           ),
         ),
+        ),
       );
     }
 
@@ -1068,7 +1071,8 @@ class _WebTransactionsPageState extends State<WebTransactionsPage> {
           const SizedBox(width: 8),
         ],
       ),
-      body: _isLoading
+      body: DeviceActivationBannerWrapper(
+        child: _isLoading
           ? const Center(child: CircularProgressIndicator())
           : _errorMessage != null
               ? Center(
@@ -1116,6 +1120,7 @@ class _WebTransactionsPageState extends State<WebTransactionsPage> {
                     );
                   },
                 ),
+      ),
     );
   }
 }

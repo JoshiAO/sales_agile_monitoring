@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:compact_sales_monitoring/widgets/device_activation_banner.dart';
 import 'package:flutter/foundation.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:intl/intl.dart';
@@ -581,7 +582,8 @@ class _SupervisorHomeScreenState extends State<SupervisorHomeScreen> {
             ),
         ],
       ),
-      body: Stack(
+      body: DeviceActivationBannerWrapper(
+        child: Stack(
         children: [
           FutureBuilder<_SupervisorHomeData>(
             future: _homeDataFuture,
@@ -763,6 +765,7 @@ class _SupervisorHomeScreenState extends State<SupervisorHomeScreen> {
             _buildNotificationsPanel(uid),
           ],
         ],
+      ),
       ),
     );
   }
