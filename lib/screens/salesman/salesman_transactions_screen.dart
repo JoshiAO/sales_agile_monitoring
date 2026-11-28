@@ -260,14 +260,22 @@ class _SalesmanTransactionsScreenState extends State<SalesmanTransactionsScreen>
         return;
       }
 
-      final processed = await _syncService.processRawInvoiceText(
+      final preview = await _syncService.parseInvoiceForPreview(rawText: text);
+      if (!mounted) return;
+
+      if (preview.existingCapturedToday != null) {
+        await _openInvoiceModal(
+          preview.existingCapturedToday!,
+          alreadyCapturedBanner: true,
+        );
+        return;
+      }
+
+      await _openManualImportPreviewModal(
+        preview: preview,
         rawText: text,
         fallbackSalesmanCode: user?.fsName ?? user?.name,
       );
-
-      await _loadData();
-      if (!mounted) return;
-      await _openInvoiceModal(processed.transaction);
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -351,7 +359,322 @@ Grand total = 1107.47
     );
   }
 
-  Future<void> _openInvoiceModal(RouteTransaction tx) async {
+  Future<void> _openManualImportPreviewModal({
+    required ParsedPreviewInvoiceResult preview,
+    required String rawText,
+    String? fallbackSalesmanCode,
+  }) async {
+    final user = context.read<AuthProvider>().currentUser;
+    RouteTransaction currentTx = preview.transaction;
+    var isPreviewOnly = true;
+    var isAdding = false;
+    var didSave = false;
+
+    await showDialog<void>(
+      context: context,
+      builder: (dialogCtx) => StatefulBuilder(
+        builder: (dialogCtx, setDialogState) {
+          Future<void> handleAddToTransactions() async {
+            if (isAdding) return;
+            if (!preview.hasActiveCallToday) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text(
+                    'Please make a First Call first before adding a transaction.',
+                  ),
+                ),
+              );
+              return;
+            }
+
+            if (preview.isOldInvoiceDate) {
+              final confirmed = await showDialog<bool>(
+                context: dialogCtx,
+                builder: (confirmCtx) => AlertDialog(
+                  title: Row(
+                    children: [
+                      Icon(
+                        Icons.warning_amber_rounded,
+                        color: Colors.amber.shade800,
+                      ),
+                      const SizedBox(width: 8),
+                      const Expanded(child: Text('Old Invoice Date')),
+                    ],
+                  ),
+                  content: Text(
+                    'This invoice is dated "${preview.transaction.invoiceDate}", '
+                    'which is not today.\n\n'
+                    'Are you sure you want to add it to today\'s transactions and '
+                    'consume SI series number(s) from your booklet?',
+                  ),
+                  actions: [
+                    TextButton(
+                      onPressed: () => Navigator.pop(confirmCtx, false),
+                      child: const Text('Cancel'),
+                    ),
+                    FilledButton(
+                      onPressed: () => Navigator.pop(confirmCtx, true),
+                      child: const Text('Yes, Add to Transactions'),
+                    ),
+                  ],
+                ),
+              );
+              if (confirmed != true) return;
+            }
+
+            setDialogState(() => isAdding = true);
+            try {
+              final processed = await _syncService.processRawInvoiceText(
+                rawText: rawText,
+                fallbackSalesmanCode: fallbackSalesmanCode,
+                requireActiveCall: true,
+                forceTodayRouteDate: true,
+              );
+
+              if (processed.blockedNoActiveCall) {
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text(
+                        'No active call found. Complete First Call first before adding a transaction.',
+                      ),
+                    ),
+                  );
+                }
+                setDialogState(() => isAdding = false);
+                return;
+              }
+
+              didSave = true;
+              setDialogState(() {
+                currentTx = processed.transaction;
+                isPreviewOnly = false;
+                isAdding = false;
+              });
+              if (mounted) {
+                final siSummary = processed.transaction.formattedSiSeriesSummary;
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text(
+                      siSummary.isNotEmpty
+                          ? 'Added to Transactions (SI: $siSummary).'
+                          : 'Added to Transactions.',
+                    ),
+                  ),
+                );
+              }
+            } catch (e) {
+              setDialogState(() => isAdding = false);
+              if (mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text('Failed to add transaction: $e')),
+                );
+              }
+            }
+          }
+
+          return Dialog(
+            insetPadding: const EdgeInsets.symmetric(
+              horizontal: 14,
+              vertical: 20,
+            ),
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 600, maxHeight: 780),
+              child: Padding(
+                padding: const EdgeInsets.all(14),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if (isPreviewOnly) ...[
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 7,
+                        ),
+                        decoration: BoxDecoration(
+                          color: Colors.blueGrey.shade50,
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(color: Colors.blueGrey.shade200),
+                        ),
+                        child: Row(
+                          children: [
+                            Icon(
+                              Icons.visibility_outlined,
+                              size: 17,
+                              color: Colors.blueGrey.shade800,
+                            ),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                'Preview Only — Not Saved (No SI number used)',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w700,
+                                  color: Colors.blueGrey.shade900,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      if (!preview.hasActiveCallToday) ...[
+                        const SizedBox(height: 6),
+                        Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 10,
+                            vertical: 7,
+                          ),
+                          decoration: BoxDecoration(
+                            color: Colors.red.shade50,
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(color: Colors.red.shade200),
+                          ),
+                          child: Row(
+                            children: [
+                              Icon(
+                                Icons.warning_amber_rounded,
+                                size: 17,
+                                color: Colors.red.shade800,
+                              ),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: Text(
+                                  'No Active Call — Make a First Call first before adding a transaction.',
+                                  style: TextStyle(
+                                    fontSize: 11.5,
+                                    fontWeight: FontWeight.w700,
+                                    color: Colors.red.shade900,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ] else if (preview.isOldInvoiceDate) ...[
+                        const SizedBox(height: 6),
+                        Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 10,
+                            vertical: 7,
+                          ),
+                          decoration: BoxDecoration(
+                            color: Colors.amber.shade50,
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(color: Colors.amber.shade300),
+                          ),
+                          child: Row(
+                            children: [
+                              Icon(
+                                Icons.history_rounded,
+                                size: 17,
+                                color: Colors.amber.shade900,
+                              ),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: Text(
+                                  'Old Invoice Date (${preview.transaction.invoiceDate}) — not dated today.',
+                                  style: TextStyle(
+                                    fontSize: 11.5,
+                                    fontWeight: FontWeight.w700,
+                                    color: Colors.amber.shade900,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                      const SizedBox(height: 8),
+                    ],
+                    Flexible(
+                      child: SalesInvoiceViewer(
+                        transaction: currentTx,
+                        confirmOnClose: false,
+                        showCloseButton: !isPreviewOnly,
+                        isPreviewOnly: isPreviewOnly,
+                        onCloseRequested: () => Navigator.pop(dialogCtx),
+                        onVoidPageRequested: isPreviewOnly
+                            ? null
+                            : (pageNo, reason) async {
+                                final voidResult =
+                                    await _syncService.voidPageAsSalesman(
+                                  transaction: currentTx,
+                                  pageNo: pageNo,
+                                  reason: reason,
+                                  salesmanName: user?.name ?? user?.email,
+                                  fallbackSalesmanCode:
+                                      user?.fsName ?? user?.name,
+                                );
+                                didSave = true;
+                                setDialogState(() {
+                                  currentTx = voidResult.updatedTransaction;
+                                });
+                                return voidResult.updatedTransaction;
+                              },
+                      ),
+                    ),
+                    if (isPreviewOnly) ...[
+                      const SizedBox(height: 10),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: OutlinedButton.icon(
+                              onPressed: isAdding
+                                  ? null
+                                  : () => Navigator.pop(dialogCtx),
+                              icon: const Icon(Icons.close, size: 18),
+                              label: const Text('Close (View Only)'),
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: FilledButton.icon(
+                              onPressed: (isAdding ||
+                                      !preview.hasActiveCallToday)
+                                  ? null
+                                  : handleAddToTransactions,
+                              icon: isAdding
+                                  ? const SizedBox(
+                                      width: 15,
+                                      height: 15,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                        color: Colors.white,
+                                      ),
+                                    )
+                                  : const Icon(
+                                      Icons.add_circle_outline,
+                                      size: 18,
+                                    ),
+                              label: Text(
+                                isAdding ? 'Adding...' : 'Add to Transactions',
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ),
+          );
+        },
+      ),
+    );
+
+    if (didSave && mounted) {
+      await _loadData();
+    }
+  }
+
+  Future<void> _openInvoiceModal(
+    RouteTransaction tx, {
+    bool alreadyCapturedBanner = false,
+  }) async {
     final user = context.read<AuthProvider>().currentUser;
     var currentTx = tx;
     var didMutate = false;
@@ -364,38 +687,81 @@ Grand total = 1107.47
             constraints: const BoxConstraints(maxWidth: 600, maxHeight: 760),
             child: Padding(
               padding: const EdgeInsets.all(14),
-              child: SalesInvoiceViewer(
-                transaction: currentTx,
-                confirmOnClose: false,
-                showCloseButton: true,
-                onCloseRequested: () => Navigator.pop(dialogCtx),
-                onVoidPageRequested: (pageNo, reason) async {
-                  final voidResult = await _syncService.voidPageAsSalesman(
-                    transaction: currentTx,
-                    pageNo: pageNo,
-                    reason: reason,
-                    salesmanName: user?.name ?? user?.email,
-                    fallbackSalesmanCode: user?.fsName ?? user?.name,
-                  );
-                  didMutate = true;
-                  setDialogState(() {
-                    currentTx = voidResult.updatedTransaction;
-                  });
-                  if (mounted) {
-                    final nextSi =
-                        voidResult.updatedTransaction.siNumberForPage(pageNo);
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(
-                        content: Text(
-                          nextSi != null
-                              ? 'Voided SI ${voidResult.voidedEntry.siNumber}. Page $pageNo is now SI No. $nextSi.'
-                              : 'Voided SI ${voidResult.voidedEntry.siNumber}. Booklet exhausted.',
-                        ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (alreadyCapturedBanner) ...[
+                    Container(
+                      width: double.infinity,
+                      margin: const EdgeInsets.only(bottom: 8),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 7,
                       ),
-                    );
-                  }
-                  return voidResult.updatedTransaction;
-                },
+                      decoration: BoxDecoration(
+                        color: Colors.blue.shade50,
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(color: Colors.blue.shade200),
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(
+                            Icons.copy_all_outlined,
+                            size: 17,
+                            color: Colors.blue.shade800,
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              'Already Captured Today — Showing saved record',
+                              style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w700,
+                                color: Colors.blue.shade900,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                  Flexible(
+                    child: SalesInvoiceViewer(
+                      transaction: currentTx,
+                      confirmOnClose: false,
+                      showCloseButton: true,
+                      onCloseRequested: () => Navigator.pop(dialogCtx),
+                      onVoidPageRequested: (pageNo, reason) async {
+                        final voidResult =
+                            await _syncService.voidPageAsSalesman(
+                          transaction: currentTx,
+                          pageNo: pageNo,
+                          reason: reason,
+                          salesmanName: user?.name ?? user?.email,
+                          fallbackSalesmanCode: user?.fsName ?? user?.name,
+                        );
+                        didMutate = true;
+                        setDialogState(() {
+                          currentTx = voidResult.updatedTransaction;
+                        });
+                        if (mounted) {
+                          final nextSi = voidResult.updatedTransaction
+                              .siNumberForPage(pageNo);
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text(
+                                nextSi != null
+                                    ? 'Voided SI ${voidResult.voidedEntry.siNumber}. Page $pageNo is now SI No. $nextSi.'
+                                    : 'Voided SI ${voidResult.voidedEntry.siNumber}. Booklet exhausted.',
+                              ),
+                            ),
+                          );
+                        }
+                        return voidResult.updatedTransaction;
+                      },
+                    ),
+                  ),
+                ],
               ),
             ),
           ),

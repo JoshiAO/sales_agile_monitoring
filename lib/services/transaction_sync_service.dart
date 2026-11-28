@@ -26,6 +26,7 @@ class CapturedTransactionResult {
   final bool hasIntegrityWarning;
   final bool siExhausted;
   final bool hasNoSiBooklets;
+  final bool blockedNoActiveCall;
 
   const CapturedTransactionResult({
     required this.transaction,
@@ -36,6 +37,25 @@ class CapturedTransactionResult {
     this.hasIntegrityWarning = false,
     this.siExhausted = false,
     this.hasNoSiBooklets = false,
+    this.blockedNoActiveCall = false,
+  });
+}
+
+class ParsedPreviewInvoiceResult {
+  final RouteTransaction transaction;
+  final List<InvoicePageData> pages;
+  final RouteTransaction? existingCapturedToday;
+  final bool isOldInvoiceDate;
+  final bool hasActiveCallToday;
+  final bool hasIntegrityWarning;
+
+  const ParsedPreviewInvoiceResult({
+    required this.transaction,
+    required this.pages,
+    this.existingCapturedToday,
+    required this.isOldInvoiceDate,
+    required this.hasActiveCallToday,
+    this.hasIntegrityWarning = false,
   });
 }
 
@@ -55,6 +75,99 @@ class TransactionSyncService {
   }) : _storage = storage ?? TransactionStorageService(),
        _firestore = firestore ?? FirestoreService(),
        _bookletStorage = bookletStorage ?? SiBookletStorageService();
+
+  /// Checks `SharedPreferences` (cross-isolate safe via `reload()`) to determine
+  /// whether the salesman currently has an active call (First Call started, online
+  /// or offline) for [routeDate] (`YYYY-MM-DD`).
+  static Future<bool> hasActiveCallForDate(String routeDate) async {
+    if (kIsWeb) return false;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.reload();
+
+      final activeRouteId = prefs.getString('active_route_id');
+      final routeStartStr = prefs.getString('route_start_time');
+      if (activeRouteId != null &&
+          activeRouteId.trim().isNotEmpty &&
+          routeStartStr != null &&
+          routeStartStr.trim().isNotEmpty) {
+        final parsedStart = DateTime.tryParse(routeStartStr);
+        if (parsedStart != null &&
+            DateFormat('yyyy-MM-dd').format(parsedStart) == routeDate) {
+          return true;
+        }
+      }
+
+      final pendingFirstCallRaw = prefs.getString('pending_first_call_v2') ?? '';
+      if (pendingFirstCallRaw.isNotEmpty) {
+        try {
+          final map = jsonDecode(pendingFirstCallRaw) as Map<String, dynamic>;
+          final pendingDate = (map['date'] as String?)?.trim();
+          if (pendingDate == routeDate) {
+            return true;
+          }
+        } catch (_) {}
+      }
+    } catch (e) {
+      debugPrint('[TransactionSyncService] hasActiveCallForDate error: $e');
+    }
+    return false;
+  }
+
+  /// Returns `true` if the parsed invoice date matches [referenceNow]'s local calendar day.
+  static bool isInvoiceDateToday(
+    String rawInvoiceDate, {
+    DateTime? referenceNow,
+  }) {
+    final now = referenceNow ?? DateTime.now();
+    final todayStr = DateFormat('yyyy-MM-dd').format(now);
+    final parsed = SfaInvoiceParser.tryParseInvoiceDateTime(rawInvoiceDate);
+    if (parsed == null) return true;
+    return DateFormat('yyyy-MM-dd').format(parsed) == todayStr;
+  }
+
+  /// Parses raw SFA text strictly for **Preview Only** (manual import flow):
+  /// does NOT save locally, does NOT allocate SI numbers, does NOT rebuild PDF,
+  /// and does NOT upload to Firestore.
+  Future<ParsedPreviewInvoiceResult> parseInvoiceForPreview({
+    required String rawText,
+  }) async {
+    final now = DateTime.now();
+    final todayStr = DateFormat('yyyy-MM-dd').format(now);
+    final parsed = SfaInvoiceParser.parse(
+      rawText: rawText,
+      capturedAt: now,
+      uploadStatus: TransactionUploadStatus.pending,
+    );
+
+    final isToday = isInvoiceDateToday(
+      parsed.transaction.invoiceDate,
+      referenceNow: now,
+    );
+
+    // Check if this invoice code is already captured today (or on its parsed routeDate).
+    final existingToday = await _storage.findExistingByInvoiceCode(
+          routeDate: todayStr,
+          invoiceCode: parsed.transaction.invoiceCode,
+        ) ??
+        (parsed.transaction.routeDate != todayStr
+            ? await _storage.findExistingByInvoiceCode(
+                routeDate: parsed.transaction.routeDate,
+                invoiceCode: parsed.transaction.invoiceCode,
+              )
+            : null);
+
+    final hasActiveCall = await hasActiveCallForDate(todayStr);
+
+    return ParsedPreviewInvoiceResult(
+      transaction: parsed.transaction,
+      pages: parsed.pages,
+      existingCapturedToday: existingToday,
+      isOldInvoiceDate: !isToday,
+      hasActiveCallToday: hasActiveCall,
+      hasIntegrityWarning: parsed.hasIntegrityWarning,
+    );
+  }
 
   Future<String?> _resolveCurrentUid() async {
     var uid = FirebaseAuth.instance.currentUser?.uid;
@@ -169,13 +282,18 @@ class TransactionSyncService {
     );
   }
 
-  /// Processes raw parsed SFA text: captures GPS, deduplicates by `invoiceCode`
-  /// for the day, rebuilds today's combined PDF, and uploads to Firestore if possible.
+  /// Processes raw parsed SFA text: verifies an active call exists (when
+  /// [requireActiveCall] is true), captures GPS, deduplicates by `invoiceCode`
+  /// for the day, allocates SI series numbers, rebuilds today's combined PDF,
+  /// and uploads to Firestore if possible.
   Future<CapturedTransactionResult> processRawInvoiceText({
     required String rawText,
     String? fallbackSalesmanCode,
+    bool requireActiveCall = true,
+    bool forceTodayRouteDate = false,
   }) async {
     final now = DateTime.now();
+    final todayStr = DateFormat('yyyy-MM-dd').format(now);
     final snapshot = await captureDeviceSnapshot();
 
     final parsed = SfaInvoiceParser.parse(
@@ -190,11 +308,40 @@ class TransactionSyncService {
       uploadStatus: TransactionUploadStatus.pending,
     );
 
+    final effectiveTx = forceTodayRouteDate &&
+            parsed.transaction.routeDate != todayStr
+        ? parsed.transaction.copyWith(
+            routeDate: todayStr,
+            transactionId: '${todayStr}_${parsed.transaction.invoiceCode}',
+          )
+        : parsed.transaction;
+
+    // Check if already captured before enforcing active-call block so reprints
+    // of already-saved invoices still display cleanly with their assigned SI No.
+    final existingAlready = await _storage.findExistingByInvoiceCode(
+      routeDate: effectiveTx.routeDate,
+      invoiceCode: effectiveTx.invoiceCode,
+    );
+
+    if (requireActiveCall && existingAlready == null) {
+      final hasActiveCall = await hasActiveCallForDate(todayStr);
+      if (!hasActiveCall) {
+        return CapturedTransactionResult(
+          transaction: effectiveTx,
+          pages: parsed.pages,
+          isDuplicate: false,
+          hasIntegrityWarning: parsed.hasIntegrityWarning,
+          blockedNoActiveCall: true,
+        );
+      }
+    }
+
     final currentUid = await _resolveCurrentUid();
     final saveResult = await _storage.saveOrFindExistingWithSiAllocation(
-      candidate: parsed.transaction,
+      candidate: effectiveTx,
       salesmanId: currentUid,
       bookletStorage: _bookletStorage,
+      allocateSi: true,
     );
 
     final dayTransactions = await _storage.getTransactionsForDate(

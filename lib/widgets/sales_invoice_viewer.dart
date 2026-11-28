@@ -11,6 +11,7 @@ class SalesInvoiceViewer extends StatefulWidget {
   final VoidCallback? onCloseRequested;
   final bool confirmOnClose;
   final bool showCloseButton;
+  final bool isPreviewOnly;
 
   /// Optional callback invoked when the user confirms voiding [pageNo] (1-based).
   /// Returning the updated [RouteTransaction] immediately refreshes the viewer
@@ -24,6 +25,7 @@ class SalesInvoiceViewer extends StatefulWidget {
     this.onCloseRequested,
     this.confirmOnClose = false,
     this.showCloseButton = true,
+    this.isPreviewOnly = false,
     this.onVoidPageRequested,
   });
 
@@ -206,7 +208,9 @@ class _SalesInvoiceViewerState extends State<SalesInvoiceViewer> {
     final currentPageNo = _currentPage + 1;
     final currentPageSi = _transaction.siNumberForPage(currentPageNo);
     final showVoidButton =
-        widget.onVoidPageRequested != null && currentPageSi != null;
+        !widget.isPreviewOnly &&
+        widget.onVoidPageRequested != null &&
+        currentPageSi != null;
     final voidedSummary = _transaction.formattedVoidedSiSummary;
 
     return Column(
@@ -287,6 +291,7 @@ class _SalesInvoiceViewerState extends State<SalesInvoiceViewer> {
                 page: _pages[index],
                 sheetDate: sheetDate,
                 moneyFormat: _moneyFormat,
+                isPreviewOnly: widget.isPreviewOnly,
                 onZoomChanged: (zoomed) {
                   if (zoomed != _isZoomed && mounted) {
                     setState(() => _isZoomed = zoomed);
@@ -459,6 +464,7 @@ class _ZoomableInvoiceSheet extends StatefulWidget {
   final InvoicePageData page;
   final String sheetDate;
   final NumberFormat moneyFormat;
+  final bool isPreviewOnly;
   final ValueChanged<bool> onZoomChanged;
 
   const _ZoomableInvoiceSheet({
@@ -466,6 +472,7 @@ class _ZoomableInvoiceSheet extends StatefulWidget {
     required this.page,
     required this.sheetDate,
     required this.moneyFormat,
+    this.isPreviewOnly = false,
     required this.onZoomChanged,
   });
 
@@ -513,6 +520,7 @@ class _ZoomableInvoiceSheetState extends State<_ZoomableInvoiceSheet> {
             page: widget.page,
             sheetDate: widget.sheetDate,
             moneyFormat: widget.moneyFormat,
+            isPreviewOnly: widget.isPreviewOnly,
           ),
         ),
       ),
@@ -525,12 +533,14 @@ class _BirInvoiceSheetCard extends StatelessWidget {
   final InvoicePageData page;
   final String sheetDate;
   final NumberFormat moneyFormat;
+  final bool isPreviewOnly;
 
   const _BirInvoiceSheetCard({
     required this.transaction,
     required this.page,
     required this.sheetDate,
     required this.moneyFormat,
+    this.isPreviewOnly = false,
   });
 
   @override
@@ -715,6 +725,25 @@ class _BirInvoiceSheetCard extends StatelessWidget {
   }
 
   Widget _buildSiSeriesHeaderTag() {
+    if (isPreviewOnly) {
+      return Container(
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+        decoration: BoxDecoration(
+          color: Colors.blueGrey.shade50,
+          borderRadius: BorderRadius.circular(4),
+          border: Border.all(color: Colors.blueGrey.shade400, width: 0.8),
+        ),
+        child: Text(
+          'Preview Only',
+          style: TextStyle(
+            fontSize: 10,
+            fontWeight: FontWeight.w800,
+            color: Colors.blueGrey.shade800,
+          ),
+        ),
+      );
+    }
+
     final pageSi = transaction.siNumberForPage(page.pageNo);
     if (pageSi != null) {
       return Container(

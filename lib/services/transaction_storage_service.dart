@@ -142,6 +142,22 @@ class TransactionStorageService {
     });
   }
 
+  /// Looks up an existing locally saved transaction by [invoiceCode] for [routeDate].
+  Future<RouteTransaction?> findExistingByInvoiceCode({
+    required String routeDate,
+    required String invoiceCode,
+  }) async {
+    if (kIsWeb) return null;
+    final list = await getTransactionsForDate(routeDate);
+    final normalizedCode = invoiceCode.trim().toUpperCase();
+    for (final existing in list) {
+      if (existing.invoiceCode.trim().toUpperCase() == normalizedCode) {
+        return existing;
+      }
+    }
+    return null;
+  }
+
   /// Atomically deduplicates [candidate] and allocates sequential SI numbers
   /// from [bookletStorage] under the same exclusive OS file lock so Overlay,
   /// Main, and Background isolates never race or consume duplicate SI numbers.
@@ -149,6 +165,7 @@ class TransactionStorageService {
     required RouteTransaction candidate,
     required String? salesmanId,
     required SiBookletStorageService bookletStorage,
+    bool allocateSi = true,
   }) async {
     return _withFileLock(() async {
       final existingList = await _readTransactionsForDateUnlocked(
@@ -169,7 +186,7 @@ class TransactionStorageService {
       var siExhausted = false;
       var hasNoSiBooklets = false;
 
-      if (salesmanId != null && salesmanId.trim().isNotEmpty) {
+      if (allocateSi && salesmanId != null && salesmanId.trim().isNotEmpty) {
         final bookletState = await bookletStorage.readUnlocked(salesmanId);
         if (!bookletState.hasBooklets) {
           hasNoSiBooklets = true;

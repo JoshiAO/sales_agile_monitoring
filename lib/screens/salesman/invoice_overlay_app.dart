@@ -148,7 +148,7 @@ class _InvoiceOverlayScreenState extends State<_InvoiceOverlayScreen> {
   }
 
   Future<void> _handleBackNavigation() async {
-    if (_result == null) {
+    if (_result == null || _result!.blockedNoActiveCall) {
       await _closeOverlay();
       return;
     }
@@ -269,8 +269,9 @@ class _InvoiceOverlayScreenState extends State<_InvoiceOverlayScreen> {
       );
     }
 
-      final result = _result!;
+    final result = _result!;
     final tx = result.transaction;
+    final isBlocked = result.blockedNoActiveCall;
 
     return Column(
       mainAxisSize: MainAxisSize.min,
@@ -280,38 +281,44 @@ class _InvoiceOverlayScreenState extends State<_InvoiceOverlayScreen> {
         Flexible(
           child: SalesInvoiceViewer(
             transaction: tx,
-            confirmOnClose: true,
+            confirmOnClose: !isBlocked,
             showCloseButton: true,
+            isPreviewOnly: isBlocked,
             onCloseRequested: _closeOverlay,
-            onVoidPageRequested: (pageNo, reason) async {
-              final voidResult = await TransactionSyncService().voidPageAsSalesman(
-                transaction: tx,
-                pageNo: pageNo,
-                reason: reason,
-              );
-              if (!mounted) return voidResult.updatedTransaction;
-              setState(() {
-                _result = CapturedTransactionResult(
-                  transaction: voidResult.updatedTransaction,
-                  pages: result.pages,
-                  isDuplicate: result.isDuplicate,
-                  pdfSaveResult: result.pdfSaveResult,
-                  uploadedNow: voidResult.updatedTransaction.isUploaded &&
-                      !voidResult.updatedTransaction.needsRemoteUpdate,
-                  hasIntegrityWarning: result.hasIntegrityWarning,
-                  siExhausted: voidResult.exhausted,
-                  hasNoSiBooklets: !voidResult.updatedTransaction.hasAnySiAssigned,
-                );
-              });
-              final newPageSi = voidResult.updatedTransaction.siNumberForPage(pageNo);
-              final msg = newPageSi != null
-                  ? 'Voided SI ${voidResult.voidedEntry.siNumber}. Page $pageNo is now SI No. $newPageSi.'
-                  : 'Voided SI ${voidResult.voidedEntry.siNumber}. SI booklet exhausted for remaining pages.';
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(content: Text(msg)),
-              );
-              return voidResult.updatedTransaction;
-            },
+            onVoidPageRequested: isBlocked
+                ? null
+                : (pageNo, reason) async {
+                    final voidResult =
+                        await TransactionSyncService().voidPageAsSalesman(
+                      transaction: tx,
+                      pageNo: pageNo,
+                      reason: reason,
+                    );
+                    if (!mounted) return voidResult.updatedTransaction;
+                    setState(() {
+                      _result = CapturedTransactionResult(
+                        transaction: voidResult.updatedTransaction,
+                        pages: result.pages,
+                        isDuplicate: result.isDuplicate,
+                        pdfSaveResult: result.pdfSaveResult,
+                        uploadedNow: voidResult.updatedTransaction.isUploaded &&
+                            !voidResult.updatedTransaction.needsRemoteUpdate,
+                        hasIntegrityWarning: result.hasIntegrityWarning,
+                        siExhausted: voidResult.exhausted,
+                        hasNoSiBooklets:
+                            !voidResult.updatedTransaction.hasAnySiAssigned,
+                      );
+                    });
+                    final newPageSi =
+                        voidResult.updatedTransaction.siNumberForPage(pageNo);
+                    final msg = newPageSi != null
+                        ? 'Voided SI ${voidResult.voidedEntry.siNumber}. Page $pageNo is now SI No. $newPageSi.'
+                        : 'Voided SI ${voidResult.voidedEntry.siNumber}. SI booklet exhausted for remaining pages.';
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(content: Text(msg)),
+                    );
+                    return voidResult.updatedTransaction;
+                  },
           ),
         ),
       ],
@@ -332,7 +339,13 @@ class _StatusHeaderBar extends StatelessWidget {
     final IconData icon;
     final String label;
 
-    if (result.isDuplicate) {
+    if (result.blockedNoActiveCall) {
+      bgColor = Colors.red.shade50;
+      fgColor = Colors.red.shade900;
+      icon = Icons.warning_amber_rounded;
+      label =
+          'No Active Call — Make a First Call first before making a transaction. (Preview only; not saved and no SI number used)';
+    } else if (result.isDuplicate) {
       bgColor = Colors.blue.shade50;
       fgColor = Colors.blue.shade800;
       icon = Icons.copy_all_outlined;

@@ -1,12 +1,14 @@
 import 'package:excel/excel.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:compact_sales_monitoring/models/si_booklet_model.dart';
 import 'package:compact_sales_monitoring/models/transaction_model.dart';
 import 'package:compact_sales_monitoring/models/user_model.dart';
 import 'package:compact_sales_monitoring/services/daily_invoice_pdf_service.dart';
 import 'package:compact_sales_monitoring/services/si_series_engine.dart';
 import 'package:compact_sales_monitoring/services/transaction_export_service.dart';
+import 'package:compact_sales_monitoring/services/transaction_sync_service.dart';
 import 'package:compact_sales_monitoring/widgets/sales_invoice_viewer.dart';
 
 RouteTransaction _makeTx({
@@ -420,6 +422,89 @@ void main() {
       expect(find.text('PAGE 2 OF 2'), findsOneWidget);
       expect(find.text('SI No. 123458'), findsOneWidget);
       expect(find.text('Voided SI: 123457'), findsOneWidget);
+    });
+
+    testWidgets('SalesInvoiceViewer in previewOnly mode shows Preview Only badge and hides Void Page', (
+      tester,
+    ) async {
+      final tx = _makeTx(
+        id: 'tx_preview',
+        invoiceCode: 'CBINV-PREV',
+        pageCount: 1,
+        pageSiNumbers: const [],
+      );
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: SizedBox(
+              height: 760,
+              child: SalesInvoiceViewer(
+                transaction: tx,
+                isPreviewOnly: true,
+                showCloseButton: false,
+                onVoidPageRequested: (_, _) async => tx,
+              ),
+            ),
+          ),
+        ),
+      );
+
+      expect(find.text('Preview Only'), findsOneWidget);
+      expect(find.text('No SI Series'), findsNothing);
+      expect(find.text('Void Page'), findsNothing);
+    });
+  });
+
+  group('Active Call Guard & Old Invoice Date Detection', () {
+    test('hasActiveCallForDate detects online active route, offline pending first call, and inactive state', () async {
+      SharedPreferences.setMockInitialValues({});
+      expect(
+        await TransactionSyncService.hasActiveCallForDate('2026-11-28'),
+        isFalse,
+      );
+
+      // Online active route for today
+      SharedPreferences.setMockInitialValues({
+        'active_route_id': 'route_123',
+        'route_start_time': '2026-11-28T08:15:00.000',
+      });
+      expect(
+        await TransactionSyncService.hasActiveCallForDate('2026-11-28'),
+        isTrue,
+      );
+      // Stale date should not match
+      expect(
+        await TransactionSyncService.hasActiveCallForDate('2026-11-29'),
+        isFalse,
+      );
+
+      // Offline pending First Call for today
+      SharedPreferences.setMockInitialValues({
+        'pending_first_call_v2': '{"date":"2026-11-28","lat":15.48,"lon":120.96}',
+      });
+      expect(
+        await TransactionSyncService.hasActiveCallForDate('2026-11-28'),
+        isTrue,
+      );
+    });
+
+    test('isInvoiceDateToday distinguishes today vs older SFA invoice dates', () {
+      final ref = DateTime(2026, 11, 28, 14, 0);
+      expect(
+        TransactionSyncService.isInvoiceDateToday(
+          '28-Nov-2026 10:26:43 AM',
+          referenceNow: ref,
+        ),
+        isTrue,
+      );
+      expect(
+        TransactionSyncService.isInvoiceDateToday(
+          '25-Nov-2026 09:15:00 AM',
+          referenceNow: ref,
+        ),
+        isFalse,
+      );
     });
   });
 }
